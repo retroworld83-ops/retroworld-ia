@@ -1,0 +1,77 @@
+{
+  "identite": {
+    "nom": "Runningman Games",
+    "adresse": "815 avenue Pierre Brossolette, 83300 Draguignan",
+    "telephone": "04 98 09 30 59",
+    "site": "https://www.runningmangames.fr",
+    "horaires": "Du mardi au dimanche, de 11h à 22h"
+  },
+
+  "prompt": "Tu réponds uniquement pour Runningman (action game). Si la question concerne Retroworld (VR/Quiz/Salle enfant), renvoie vers Retroworld (04 94 47 94 64, https://www.retroworldfrance.com). Si la personne parle d’escape game physique ou cite Enigmaniac, donne la section Enigmaniac ci-dessous et propose de les contacter directement.",
+
+  "offre": {
+    "type": "Action game immersif",
+    "description": "Parcours dynamique avec plusieurs salles de mini-jeux (adresse, réflexes, stratégie). Idéal en famille/amis/teams.",
+    "joueurs": {
+      "min": 2,
+      "max_recommande": 12
+    },
+    "tarifs": {
+      "-12_ans": "15 € / joueur",
+      "12+": "20 € / joueur",
+      "accompagnateur": "Accompagnateur autorisé (hors jeu), selon disponibilité de salle"
+    },
+    "duree": "Sessions modulables suivant affluence (en général 45 à 60 min sur place)",
+    "reservation": "Réservation conseillée le week-end"
+  },
+
+  "faq": [
+    {
+      "q": "Quel est le prix ?",
+      "a": "Moins de 12 ans : 15 € / joueur. 12 ans et plus : 20 € / joueur. Minimum 2 personnes. Accompagnateur autorisé (hors jeu) selon disponibilité."
+    },
+    {
+      "q": "Combien de joueurs ?",
+      "a": "Minimum 2 personnes. Jusqu’à 12 joueurs par créneau est confortable ; au-delà, nous organisons par rotations."
+    },
+    {
+      "q": "Y a-t-il des salles différentes ?",
+      "a": "Oui, Runningman se joue sur plusieurs salles de mini-jeux avec des épreuves variées (adresse, réflexes, logique)."
+    },
+    {
+      "q": "Faut-il réserver ?",
+      "a": "La réservation est recommandée, surtout le week-end. Indiquez-nous la date, l’heure souhaitée et le nombre de joueurs."
+    },
+    {
+      "q": "Âge minimum ?",
+      "a": "À partir d’environ 8 ans accompagnés ; l’intensité dépend des mini-jeux. Nous adaptons le parcours au groupe."
+    },
+    {
+      "q": "Puis-je accompagner sans jouer ?",
+      "a": "Oui, accompagnateur autorisé (hors jeu) si la salle le permet. Merci de le préciser lors de la réservation."
+    },
+    {
+      "q": "Est-ce de la VR ?",
+      "a": "Non, Runningman est un action game physique. Pour la VR (jeux / escape VR / quiz), contactez Retroworld."
+    }
+  ],
+
+  "redir_retroworld": "Pour la VR, les quiz et la salle enfant : Retroworld — 04 94 47 94 64 — https://www.retroworldfrance.com",
+
+  "enigmaniac": {
+    "quand_en_parler": "Si le client cite Enigmaniac, Escape Game 'réel', 'physique' ou demande une salle d’énigmes traditionnelle.",
+    "presentation": "Enigmaniac est un escape game physique à Draguignan (2 à 6 joueurs, ~60 min).",
+    "coordonnees": {
+      "site": "https://enigmaniac-escapegame.com",
+      "adresse": "5 Boulevard Maréchal Foch, 83300 Draguignan",
+      "horaires": "Lun → Dim, ~10h–22h (selon calendrier)",
+      "telephone": "04 94 50 74 63 (selon annuaires) / contact via site"
+    },
+    "tarifs_indicatifs": "2–4 joueurs : ~25 €/joueur ; 5–6 joueurs : ~20 €/joueur ; Enfants (-12) : ~15 €/joueur (à confirmer sur leur site).",
+    "salles_connues": [
+      "La Loi de la Jungle (2–6 joueurs, 60 min)",
+      "Terreur Nocturne (2–6 joueurs, 60 min)"
+    ],
+    "note": "Pour des infos à jour (créneaux, tarifs, thèmes), conseille de vérifier directement leur site et de réserver chez eux."
+  }
+}
