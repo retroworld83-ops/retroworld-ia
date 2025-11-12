@@ -1,0 +1,100 @@
+{
+  "identite": {
+    "nom": "Retroworld France",
+    "adresse": "815 avenue Pierre Brossolette, 83300 Draguignan",
+    "telephone": "04 94 47 94 64",
+    "site": "https://www.retroworldfrance.com",
+    "horaires": "Du mardi au dimanche, de 11h à 22h"
+  },
+
+  "prompt": "Utilise un ton professionnel, chaleureux et clair. Réponds uniquement avec les informations confirmées par Retroworld. Si tu ne sais pas, dis-le.",
+
+  "activites": {
+    "Jeux VR": {
+      "description": "Plus de 50 expériences : tir, aventure, horreur, musique, facile...",
+      "prix": "15 €/joueur (20 € avant 11h, 17 € après 20h)",
+      "joueurs": "1 à 5 joueurs",
+      "duree": "20 à 30 minutes",
+      "age": "Dès 10 ans (ou dès 7 ans accompagné)",
+      "liens": {
+        "reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr"
+      }
+    },
+
+    "Escape Game VR": {
+      "description": "Immersion VR en équipe, jusqu’à 5 joueurs.",
+      "prix": "30 €/joueur (35 € avant 11h ou après 20h)",
+      "joueurs": "2 à 5 joueurs",
+      "duree": "45 à 60 minutes",
+      "age": "Dès 10 ans seul, dès 7 ans accompagné",
+      "langues": "Français, Anglais et autres langues",
+      "liens": {
+        "reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr"
+      }
+    },
+
+    "Quiz interactif": {
+      "description": "Fun et compétitif, idéal en famille ou entre amis !",
+      "prix": "30 min → 8 €, 60 min → 15 €, 90 min → 20 € (+5 € hors 11h–20h)",
+      "joueurs": "Jusqu’à 12 joueurs",
+      "age": "Dès que l’enfant sait lire",
+      "liens": {
+        "reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr"
+      }
+    },
+
+    "Salle enfant": {
+      "description": "Parfaite pour les anniversaires d’enfants.",
+      "prix": "50 €/h, +25 €/demi-heure",
+      "inclus": "Jeux en bois, mur interactif, ballayeuse, espace goûter",
+      "age": "6 à 15 ans",
+      "liens": {
+        "reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=salle%20enfant&lang=fr"
+      }
+    }
+  },
+
+  "formules": {
+    "Anniversaires": {
+      "details": "Formules dès 5 pers. : VR 15 € (-5 %), Escape 30 € (-5 %), Combo VR+Quiz 20 €.",
+      "option_gouter": "50 € (jusqu’à 10 pers.) +5 €/pers. suppl. — réservation ≥ 2 semaines.",
+      "contenu": "Crêpes, gaufres, glaces, granités, fondue chocolat, barbe à papa.",
+      "age_min": "8 ans"
+    }
+  },
+
+  "fidélité": {
+    "points": {
+      "VR": 1,
+      "Escape": 2
+    },
+    "paliers": {
+      "5": "Quiz 30 min offert",
+      "10": "Partie VR offerte",
+      "20": "Escape Game VR offert"
+    }
+  },
+
+  "extras": {
+    "Billard": "10 €/h (temps consommé)",
+    "Jeux d’attente": "baby-foot, air hockey, borne basketball",
+    "Boissons": "café, thé, chocolat, sodas, distributeur",
+    "Salle climatisée": "Oui"
+  },
+
+  "anti_erreurs": [
+    "Toujours demander : activité + date + heure + joueurs + coordonnées",
+    "Si heure incertaine → proposer une fourchette horaire",
+    "Toujours donner le bon lien officiel, jamais inventé",
+    "Si le client mentionne Runningman ou Game Zone → renvoyer vers www.runningmangames.fr ou 04 98 09 30 59"
+  ],
+
+  "faqs": [
+    {"q": "Quels sont vos horaires ?", "a": "Du mardi au dimanche, de 11h à 22h."},
+    {"q": "Faites-vous des anniversaires ?", "a": "Oui, dès 5 personnes. Formules VR, Escape, ou Combo VR+Quiz, avec option goûter dès 50 €."},
+    {"q": "Y a-t-il une limite d'âge ?", "a": "Jeux VR dès 7 ans accompagné, Escape dès 10 ans seul."},
+    {"q": "Faites-vous des devis ?", "a": "Oui, sur demande avec nom, mail, téléphone, activité, date, heure et nombre de joueurs."},
+    {"q": "Quels moyens de paiement acceptez-vous ?", "a": "CB en ligne, espèces, ANCV, Pass Culture (via l'app)."},
+    {"q": "Avez-vous un parking ?", "a": "Oui, parking gratuit."}
+  ]
+}
