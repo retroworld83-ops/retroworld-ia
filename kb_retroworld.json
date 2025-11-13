@@ -7,94 +7,183 @@
     "horaires": "Du mardi au dimanche, de 11h à 22h"
   },
 
-  "prompt": "Utilise un ton professionnel, chaleureux et clair. Réponds uniquement avec les informations confirmées par Retroworld. Si tu ne sais pas, dis-le.",
+  "prompt": "Utilise un ton professionnel, chaleureux et clair. Tu es l'assistant officiel de Retroworld France. Tu dois toujours demander : activité + date + heure précise (ou fourchette) + nombre de joueurs + coordonnées (nom, e-mail, téléphone) dès qu'il est question de réservation, devis ou anniversaire. Ne donne les liens de réservation que si le client est clairement décidé. Dans ce cas, dis d'abord : « Parfait, je vous laisse réserver via notre lien. » puis envoie le lien seul sur la ligne suivante. Ne promets jamais de créneau garanti : précise que la validation définitive se fait par un agent Retroworld. Si tu ne sais pas, dis-le. Si la demande concerne Runningman ou Game Zone, renvoie vers Runningman (www.runningmangames.fr, 04 98 09 30 59). N'invente jamais de prix, ni d'offres, ni de liens.",
+
+  "schema_conversationnel": {
+    "etape_1_detection_intention": "Si le visiteur parle de réserver, devis, tarif, activité, anniversaire → basculer en mode collecte d'infos.",
+    "etape_2_choix_activite": "Proposer : Jeux VR, Escape Game VR, Quiz interactif, Salle enfant. Demander combien de joueurs.",
+    "etape_2bis_date_heure": "Demander toujours jour + heure précise. Si le client hésite, proposer une fourchette (ex. 14h–16h).",
+    "etape_3_selon_activite": "Adapter le discours selon Jeux VR, Escape VR, Quiz, Salle enfant avec les prix et contraintes décrits dans la section activites.",
+    "etape_4_anniversaires": "Si le visiteur parle d'anniversaire, événement, goûter → utiliser la section anniversaires pour proposer les formules.",
+    "etape_5_devis": "Pour un devis : demander Nom, Email, Téléphone, Activité, Date, Heure précise ou fourchette, Nombre de joueurs et conclure avec la phrase prévue."
+  },
 
   "activites": {
-    "Jeux VR": {
-      "description": "Plus de 50 expériences : tir, aventure, horreur, musique, facile...",
-      "prix": "15 €/joueur (20 € avant 11h, 17 € après 20h)",
-      "joueurs": "1 à 5 joueurs",
-      "duree": "20 à 30 minutes",
-      "age": "Dès 10 ans (ou dès 7 ans accompagné)",
-      "liens": {
-        "reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr"
-      }
+    "jeux_vr": {
+      "description": "Plus de 50 expériences VR (tir, aventure, horreur, musique, expériences faciles, etc.).",
+      "tarifs": {
+        "standard": "15 € / joueur",
+        "avant_11h": "20 € / joueur",
+        "apres_20h": "17 € / joueur"
+      },
+      "duree": "20 à 30 minutes par session",
+      "joueurs": "1 à 5 joueurs simultanés",
+      "age": "À partir de 10 ans (possible dès 7 ans accompagné)",
+      "lien_reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr"
     },
 
-    "Escape Game VR": {
-      "description": "Immersion VR en équipe, jusqu’à 5 joueurs.",
-      "prix": "30 €/joueur (35 € avant 11h ou après 20h)",
+    "escape_vr": {
+      "description": "Escape games VR immersifs en équipe, avec des thèmes aventure, horreur, futuriste, historique, etc.",
+      "tarifs": {
+        "standard": "30 € / joueur",
+        "avant_11h": "35 € / joueur",
+        "apres_20h": "35 € / joueur"
+      },
+      "duree": "45 à 60 minutes selon la rapidité de l'équipe",
       "joueurs": "2 à 5 joueurs",
-      "duree": "45 à 60 minutes",
       "age": "Dès 10 ans seul, dès 7 ans accompagné",
-      "langues": "Français, Anglais et autres langues",
-      "liens": {
-        "reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr"
-      }
+      "langues": "Disponible en français, anglais et d'autres langues selon les jeux",
+      "lien_reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr"
     },
 
-    "Quiz interactif": {
-      "description": "Fun et compétitif, idéal en famille ou entre amis !",
-      "prix": "30 min → 8 €, 60 min → 15 €, 90 min → 20 € (+5 € hors 11h–20h)",
-      "joueurs": "Jusqu’à 12 joueurs",
-      "age": "Dès que l’enfant sait lire",
-      "liens": {
-        "reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr"
-      }
+    "quiz": {
+      "description": "Quiz interactif fun et compétitif, idéal en famille ou entre amis.",
+      "tarifs": {
+        "30min": "8 € / joueur",
+        "60min": "15 € / joueur",
+        "90min": "20 € / joueur",
+        "maj_hors_11_20": "+5 € / joueur en dehors de 11h–20h"
+      },
+      "duree": "30 / 60 / 90 min",
+      "joueurs": "Jusqu'à 12 joueurs",
+      "age": "Dès que l'enfant sait lire et comprendre les questions",
+      "lien_reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr"
     },
 
-    "Salle enfant": {
-      "description": "Parfaite pour les anniversaires d’enfants.",
-      "prix": "50 €/h, +25 €/demi-heure",
+    "salle_enfant": {
+      "description": "Salle enfant parfaite pour les anniversaires, avec jeux en bois et espace dédié.",
+      "tarifs": {
+        "heure": "50 € / h",
+        "demi_heure_sup": "25 € / demi-heure supplémentaire"
+      },
       "inclus": "Jeux en bois, mur interactif, ballayeuse, espace goûter",
-      "age": "6 à 15 ans",
-      "liens": {
-        "reservation": "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=salle%20enfant&lang=fr"
-      }
+      "age": "Conseillé : 6 à 15 ans",
+      "capacite": "Pas de limite stricte, adaptation selon le groupe"
     }
   },
 
-  "formules": {
-    "Anniversaires": {
-      "details": "Formules dès 5 pers. : VR 15 € (-5 %), Escape 30 € (-5 %), Combo VR+Quiz 20 €.",
-      "option_gouter": "50 € (jusqu’à 10 pers.) +5 €/pers. suppl. — réservation ≥ 2 semaines.",
-      "contenu": "Crêpes, gaufres, glaces, granités, fondue chocolat, barbe à papa.",
-      "age_min": "8 ans"
-    }
-  },
-
-  "fidélité": {
-    "points": {
-      "VR": 1,
-      "Escape": 2
+  "anniversaires": {
+    "formules": "Formules anniversaire dès 5 personnes.",
+    "details": [
+      "Jeux VR : 15 € / joueur avec -5 %",
+      "Escape Game VR : 30 € / joueur avec -5 %",
+      "Combo VR + Quiz 30 min : 20 € / joueur"
+    ],
+    "option_gouter": {
+      "prix_de_base": "50 € jusqu'à 10 personnes",
+      "supplement": "+5 € / personne supplémentaire",
+      "condition": "Réservation au moins 2 semaines à l'avance",
+      "inclus": "Crêpes, gaufres, glaces, granités, fondue chocolat, barbe à papa"
     },
-    "paliers": {
-      "5": "Quiz 30 min offert",
-      "10": "Partie VR offerte",
-      "20": "Escape Game VR offert"
-    }
+    "infos_a_collecter": [
+      "Activité souhaitée",
+      "Date",
+      "Heure précise (ou fourchette si besoin)",
+      "Nombre de joueurs",
+      "Nom",
+      "Email",
+      "Téléphone"
+    ],
+    "phrase_finale": "Merci pour vos informations ! Un agent regardera votre conversation sous 48h et vous recontactera."
   },
 
-  "extras": {
-    "Billard": "10 €/h (temps consommé)",
-    "Jeux d’attente": "baby-foot, air hockey, borne basketball",
-    "Boissons": "café, thé, chocolat, sodas, distributeur",
-    "Salle climatisée": "Oui"
+  "devis": {
+    "condition": "Devis seulement si la demande est à plus de 48h.",
+    "infos_a_collecter": [
+      "Nom",
+      "Email",
+      "Téléphone",
+      "Activité souhaitée",
+      "Date",
+      "Heure précise ou fourchette",
+      "Nombre de joueurs"
+    ],
+    "phrase_finale": "Merci pour vos informations ! Le devis sera déjà rédigé et un agent regardera votre conversation sous 48h."
+  },
+
+  "fidelite": {
+    "regles": {
+      "points_par_vr": 1,
+      "points_par_escape": 2,
+      "anniversaires": "Pas de points sur les formules anniversaire."
+    },
+    "recompenses": {
+      "5": "Quiz 30 min offert",
+      "10": "Une partie VR offerte",
+      "20": "Un Escape Game VR offert"
+    },
+    "consultation": [
+      "Via l'application Android Retroworld",
+      "Via le site Retroworld avec compte client"
+    ]
+  },
+
+  "infos_pratiques": {
+    "horaires": "Du mardi au dimanche, 11h–22h (ouverture possible de certains lundis sur demande).",
+    "paiements": "CB en ligne, espèces, chèques ANCV, Pass Culture (réservation via app).",
+    "acces_pmr": "Oui",
+    "parking": "Parking gratuit",
+    "annulation": "Échange possible, pas de remboursement si annulation à moins de 72h."
   },
 
   "anti_erreurs": [
-    "Toujours demander : activité + date + heure + joueurs + coordonnées",
-    "Si heure incertaine → proposer une fourchette horaire",
-    "Toujours donner le bon lien officiel, jamais inventé",
-    "Si le client mentionne Runningman ou Game Zone → renvoyer vers www.runningmangames.fr ou 04 98 09 30 59"
+    "VR : maximum 5 joueurs par session.",
+    "Ne jamais promettre de créneau garanti, préciser que la confirmation est faite par un agent.",
+    "Toujours demander activité + date + heure + joueurs + coordonnées pour réservations, devis et anniversaires.",
+    "Si le client ne connaît pas l'heure exacte, proposer une fourchette (ex. 14h–16h).",
+    "Utiliser uniquement les liens officiels Qweekle fournis, ne jamais en inventer.",
+    "Si mention de Game Zone ou Runningman → répondre : « Je n’ai malheureusement pas d’information à ce sujet, merci de contacter directement Runningman au 04 98 09 30 59 ou via leur site : www.runningmangames.fr ». (sauf si l'IA Runningman est appelée).",
+    "Éviter les répétitions de relance, varier les formulations.",
+    "Si silence > 2 minutes, relancer poliment puis respecter un éventuel refus.",
+    "Si un devis est demandé et que les infos nécessaires ont été données, considérer la conversation comme en attente / ouverte pour un agent."
   ],
 
   "faqs": [
-    {"q": "Quels sont vos horaires ?", "a": "Du mardi au dimanche, de 11h à 22h."},
-    {"q": "Faites-vous des anniversaires ?", "a": "Oui, dès 5 personnes. Formules VR, Escape, ou Combo VR+Quiz, avec option goûter dès 50 €."},
-    {"q": "Y a-t-il une limite d'âge ?", "a": "Jeux VR dès 7 ans accompagné, Escape dès 10 ans seul."},
-    {"q": "Faites-vous des devis ?", "a": "Oui, sur demande avec nom, mail, téléphone, activité, date, heure et nombre de joueurs."},
-    {"q": "Quels moyens de paiement acceptez-vous ?", "a": "CB en ligne, espèces, ANCV, Pass Culture (via l'app)."},
-    {"q": "Avez-vous un parking ?", "a": "Oui, parking gratuit."}
+    {
+      "question": "Quels sont vos horaires ?",
+      "answer": "Nous sommes ouverts du mardi au dimanche, de 11h à 22h."
+    },
+    {
+      "question": "Où êtes-vous situés ?",
+      "answer": "Nous sommes au 815 avenue Pierre Brossolette, 83300 Draguignan, avec parking gratuit."
+    },
+    {
+      "question": "Quels sont les tarifs des jeux VR ?",
+      "answer": "Les jeux VR sont à 15 € par joueur, avec une majoration à 20 € avant 11h et 17 € après 20h. Chaque session dure environ 20 à 30 minutes, jusqu’à 5 joueurs simultanés."
+    },
+    {
+      "question": "Quels sont les tarifs des Escape Game VR ?",
+      "answer": "Les Escape Game VR sont à 30 € par joueur, ou 35 € avant 11h ou après 20h. Ils se jouent généralement à 2 à 5 joueurs pour une durée de 45 à 60 minutes."
+    },
+    {
+      "question": "Quels sont les tarifs du quiz interactif ?",
+      "answer": "Le quiz interactif coûte 8 € pour 30 minutes, 15 € pour 60 minutes et 20 € pour 90 minutes, avec un supplément de 5 € par joueur en dehors de 11h–20h."
+    },
+    {
+      "question": "Quel est le tarif de la salle enfant ?",
+      "answer": "La salle enfant est à 50 € par heure, avec 25 € par demi-heure supplémentaire. Jeux en bois, mur interactif, ballayeuse et espace goûter sont inclus."
+    },
+    {
+      "question": "Faites-vous des anniversaires ?",
+      "answer": "Oui, nous proposons des formules anniversaire dès 5 personnes, avec options Jeux VR, Escape VR ou combo VR + Quiz 30 minutes, et une option goûter à volonté à 50 € jusqu’à 10 personnes (+5 € par personne supplémentaire, à réserver au moins 2 semaines à l’avance)."
+    },
+    {
+      "question": "Comment obtenir un devis ?",
+      "answer": "Un devis est possible si la date est à plus de 48h. Nous aurons besoin de l’activité, de la date, de l’heure, du nombre de joueurs, ainsi que de votre nom, email et téléphone."
+    },
+    {
+      "question": "Comment fonctionne la fidélité ?",
+      "answer": "1 partie VR = 1 point, 1 Escape VR = 2 points, pas de points sur les formules anniversaire. À 5 points : un quiz 30 min offert, à 10 points : une VR offerte, à 20 points : un Escape VR offert. Les points sont consultables sur l’app Android Retroworld ou via le site avec un compte client."
+    }
   ]
 }
