@@ -9,6 +9,10 @@ from flask_cors import CORS
 
 import urllib.request
 import urllib.error
+import urllib.parse
+import smtplib
+from email.mime.text import MIMEText
+import base64
 
 # ----------------------------------------------------
 # CONFIG
@@ -24,6 +28,23 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 
 DATA_DIR = Path("/mnt/data")           # stockage persistant Render
 APP_DIR = Path(__file__).resolve().parent  # répertoire de l'image Docker (/app)
+
+# Notifications e-mail
+SMTP_HOST = os.environ.get("SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
+ADMIN_EMAILS = [
+    e.strip() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()
+]
+
+# Notifications SMS (ex. Twilio, facultatif)
+TWILIO_SID = os.environ.get("TWILIO_SID", "")
+TWILIO_TOKEN = os.environ.get("TWILIO_TOKEN", "")
+TWILIO_FROM = os.environ.get("TWILIO_FROM", "")
+SMS_ADMIN_NUMBERS = [
+    n.strip() for n in os.environ.get("SMS_ADMIN_NUMBERS", "").split(",") if n.strip()
+]
 
 
 # ----------------------------------------------------
@@ -101,6 +122,104 @@ def count_faqs(kb: Dict[str, Any]) -> int:
     if "faq" in kb and isinstance(kb["faq"], list):
         return len(kb["faq"])
     return 0
+
+
+# ----------------------------------------------------
+# LOG & NOTIFICATIONS
+# ----------------------------------------------------
+
+def append_conversation_log(brand: str, user_message: str, answer: str, meta: Dict[str, Any]):
+    """Ajoute une ligne JSON dans /mnt/data/conversations.log"""
+    try:
+        ensure_data_dir()
+        log_path = DATA_DIR / "conversations.log"
+        entry = {
+            "ts": time.time(),
+            "brand": brand,
+            "user_message": user_message,
+            "answer": answer,
+            "meta": meta,
+        }
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        if DEBUG_LOGS:
+            print(f"[LOG] Conversation ajoutée dans {log_path}")
+    except Exception as e:
+        print("[LOG ERROR]", e)
+
+
+def send_email_notification(brand: str, user_message: str, answer: str, meta: Dict[str, Any]):
+    """Envoie un e-mail avec la conversation (si la config SMTP est présente)."""
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS and ADMIN_EMAILS):
+        if DEBUG_LOGS:
+            print("[MAIL] Config SMTP incomplète, notification ignorée.")
+        return
+
+    try:
+        subject = f"[IA {brand}] Nouveau message client"
+        body_lines = [
+            f"Marque : {brand}",
+            f"Horodatage : {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(meta.get('ts', time.time())))}",
+            "",
+            "Message client :",
+            user_message,
+            "",
+            "Réponse IA :",
+            answer,
+            "",
+            f"IP: {meta.get('ip', '')}",
+            f"User-Agent: {meta.get('user_agent', '')}",
+        ]
+        body = "\n".join(body_lines)
+
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["Subject"] = subject
+        msg["From"] = SMTP_USER
+        msg["To"] = ", ".join(ADMIN_EMAILS)
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, ADMIN_EMAILS, msg.as_string())
+
+        if DEBUG_LOGS:
+            print("[MAIL] Notification envoyée.")
+    except Exception as e:
+        print("[MAIL ERROR]", e)
+
+
+def send_sms_notification(brand: str, user_message: str, answer: str, meta: Dict[str, Any]):
+    """Envoie un SMS (ex. via Twilio) si les variables sont configurées."""
+    if not (TWILIO_SID and TWILIO_TOKEN and TWILIO_FROM and SMS_ADMIN_NUMBERS):
+        if DEBUG_LOGS:
+            print("[SMS] Config SMS incomplète, notification ignorée.")
+        return
+
+    body = f"[IA {brand}] Nouveau message : {user_message[:120]}"
+
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Messages.json"
+    auth_str = f"{TWILIO_SID}:{TWILIO_TOKEN}"
+    auth_bytes = base64.b64encode(auth_str.encode("utf-8")).decode("ascii")
+
+    for number in SMS_ADMIN_NUMBERS:
+        try:
+            data = urllib.parse.urlencode({
+                "From": TWILIO_FROM,
+                "To": number,
+                "Body": body,
+            }).encode("utf-8")
+
+            req = urllib.request.Request(url, data=data)
+            req.add_header("Authorization", f"Basic {auth_bytes}")
+            req.add_header("Content-Type", "application/x-www-form-urlencoded")
+
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                _ = resp.read()
+
+            if DEBUG_LOGS:
+                print(f"[SMS] Notification envoyée à {number}")
+        except Exception as e:
+            print("[SMS ERROR]", e)
 
 
 # ----------------------------------------------------
@@ -252,6 +371,18 @@ def chat_brand(brand: str):
     b = safe_brand(brand)
     kb = load_kb(b)
     answer = ask_ai(kb, message, b)
+
+    # meta pour logs / notifications
+    meta = {
+        "ts": time.time(),
+        "ip": request.remote_addr,
+        "user_agent": request.headers.get("User-Agent", ""),
+    }
+
+    # Log + notifications
+    append_conversation_log(b, message, answer, meta)
+    send_email_notification(b, message, answer, meta)
+    send_sms_notification(b, message, answer, meta)
 
     return jsonify({"brand": b, "answer": answer})
 
