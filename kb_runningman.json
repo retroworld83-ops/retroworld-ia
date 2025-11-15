@@ -3,67 +3,82 @@
     "nom": "Runningman Game Zone",
     "adresse": "815 avenue Pierre Brossolette, 83300 Draguignan (même bâtiment que Retroworld)",
     "telephone": "04 98 09 30 59",
-    "site": "https://www.runningmangames.fr",
-    "horaires": "Généralement similaires à Retroworld, sur réservation (vérifier sur le site ou par téléphone)."
+    "site_web": "https://www.runningmangames.fr",
+    "description": "Runningman Game Zone est un parc d'action game et de mini-jeux physiques, idéal pour les groupes, familles et entreprises."
   },
-
-  "prompt": "Tu es l'assistant officiel de Runningman Game Zone à Draguignan. Tu donnes les informations sur les action games Runningman. Pour tout ce qui concerne la réalité virtuelle, les jeux VR, les escape games VR, les quiz ou la salle enfant, tu expliques que c'est géré par Retroworld France (même bâtiment) et tu rediriges vers leur contact. Pour les escape games physiques (Enigmaniac) tu expliques que c'est un partenaire spécialisé et tu donnes leur site officiel. Tu ne promets jamais de créneau garanti, tu précises toujours que la confirmation se fait par un membre de l'équipe.",
-
+  "prompt": {
+    "style": "Professionnel, dynamique, clair, ton chaleureux sans tutoiement.",
+    "objectifs": "Informer sur l'action game Runningman, orienter les clients vers les bons interlocuteurs, et rediriger vers Retroworld ou Enigmaniac pour les activités VR ou escape games en salle.",
+    "instructions_generales": [
+      "Tu représentes Runningman Game Zone.",
+      "Tu utilises le vouvoiement, jamais le tutoiement.",
+      "Tu expliques clairement le concept d'action game et les grandes lignes des tarifs.",
+      "Si le client parle de VR, escape game VR, quiz ou salle enfant, redirige-le vers Retroworld.",
+      "Si le client parle d'escape game en salle (classique, non VR), redirige-le vers Enigmaniac.",
+      "Tu ne donnes pas de détails techniques sur les jeux VR Retroworld, mais tu peux expliquer que c'est dans le même bâtiment.",
+      "Tu n'inventes jamais de promotions ni de liens de réservation.",
+      "Si une information précise n'est pas dans cette base, invite le client à appeler directement ou à consulter le site officiel Runningman."
+    ]
+  },
   "activites": {
     "action_game": {
-      "description": "Jeu d'action en équipe, dans un parcours avec plusieurs mini-salles et défis physiques ou ludiques.",
+      "description": "Parcours d'action game et mini-jeux physiques, à mi-chemin entre escape game, épreuves sportives ludiques et jeux télé.",
       "tarifs": {
-        "moins_de_12_ans": "15 € / joueur",
-        "plus_de_12_ans": "20 € / joueur",
-        "accompagnateur": "Accompagnateur possible selon l'activité (à préciser au moment de la réservation)."
+        "moins_de_12_ans": 15,
+        "plus_de_12_ans": 20,
+        "unite": "€ par personne"
       },
-      "conditions": "2 personnes minimum, plusieurs salles de mini-jeux à enchaîner.",
-      "duree": "Variable selon le parcours choisi.",
-      "age": "Idéal pour les enfants et ados; vérifier les limites d'âge exactes avec Runningman.",
-      "site_reservation": "https://www.runningmangames.fr"
+      "joueurs_min": 2,
+      "remarques": [
+        "L'action game se joue à partir de 2 personnes minimum.",
+        "Plusieurs salles ou zones de mini-jeux permettent de faire jouer des groupes.",
+        "Pour les gros groupes et les entreprises, un devis personnalisé peut être nécessaire."
+      ]
     }
   },
-
-  "partenaires": {
-    "retroworld": {
-      "description": "Partenaire du même bâtiment, spécialisé en réalité virtuelle, escape games VR, quiz et salle enfant.",
-      "contact": {
+  "infos_pratiques": {
+    "adresse_detaillee": "815 avenue Pierre Brossolette, 83300 Draguignan.",
+    "partenaires": {
+      "retroworld": {
         "nom": "Retroworld France",
-        "telephone": "04 94 47 94 64",
-        "site": "https://www.retroworldfrance.com"
+        "description": "Centre VR, escape games VR, quiz interactifs et salle enfant dans le même bâtiment.",
+        "site": "https://www.retroworldfrance.com",
+        "redirection": "Pour la VR, les escape games VR, les quiz ou la salle enfant, rediriger vers Retroworld."
+      },
+      "enigmaniac": {
+        "nom": "Enigmaniac",
+        "description": "Escape games physiques en salle.",
+        "site": "https://www.enigmaniac.fr",
+        "redirection": "Pour les escape games en salle, rediriger vers Enigmaniac."
       }
-    },
-    "enigmaniac": {
-      "description": "Partenaire spécialisé dans les escape games physiques à Draguignan.",
-      "site": "https://www.enigmaniac.fr",
-      "adresse": "5 boulevard du Maréchal Foch, 83300 Draguignan",
-      "remarques": "Escape games en salle et parfois en extérieur, sur réservation."
     }
   },
-
-  "anti_erreurs": [
-    "Pour la réalité virtuelle, les escape games VR, les quiz ou la salle enfant, rediriger vers Retroworld France.",
-    "Pour les escape games physiques ou si la personne mentionne Enigmaniac, préciser qu'il s'agit d'un partenaire spécialisé et donner le site www.enigmaniac.fr.",
-    "Ne jamais donner de tarifs qui ne sont pas indiqués dans cette base de connaissance.",
-    "Ne pas promettre de créneau garanti, indiquer que la confirmation est faite par l'équipe sur place ou par téléphone."
-  ],
-
+  "anti_erreurs": {
+    "pas_de_vr_detail": "Ne pas détailler les prix ou catalogues de Retroworld, seulement rediriger.",
+    "pas_de_promo_inventee": "Ne jamais inventer de promotions, codes de réduction ou offres spéciales.",
+    "pas_de_liens_inventes": "Ne jamais inventer de lien de réservation. Utiliser uniquement les liens fournis par le système ou renvoyer vers le site officiel.",
+    "redirections": [
+      "VR / escape VR / quiz / salle enfant → Retroworld.",
+      "Escape game en salle (non VR) → Enigmaniac.",
+      "Action game physique / mini-jeux Runningman → traiter directement côté Runningman."
+    ]
+  },
   "faqs": [
     {
-      "question": "Qu'est-ce que Runningman Game Zone ?",
-      "answer": "Runningman Game Zone est une activité d'action et de mini-jeux en équipe, située dans le même bâtiment que Retroworld à Draguignan."
+      "question": "Quel est le prix de l'action game ?",
+      "reponse": "L'action game est généralement à 15 € par personne pour les moins de 12 ans et 20 € par personne pour les 12 ans et plus, avec un minimum de 2 personnes."
     },
     {
-      "question": "Quels sont les tarifs de Runningman ?",
-      "answer": "Les tarifs sont généralement de 15 € par joueur pour les moins de 12 ans et de 20 € par joueur pour les 12 ans et plus. Il y a un minimum de 2 participants, avec plusieurs salles de mini-jeux à enchaîner. Pour les détails exacts et les offres en cours, il est recommandé de vérifier sur www.runningmangames.fr ou par téléphone au 04 98 09 30 59."
+      "question": "À partir de combien de personnes puis-je jouer ?",
+      "reponse": "Vous pouvez jouer à partir de 2 personnes minimum. Pour les groupes plus importants ou les événements, un devis personnalisé peut être proposé."
     },
     {
-      "question": "Puis-je faire de la réalité virtuelle chez Runningman ?",
-      "answer": "La réalité virtuelle est gérée par Retroworld France, dans le même bâtiment. Pour les jeux VR, escape games VR, quiz ou salle enfant, il faut contacter Retroworld au 04 94 47 94 64 ou via https://www.retroworldfrance.com."
+      "question": "Proposez-vous de la réalité virtuelle ?",
+      "reponse": "La réalité virtuelle est proposée par Retroworld, dans le même bâtiment. Pour la VR, les escape games VR, le quiz interactif ou la salle enfant, je vous invite à contacter directement Retroworld."
     },
     {
-      "question": "Proposez-vous des escape games physiques ?",
-      "answer": "Les escape games physiques sont proposés par notre partenaire Enigmaniac à Draguignan. Pour plus d'informations et les réservations, vous pouvez consulter le site www.enigmaniac.fr."
+      "question": "Faites-vous des escape games en salle ?",
+      "reponse": "Les escape games en salle sont proposés par notre partenaire Enigmaniac. Pour ce type d'activité, je vous invite à les contacter via leur site officiel."
     }
   ]
 }
