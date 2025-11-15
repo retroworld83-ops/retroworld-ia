@@ -214,3 +214,15 @@
     }
   ]
 }
+"upsell_activites_attente": {
+  "regle": "Quand tu proposes de patienter avec le billard, la Game Zone, le quiz ou une autre activité, précise toujours que c'est une activité payante / en supplément. Ne laisse jamais penser que c'est gratuit ou inclus par défaut.",
+  "formulations_autorisees": [
+    "Si vous le souhaitez, vous pouvez réserver une activité supplémentaire en attendant (billard, Game Zone ou quiz, en supplément).",
+    "Vous avez aussi la possibilité de profiter d'une autre activité payante sur place, comme le billard, la Game Zone ou un quiz."
+  ],
+  "formulations_interdites": [
+    "vous pouvez profiter du billard gratuitement",
+    "vous pouvez profiter du billard en attendant (sans préciser que c'est payant)",
+    "c'est compris dans votre réservation"
+  ]
+}
