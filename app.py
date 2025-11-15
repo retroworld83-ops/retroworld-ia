@@ -1,9 +1,9 @@
 import os
 import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 
 import urllib.request
@@ -23,6 +23,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 
 ALLOWED_BRANDS = {"retroworld", "runningman"}
+
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL")  # ex: https://retroworld-ia.onrender.com
+
+LOG_DIR = "/mnt/data/logs/calls"
 
 
 # ---------------------------------------------------------
@@ -55,12 +59,12 @@ def load_kb(brand: str) -> Dict[str, Any]:
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     kb = json.load(f)
-                    logger.info(f"KB {brand} chargée depuis {path} ({label})")
+                    logger.info("KB %s chargée depuis %s (%s)", brand, path, label)
                     return kb
         except Exception as e:
-            logger.error(f"Erreur lors du chargement de la KB {brand} depuis {path}: {e}")
+            logger.error("Erreur lors du chargement de la KB %s depuis %s: %s", brand, path, e)
 
-    logger.warning(f"Aucune KB trouvée pour la marque {brand}, utilisation d'une KB minimale.")
+    logger.warning("Aucune KB trouvée pour la marque %s, utilisation d'une KB minimale.", brand)
     return {
         "identite": {
             "nom": brand,
@@ -89,7 +93,7 @@ def save_kb(brand: str, kb_data: Dict[str, Any]) -> str:
     with open(target_path, "w", encoding="utf-8") as f:
         json.dump(kb_data, f, ensure_ascii=False, indent=2)
 
-    logger.info(f"KB {brand} sauvegardée dans {target_path}")
+    logger.info("KB %s sauvegardée dans %s", brand, target_path)
     return target_path
 
 
@@ -97,7 +101,7 @@ def save_kb(brand: str, kb_data: Dict[str, Any]) -> str:
 # OUTIL : APPEL OPENAI VIA URLLIB
 # ---------------------------------------------------------
 
-def call_openai_chat(messages, model: str = "gpt-4.1-mini", temperature: float = 0.3) -> str:
+def call_openai_chat(messages: List[Dict[str, str]], model: str = "gpt-4.1-mini", temperature: float = 0.3) -> str:
     """
     Appelle l'API OpenAI /v1/chat/completions via urllib.
     Ne dépend pas du SDK officiel.
@@ -129,13 +133,13 @@ def call_openai_chat(messages, model: str = "gpt-4.1-mini", temperature: float =
             return resp_json["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8", errors="ignore")
-        logger.error(f"Erreur HTTP OpenAI: {e.code} - {error_body}")
+        logger.error("Erreur HTTP OpenAI: %s - %s", e.code, error_body)
         raise
     except urllib.error.URLError as e:
-        logger.error(f"Erreur réseau OpenAI: {e.reason}")
+        logger.error("Erreur réseau OpenAI: %s", e.reason)
         raise
     except Exception as e:
-        logger.error(f"Erreur inconnue OpenAI: {e}")
+        logger.error("Erreur inconnue OpenAI: %s", e)
         raise
 
 
@@ -170,7 +174,6 @@ def build_system_messages(brand: str, kb: Dict[str, Any], channel: str = "web") 
         f"Objectifs : {objectifs}."
     )
 
-    # On fournit aussi la KB brute en JSON pour que le modèle s'y réfère.
     kb_json = json.dumps(kb, ensure_ascii=False)
 
     system_messages = [
@@ -197,11 +200,108 @@ def build_system_messages(brand: str, kb: Dict[str, Any], channel: str = "web") 
         },
     ]
 
+    if channel == "phone":
+        # Directive spéciale pour permettre à l'IA de déclencher des actions
+        system_messages.append({
+            "role": "system",
+            "content": (
+                "Tu es en conversation téléphonique. Les réponses doivent être courtes, simples à prononcer et naturelles. "
+                "Si l'appelant demande clairement à parler à un humain, écris sur une ligne séparée exactement : "
+                "[[ACTION:TRANSFER_HUMAN]]. "
+                "Tu peux ensuite ajouter une phrase courte pour annoncer le transfert."
+            )
+        })
+
     return system_messages
 
 
 # ---------------------------------------------------------
-# ENDPOINTS
+# OUTILS : LOG DES APPELS (TRANSCRIPTIONS TEXTE)
+# ---------------------------------------------------------
+
+def ensure_log_dir():
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+
+def append_call_log(call_sid: str, brand: str, role: str, content: str, extra: Dict[str, Any] = None) -> None:
+    """
+    Sauvegarde chaque tour de conversation téléphonique dans un fichier .jsonl
+    /mnt/data/logs/calls/<CallSid>.jsonl
+    """
+    ensure_log_dir()
+    path = os.path.join(LOG_DIR, f"{call_sid}.jsonl")
+    record = {
+        "role": role,
+        "brand": brand,
+        "content": content,
+    }
+    if extra:
+        record.update(extra)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def load_call_history(call_sid: str) -> List[Dict[str, str]]:
+    """
+    Charge l'historique d'un appel sous forme de messages pour le LLM.
+    On convertit les logs en alternance user/assistant, ignorés pour l'instant les métadonnées.
+    """
+    path = os.path.join(LOG_DIR, f"{call_sid}.jsonl")
+    if not os.path.exists(path):
+        return []
+
+    history: List[Dict[str, str]] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                rec = json.loads(line)
+                role = rec.get("role")
+                content = rec.get("content", "")
+                if role == "user":
+                    history.append({"role": "user", "content": content})
+                elif role == "assistant":
+                    history.append({"role": "assistant", "content": content})
+            except Exception as e:
+                logger.error("Erreur de lecture log appel %s: %s", call_sid, e)
+    return history
+
+
+# ---------------------------------------------------------
+# OUTIL : RÉPONSE TWIML
+# ---------------------------------------------------------
+
+def twiml_response(xml_body: str, status: int = 200) -> Response:
+    """
+    Construit une réponse HTTP TwiML (XML) pour Twilio.
+    """
+    if not xml_body.startswith("<?xml"):
+        xml_body = '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_body
+    return Response(xml_body, status=status, mimetype="text/xml")
+
+
+def detect_brand_from_number(to_number: str) -> str:
+    """
+    Détermine la marque en fonction du numéro appelé.
+    Pour l'instant : tout vers retroworld.
+    Si un jour Runningman a un numéro Twilio distinct, tu pourras router ici.
+    """
+    # TODO: logique plus fine si nécessaire
+    return "retroworld"
+
+
+def get_public_base_url() -> str:
+    """
+    Retourne l'URL publique de base (Render) pour construire les webhooks Twilio.
+    """
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL.rstrip("/")
+    # Fallback : URL racine de la requête (utile en dev/local)
+    root = request.url_root.rstrip("/")
+    return root
+
+
+# ---------------------------------------------------------
+# ENDPOINTS GÉNÉRAUX (HEALTH, CHAT, KB)
 # ---------------------------------------------------------
 
 @app.route("/health", methods=["GET"])
@@ -250,18 +350,12 @@ def chat_brand(brand: str):
     kb = load_kb(brand)
     system_messages = build_system_messages(brand, kb, channel=channel)
 
-    # On pourrait ici ajouter une logique de logging / classification
-    # (détection de devis / réservation / anniversaire) basée sur 'metadata'
-    # ou sur le dernier message utilisateur.
-    #
-    # Pour l'instant, on se contente d'envoyer la requête à OpenAI.
-
     messages_for_openai = system_messages + user_messages
 
     try:
         assistant_reply = call_openai_chat(messages_for_openai)
     except Exception as e:
-        logger.error(f"Erreur lors de l'appel OpenAI pour {brand}: {e}")
+        logger.error("Erreur lors de l'appel OpenAI pour %s: %s", brand, e)
         return jsonify({"error": "Erreur interne lors de la génération de la réponse."}), 500
 
     response_payload = {
@@ -296,7 +390,7 @@ def kb_upsert_brand(brand: str):
     try:
         path_used = save_kb(brand, kb_data)
     except Exception as e:
-        logger.error(f"Erreur lors de la sauvegarde de la KB {brand}: {e}")
+        logger.error("Erreur lors de la sauvegarde de la KB %s: %s", brand, e)
         return jsonify({"error": "Impossible de sauvegarder la KB."}), 500
 
     return jsonify({
@@ -304,6 +398,175 @@ def kb_upsert_brand(brand: str):
         "brand": brand,
         "saved_to": path_used
     }), 200
+
+
+# ---------------------------------------------------------
+# PARTIE TÉLÉPHONIE (TWILIO)
+# ---------------------------------------------------------
+
+@app.route("/call/incoming", methods=["POST"])
+def call_incoming():
+    """
+    Webhook Twilio : un appel arrive sur le numéro virtuel.
+    Twilio envoie une requête POST (application/x-www-form-urlencoded) ici.
+    On répond avec du TwiML pour accueillir l'appelant et lancer la première question.
+    """
+    from_number = request.form.get("From", "")
+    to_number = request.form.get("To", "")
+    call_sid = request.form.get("CallSid", "")
+
+    brand = detect_brand_from_number(to_number)  # pour l'instant : retroworld
+    base_url = get_public_base_url()
+    action_url = f"{base_url}/call/assistant?brand={brand}"
+
+    logger.info("Nouvel appel entrant: CallSid=%s, From=%s, To=%s, brand=%s", call_sid, from_number, to_number, brand)
+
+    # On log juste l'arrivée de l'appel
+    append_call_log(call_sid, brand, role="system", content="CALL_STARTED", extra={
+        "from": from_number,
+        "to": to_number
+    })
+
+    greeting = (
+        "Bonjour, vous êtes bien chez Retroworld à Draguignan. "
+        "Je suis l'assistant vocal automatique. "
+        "Pouvez-vous m'indiquer en quelques mots ce que vous souhaitez ? "
+        "Par exemple : réserver une partie de VR, organiser un anniversaire, ou avoir des informations."
+    )
+
+    xml = f"""
+<Response>
+  <Gather input="speech" language="fr-FR" action="{action_url}" method="POST" timeout="6">
+    <Say voice="woman">{greeting}</Say>
+  </Gather>
+  <Say voice="woman">Je n'ai pas entendu votre réponse. Je vais raccrocher, n'hésitez pas à nous rappeler.</Say>
+  <Hangup/>
+</Response>
+"""
+    return twiml_response(xml)
+
+
+@app.route("/call/assistant", methods=["POST"])
+def call_assistant():
+    """
+    Webhook Twilio appelé après chaque prise de parole de l'appelant.
+    On reçoit le texte transcrit par Twilio (SpeechResult), on l'envoie à l'IA,
+    puis on répond avec du TwiML <Say> + éventuellement un nouveau <Gather> pour continuer la conversation.
+    """
+    call_sid = request.form.get("CallSid", "")
+    from_number = request.form.get("From", "")
+    to_number = request.form.get("To", "")
+    speech_text = (request.form.get("SpeechResult") or "").strip()
+
+    brand = request.args.get("brand", "retroworld").lower()
+    if brand not in ALLOWED_BRANDS:
+        brand = "retroworld"
+
+    base_url = get_public_base_url()
+    action_url = f"{base_url}/call/assistant?brand={brand}"
+
+    if not speech_text:
+        # Rien compris / pas de texte -> redemander
+        logger.info("Aucune parole comprise pour CallSid=%s", call_sid)
+        xml = f"""
+<Response>
+  <Gather input="speech" language="fr-FR" action="{action_url}" method="POST" timeout="6">
+    <Say voice="woman">Je n'ai pas bien compris. Pouvez-vous répéter votre demande ?</Say>
+  </Gather>
+  <Say voice="woman">Je n'ai toujours pas compris, je vais raccrocher pour le moment.</Say>
+  <Hangup/>
+</Response>
+"""
+        return twiml_response(xml)
+
+    logger.info("CallSid=%s | Parole reconnue: %s", call_sid, speech_text)
+    append_call_log(call_sid, brand, role="user", content=speech_text, extra={
+        "from": from_number,
+        "to": to_number
+    })
+
+    # Construire le contexte de conversation pour l'IA
+    kb = load_kb(brand)
+    system_messages = build_system_messages(brand, kb, channel="phone")
+    history = load_call_history(call_sid)
+
+    messages_for_openai: List[Dict[str, str]] = system_messages + history + [
+        {"role": "user", "content": speech_text}
+    ]
+
+    try:
+        assistant_reply = call_openai_chat(messages_for_openai, temperature=0.4)
+    except Exception as e:
+        logger.error("Erreur IA pendant l'appel CallSid=%s: %s", call_sid, e)
+        error_msg = (
+            "Je rencontre un souci technique pour le moment. "
+            "Je vous invite à rappeler un peu plus tard ou à nous contacter par notre site Retroworld France."
+        )
+        xml = f"""
+<Response>
+  <Say voice="woman">{error_msg}</Say>
+  <Hangup/>
+</Response>
+"""
+        return twiml_response(xml, status=500)
+
+    append_call_log(call_sid, brand, role="assistant", content=assistant_reply, extra={})
+
+    # Vérifier si l'IA demande un transfert vers un humain
+    transfer_requested = "[[ACTION:TRANSFER_HUMAN]]" in assistant_reply
+
+    # Nettoyer la réponse vocale (on enlève le tag d'action si présent)
+    spoken_reply = assistant_reply.replace("[[ACTION:TRANSFER_HUMAN]]", "").strip()
+
+    if transfer_requested:
+        # On transfère vers un humain (par défaut le fixe Retroworld)
+        human_number = "+33494479464"  # format E.164 recommandé (à adapter)
+        logger.info("CallSid=%s | Transfert vers un humain: %s", call_sid, human_number)
+
+        # On annonce puis on compose
+        xml = f"""
+<Response>
+  <Say voice="woman">{spoken_reply or "Je vous transfère vers un membre de l'équipe."}</Say>
+  <Dial>{human_number}</Dial>
+</Response>
+"""
+        return twiml_response(xml)
+
+    # Sinon, on continue la conversation IA avec un nouveau Gather
+    # On garde la réponse courte pour éviter un monologue trop long en TTS
+    if len(spoken_reply) > 800:
+        spoken_reply = spoken_reply[:800]
+
+    xml = f"""
+<Response>
+  <Gather input="speech" language="fr-FR" action="{action_url}" method="POST" timeout="8">
+    <Say voice="woman">{spoken_reply}</Say>
+  </Gather>
+  <Say voice="woman">Je n'ai pas entendu de réponse, je mets fin à l'appel pour le moment. À bientôt chez Retroworld.</Say>
+  <Hangup/>
+</Response>
+"""
+    return twiml_response(xml)
+
+
+@app.route("/call/recording-callback", methods=["POST"])
+def call_recording_callback():
+    """
+    Callback optionnel Twilio si tu décides d'enregistrer les appels ou d'activer la transcription Twilio.
+    Tu pourras y récupérer recordingUrl, transcriptionText, etc., pour stockage complémentaire.
+    """
+    call_sid = request.form.get("CallSid", "")
+    recording_url = request.form.get("RecordingUrl", "")
+    transcription_text = request.form.get("TranscriptionText", "")
+
+    extra = {
+        "recording_url": recording_url,
+        "transcription_text": transcription_text,
+    }
+    append_call_log(call_sid, brand="retroworld", role="system", content="RECORDING_INFO", extra=extra)
+
+    logger.info("Recording callback pour CallSid=%s | recording_url=%s", call_sid, recording_url)
+    return "", 204
 
 
 # ---------------------------------------------------------
