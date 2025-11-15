@@ -1,246 +1,119 @@
 import os
 import json
-import time
-from pathlib import Path
-from typing import Dict, Any, List
+import logging
+from typing import Dict, Any
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 import urllib.request
 import urllib.error
-import urllib.parse
-import smtplib
-from email.mime.text import MIMEText
-import base64
 
-# ----------------------------------------------------
-# CONFIG
-# ----------------------------------------------------
+# ---------------------------------------------------------
+# CONFIG & INITIALISATION
+# ---------------------------------------------------------
 
 app = Flask(__name__)
 CORS(app)
 
-DEBUG_LOGS = True
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-DEFAULT_BRAND = os.environ.get("DEFAULT_BRAND", "retroworld").lower()
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 
-DATA_DIR = Path("/mnt/data")           # stockage persistant Render
-APP_DIR = Path(__file__).resolve().parent  # répertoire de l'image Docker (/app)
-
-# Notifications e-mail
-SMTP_HOST = os.environ.get("SMTP_HOST", "")
-SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER = os.environ.get("SMTP_USER", "")
-SMTP_PASS = os.environ.get("SMTP_PASS", "")
-ADMIN_EMAILS = [
-    e.strip() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()
-]
-
-# Notifications SMS (ex. Twilio, facultatif)
-TWILIO_SID = os.environ.get("TWILIO_SID", "")
-TWILIO_TOKEN = os.environ.get("TWILIO_TOKEN", "")
-TWILIO_FROM = os.environ.get("TWILIO_FROM", "")
-SMS_ADMIN_NUMBERS = [
-    n.strip() for n in os.environ.get("SMS_ADMIN_NUMBERS", "").split(",") if n.strip()
-]
+ALLOWED_BRANDS = {"retroworld", "runningman"}
 
 
-# ----------------------------------------------------
-# UTIL / KB
-# ----------------------------------------------------
+# ---------------------------------------------------------
+# OUTILS : LECTURE / ÉCRITURE BASE DE CONNAISSANCE
+# ---------------------------------------------------------
 
-def safe_brand(b: str) -> str:
-    if not b:
-        return DEFAULT_BRAND
-    return b.lower().strip()
-
-
-def kb_path(brand: str) -> Path:
-    """Chemin priorité: stockage persistant (/mnt/data)."""
-    return DATA_DIR / f"kb_{brand}.json"
-
-
-def ensure_data_dir():
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-
-
-DEFAULT_KB: Dict[str, Any] = {
-    "identite": {"nom": "Entreprise"},
-    "prompt": "Tu es un assistant d'information. La base de connaissance est vide.",
-    "faqs": []
-}
+def get_kb_paths(brand: str) -> Dict[str, str]:
+    """
+    Retourne les chemins possibles pour la KB d'une marque.
+    Priorité à /mnt/data, fallback sur /app.
+    """
+    filename = f"kb_{brand}.json"
+    return {
+        "mnt": os.path.join("/mnt/data", filename),
+        "app": os.path.join("/app", filename),
+    }
 
 
 def load_kb(brand: str) -> Dict[str, Any]:
     """
-    Charge la KB d'une marque :
-    1) /mnt/data/kb_<brand>.json (priorité)
-    2) /app/kb_<brand>.json (copié par Dockerfile)
+    Charge la base de connaissance pour une marque donnée.
+    1) Essaie /mnt/data/kb_<brand>.json
+    2) Sinon /app/kb_<brand>.json
+    3) Sinon renvoie un dict minimal.
     """
-    ensure_data_dir()
-    b = safe_brand(brand)
+    paths = get_kb_paths(brand)
 
-    candidates = [
-        DATA_DIR / f"kb_{b}.json",
-        APP_DIR / f"kb_{b}.json",
-    ]
-
-    for p in candidates:
+    for label, path in paths.items():
         try:
-            if p.is_file():
-                if DEBUG_LOGS:
-                    print(f"[KB] Chargement depuis : {p}")
-                with open(p, "r", encoding="utf-8") as f:
-                    return json.load(f)
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    kb = json.load(f)
+                    logger.info(f"KB {brand} chargée depuis {path} ({label})")
+                    return kb
         except Exception as e:
-            if DEBUG_LOGS:
-                print(f"[KB] Erreur lecture {p}: {e}")
-            continue
+            logger.error(f"Erreur lors du chargement de la KB {brand} depuis {path}: {e}")
 
-    return DEFAULT_KB.copy()
-
-
-def save_kb(brand: str, kb: Dict[str, Any]) -> None:
-    """Sauvegarde la KB dans /mnt/data uniquement (pour les updates dynamiques)."""
-    ensure_data_dir()
-    b = safe_brand(brand)
-    dest = DATA_DIR / f"kb_{b}.json"
-    with open(dest, "w", encoding="utf-8") as f:
-        json.dump(kb, f, ensure_ascii=False, indent=2)
-    if DEBUG_LOGS:
-        print(f"[KB] Sauvegardé dans {dest}")
-
-
-def count_faqs(kb: Dict[str, Any]) -> int:
-    if "faqs" in kb and isinstance(kb["faqs"], list):
-        return len(kb["faqs"])
-    if "faq" in kb and isinstance(kb["faq"], list):
-        return len(kb["faq"])
-    return 0
-
-
-# ----------------------------------------------------
-# LOG & NOTIFICATIONS
-# ----------------------------------------------------
-
-def append_conversation_log(brand: str, user_message: str, answer: str, meta: Dict[str, Any]):
-    """Ajoute une ligne JSON dans /mnt/data/conversations.log"""
-    try:
-        ensure_data_dir()
-        log_path = DATA_DIR / "conversations.log"
-        entry = {
-            "ts": time.time(),
-            "brand": brand,
-            "user_message": user_message,
-            "answer": answer,
-            "meta": meta,
+    logger.warning(f"Aucune KB trouvée pour la marque {brand}, utilisation d'une KB minimale.")
+    return {
+        "identite": {
+            "nom": brand,
+            "description": f"KB minimale pour {brand}.",
+        },
+        "prompt": {
+            "instructions_generales": [
+                "Tu es un assistant IA pour cette marque.",
+                "Réponds de manière professionnelle et claire.",
+            ]
         }
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        if DEBUG_LOGS:
-            print(f"[LOG] Conversation ajoutée dans {log_path}")
-    except Exception as e:
-        print("[LOG ERROR]", e)
+    }
 
 
-def send_email_notification(brand: str, user_message: str, answer: str, meta: Dict[str, Any]):
-    """Envoie un e-mail avec la conversation (si la config SMTP est présente)."""
-    if not (SMTP_HOST and SMTP_USER and SMTP_PASS and ADMIN_EMAILS):
-        if DEBUG_LOGS:
-            print("[MAIL] Config SMTP incomplète, notification ignorée.")
-        return
+def save_kb(brand: str, kb_data: Dict[str, Any]) -> str:
+    """
+    Sauvegarde la KB dans /mnt/data/kb_<brand>.json (créé si besoin).
+    Renvoie le chemin utilisé.
+    """
+    paths = get_kb_paths(brand)
+    target_path = paths["mnt"]
 
-    try:
-        subject = f"[IA {brand}] Nouveau message client"
-        body_lines = [
-            f"Marque : {brand}",
-            f"Horodatage : {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(meta.get('ts', time.time())))}",
-            "",
-            "Message client :",
-            user_message,
-            "",
-            "Réponse IA :",
-            answer,
-            "",
-            f"IP: {meta.get('ip', '')}",
-            f"User-Agent: {meta.get('user_agent', '')}",
-        ]
-        body = "\n".join(body_lines)
+    # S'assurer que le dossier /mnt/data existe
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
-        msg = MIMEText(body, "plain", "utf-8")
-        msg["Subject"] = subject
-        msg["From"] = SMTP_USER
-        msg["To"] = ", ".join(ADMIN_EMAILS)
+    with open(target_path, "w", encoding="utf-8") as f:
+        json.dump(kb_data, f, ensure_ascii=False, indent=2)
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_USER, ADMIN_EMAILS, msg.as_string())
-
-        if DEBUG_LOGS:
-            print("[MAIL] Notification envoyée.")
-    except Exception as e:
-        print("[MAIL ERROR]", e)
+    logger.info(f"KB {brand} sauvegardée dans {target_path}")
+    return target_path
 
 
-def send_sms_notification(brand: str, user_message: str, answer: str, meta: Dict[str, Any]):
-    """Envoie un SMS (ex. via Twilio) si les variables sont configurées."""
-    if not (TWILIO_SID and TWILIO_TOKEN and TWILIO_FROM and SMS_ADMIN_NUMBERS):
-        if DEBUG_LOGS:
-            print("[SMS] Config SMS incomplète, notification ignorée.")
-        return
+# ---------------------------------------------------------
+# OUTIL : APPEL OPENAI VIA URLLIB
+# ---------------------------------------------------------
 
-    body = f"[IA {brand}] Nouveau message : {user_message[:120]}"
-
-    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_SID}/Messages.json"
-    auth_str = f"{TWILIO_SID}:{TWILIO_TOKEN}"
-    auth_bytes = base64.b64encode(auth_str.encode("utf-8")).decode("ascii")
-
-    for number in SMS_ADMIN_NUMBERS:
-        try:
-            data = urllib.parse.urlencode({
-                "From": TWILIO_FROM,
-                "To": number,
-                "Body": body,
-            }).encode("utf-8")
-
-            req = urllib.request.Request(url, data=data)
-            req.add_header("Authorization", f"Basic {auth_bytes}")
-            req.add_header("Content-Type", "application/x-www-form-urlencoded")
-
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                _ = resp.read()
-
-            if DEBUG_LOGS:
-                print(f"[SMS] Notification envoyée à {number}")
-        except Exception as e:
-            print("[SMS ERROR]", e)
-
-
-# ----------------------------------------------------
-# OpenAI via HTTP (pas de dépendance openai)
-# ----------------------------------------------------
-
-def call_openai(messages: List[Dict[str, str]]) -> str:
-    """Appel basique à l'API OpenAI Chat Completions."""
+def call_openai_chat(messages, model: str = "gpt-4.1-mini", temperature: float = 0.3) -> str:
+    """
+    Appelle l'API OpenAI /v1/chat/completions via urllib.
+    Ne dépend pas du SDK officiel.
+    """
     if not OPENAI_API_KEY:
-        return "Erreur interne : la clé OPENAI_API_KEY n'est pas configurée sur le serveur."
+        raise RuntimeError("OPENAI_API_KEY non défini dans les variables d'environnement.")
 
     payload = {
-        "model": "gpt-4o-mini",
+        "model": model,
         "messages": messages,
-        "temperature": 0.4,
-        "max_tokens": 700,
+        "temperature": temperature,
     }
 
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
+        OPENAI_API_URL,
         data=data,
         headers={
             "Content-Type": "application/json",
@@ -250,171 +123,193 @@ def call_openai(messages: List[Dict[str, str]]) -> str:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read()
-            result = json.loads(raw.decode("utf-8"))
+        with urllib.request.urlopen(req) as resp:
+            resp_data = resp.read().decode("utf-8")
+            resp_json = json.loads(resp_data)
+            return resp_json["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as e:
-        try:
-            err_body = e.read().decode("utf-8")
-        except Exception:
-            err_body = str(e)
-        print("[OpenAI HTTPError]", e, err_body)
-        return "Désolé, une erreur technique est survenue avec le service d'IA."
+        error_body = e.read().decode("utf-8", errors="ignore")
+        logger.error(f"Erreur HTTP OpenAI: {e.code} - {error_body}")
+        raise
+    except urllib.error.URLError as e:
+        logger.error(f"Erreur réseau OpenAI: {e.reason}")
+        raise
     except Exception as e:
-        print("[OpenAI ERROR]", e)
-        return "Désolé, une erreur technique est survenue avec le service d'IA."
-
-    try:
-        return result["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print("[OpenAI PARSE ERROR]", e, result)
-        return "Désolé, je n'ai pas pu générer de réponse pour le moment."
+        logger.error(f"Erreur inconnue OpenAI: {e}")
+        raise
 
 
-def build_system_prompt(kb: Dict[str, Any], brand: str) -> str:
+# ---------------------------------------------------------
+# CONSTRUCTION DU CONTEXTE POUR /chat/<brand>
+# ---------------------------------------------------------
+
+def build_system_messages(brand: str, kb: Dict[str, Any], channel: str = "web") -> list:
+    """
+    Construit les messages de rôle 'system' envoyés à OpenAI,
+    en utilisant la KB de la marque.
+    """
     identite = kb.get("identite", {})
-    nom = identite.get("nom", "l'établissement")
-    site = identite.get("site", "")
-    tel = identite.get("telephone", "")
-    horaires = identite.get("horaires", "")
+    prompt = kb.get("prompt", {})
+    anti_erreurs = kb.get("anti_erreurs", {})
 
-    kb_prompt = kb.get("prompt", "")
+    nom = identite.get("nom", brand)
+    description = identite.get("description", "")
+    style = prompt.get("style", "")
+    objectifs = prompt.get("objectifs", "")
+    instructions_generales = prompt.get("instructions_generales", [])
 
-    header = f"""
-Tu es l'assistant officiel de {nom}.
-Tu réponds en français, avec un ton professionnel, chaleureux et clair.
+    system_intro = (
+        f"Tu es l'assistant IA officiel de {nom}. "
+        f"Description : {description}. "
+        f"Canal de conversation : {channel}. "
+        "Tu dois toujours respecter strictement la base de connaissance fournie."
+    )
 
-Coordonnées connues :
-- Téléphone : {tel}
-- Site : {site}
-- Horaires : {horaires}
+    system_style = (
+        f"Style attendu : {style}. "
+        f"Objectifs : {objectifs}."
+    )
 
-Tu dois t'appuyer UNIQUEMENT sur les informations présentes dans la base de connaissance JSON suivante.
-Si une information n'est pas disponible ou pas claire, tu le dis honnêtement et tu proposes de mettre le client en contact avec un agent humain.
-"""
+    # On fournit aussi la KB brute en JSON pour que le modèle s'y réfère.
+    kb_json = json.dumps(kb, ensure_ascii=False)
 
-    if safe_brand(brand) == "retroworld":
-        brand_rules = """
-Spécifique Retroworld :
-- Si la personne parle de réservation, devis ou anniversaire :
-  tu demandes toujours : activité, date, heure précise (ou fourchette), nombre de joueurs, nom, e-mail, téléphone.
-- Tu ne donnes les liens de réservation QUE si la personne est clairement décidée.
-  Dans ce cas, tu dis d'abord : « Parfait, je vous laisse réserver via notre lien. »
-  Puis tu envoies le lien seul sur la ligne suivante.
-- Tu ne promets jamais de créneau garanti, tu parles de créneau à confirmer par un agent.
-- Si la personne parle de Runningman ou Game Zone, tu expliques que c'est géré par Runningman (www.runningmangames.fr, 04 98 09 30 59).
-"""
-    else:
-        brand_rules = """
-Spécifique Runningman :
-- Tu donnes les informations sur les action games Runningman.
-- Si la personne parle de VR, escape game VR, quiz ou salle enfant, tu expliques que ces activités sont gérées par Retroworld dans le même bâtiment (https://www.retroworldfrance.com, 04 94 47 94 64).
-- Si la personne parle d'escape game physique ou d'Enigmaniac, tu expliques que c'est un partenaire spécialisé (www.enigmaniac.fr).
-"""
-
-    kb_json_text = json.dumps(kb, ensure_ascii=False)
-
-    return (
-        kb_prompt
-        + "\n\n"
-        + header
-        + "\n"
-        + brand_rules
-        + "\nVoici la base de connaissance au format JSON :\n"
-        + kb_json_text
-    ).strip()
-
-
-def ask_ai(kb: Dict[str, Any], message: str, brand: str) -> str:
-    system_prompt = build_system_prompt(kb, brand)
-    msgs = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": message},
+    system_messages = [
+        {
+            "role": "system",
+            "content": system_intro
+        },
+        {
+            "role": "system",
+            "content": system_style
+        },
+        {
+            "role": "system",
+            "content": "Instructions générales : " + "\n".join(instructions_generales)
+        },
+        {
+            "role": "system",
+            "content": "Règles anti-erreurs et points d'attention : " +
+                       json.dumps(anti_erreurs, ensure_ascii=False)
+        },
+        {
+            "role": "system",
+            "content": "BASE DE CONNAISSANCE (au format JSON) : " + kb_json
+        },
     ]
-    return call_openai(msgs)
+
+    return system_messages
 
 
-# ----------------------------------------------------
-# ROUTES
-# ----------------------------------------------------
-
-@app.route("/")
-def home():
-    return jsonify({
-        "ok": True,
-        "message": "Retroworld IA online (multi-marque Retroworld / Runningman).",
-        "endpoints": ["/health", "/chat/<brand>", "/kb/upsert/<brand>"]
-    })
-
+# ---------------------------------------------------------
+# ENDPOINTS
+# ---------------------------------------------------------
 
 @app.route("/health", methods=["GET"])
 def health():
-    kb_r = load_kb("retroworld")
-    kb_rm = load_kb("runningman")
-
-    return jsonify({
-        "ok": True,
-        "default_brand": DEFAULT_BRAND,
-        "kb_faqs_retroworld": count_faqs(kb_r),
-        "kb_faqs_runningman": count_faqs(kb_rm),
-        "time": time.time()
-    })
+    """
+    Endpoint de santé / monitoring.
+    Permet à Render ou à une sonde externe de vérifier que le service répond.
+    """
+    return jsonify({"status": "ok"}), 200
 
 
 @app.route("/chat/<brand>", methods=["POST"])
 def chat_brand(brand: str):
-    data = request.get_json(force=True, silent=True) or {}
-    message = (data.get("message") or "").strip()
-    if not message:
-        return jsonify({"error": "Champ 'message' manquant ou vide."}), 400
+    """
+    Endpoint principal de chat :
+    - brand : 'retroworld' ou 'runningman' (extensible)
+    - body JSON attendu :
+      {
+        "messages": [
+          {"role": "user", "content": "Bonjour..."},
+          {"role": "assistant", "content": "..."}  // historique optionnel
+        ],
+        "channel": "web" | "phone" | "whatsapp" | ... (optionnel),
+        "metadata": {...}                           (optionnel)
+      }
+    """
+    brand = brand.lower()
+    if brand not in ALLOWED_BRANDS:
+        return jsonify({"error": "Marque inconnue.", "allowed_brands": list(ALLOWED_BRANDS)}), 400
 
-    b = safe_brand(brand)
-    kb = load_kb(b)
-    answer = ask_ai(kb, message, b)
+    try:
+        body = request.get_json(force=True)
+    except Exception:
+        return jsonify({"error": "Corps de requête JSON invalide."}), 400
 
-    # meta pour logs / notifications
-    meta = {
-        "ts": time.time(),
-        "ip": request.remote_addr,
-        "user_agent": request.headers.get("User-Agent", ""),
+    if not isinstance(body, dict):
+        return jsonify({"error": "Format de requête incorrect."}), 400
+
+    user_messages = body.get("messages")
+    channel = body.get("channel", "web")
+    metadata = body.get("metadata", {})
+
+    if not user_messages or not isinstance(user_messages, list):
+        return jsonify({"error": "Le champ 'messages' (liste) est requis."}), 400
+
+    kb = load_kb(brand)
+    system_messages = build_system_messages(brand, kb, channel=channel)
+
+    # On pourrait ici ajouter une logique de logging / classification
+    # (détection de devis / réservation / anniversaire) basée sur 'metadata'
+    # ou sur le dernier message utilisateur.
+    #
+    # Pour l'instant, on se contente d'envoyer la requête à OpenAI.
+
+    messages_for_openai = system_messages + user_messages
+
+    try:
+        assistant_reply = call_openai_chat(messages_for_openai)
+    except Exception as e:
+        logger.error(f"Erreur lors de l'appel OpenAI pour {brand}: {e}")
+        return jsonify({"error": "Erreur interne lors de la génération de la réponse."}), 500
+
+    response_payload = {
+        "reply": assistant_reply,
+        "brand": brand,
+        "metadata_echo": metadata,
     }
 
-    # Log + notifications
-    append_conversation_log(b, message, answer, meta)
-    send_email_notification(b, message, answer, meta)
-    send_sms_notification(b, message, answer, meta)
-
-    return jsonify({"brand": b, "answer": answer})
+    return jsonify(response_payload), 200
 
 
 @app.route("/kb/upsert/<brand>", methods=["POST"])
-def kb_upsert(brand: str):
-    """Ajoute une entrée dans la KB (dans la liste 'faqs')."""
-    b = safe_brand(brand)
-    body = request.get_json(force=True, silent=True) or {}
-    question = (body.get("question") or "").strip()
-    answer = (body.get("answer") or "").strip()
+def kb_upsert_brand(brand: str):
+    """
+    Endpoint pour mettre à jour la KB d'une marque.
+    - brand : 'retroworld', 'runningman', etc.
+    - body JSON : la KB complète à enregistrer.
+    -> Sauvegarde dans /mnt/data/kb_<brand>.json
+    """
+    brand = brand.lower()
+    if brand not in ALLOWED_BRANDS:
+        return jsonify({"error": "Marque inconnue.", "allowed_brands": list(ALLOWED_BRANDS)}), 400
 
-    if not question or not answer:
-        return jsonify({"error": "Champs 'question' et 'answer' requis."}), 400
+    try:
+        kb_data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"error": "Corps de requête JSON invalide."}), 400
 
-    kb = load_kb(b)
-    if "faqs" not in kb or not isinstance(kb["faqs"], list):
-        kb["faqs"] = []
+    if not isinstance(kb_data, dict):
+        return jsonify({"error": "La KB doit être un objet JSON (dict)."}), 400
 
-    kb["faqs"].append({"question": question, "answer": answer})
-    save_kb(b, kb)
+    try:
+        path_used = save_kb(brand, kb_data)
+    except Exception as e:
+        logger.error(f"Erreur lors de la sauvegarde de la KB {brand}: {e}")
+        return jsonify({"error": "Impossible de sauvegarder la KB."}), 500
 
     return jsonify({
-        "ok": True,
-        "brand": b,
-        "faqs_count": len(kb["faqs"])
-    })
+        "status": "ok",
+        "brand": brand,
+        "saved_to": path_used
+    }), 200
 
 
-# ----------------------------------------------------
-# MAIN (local)
-# ----------------------------------------------------
+# ---------------------------------------------------------
+# MAIN (pour exécution locale / debug)
+# ---------------------------------------------------------
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "8080"))
-    app.run(host="0.0.0.0", port=port)
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
