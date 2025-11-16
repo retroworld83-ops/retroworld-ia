@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import urllib.request
-import urllib.parse
 
 # ---------------------------------------------------------
 # CONFIG GLOBALE
@@ -42,10 +41,10 @@ ADMIN_DASHBOARD_TOKEN = os.getenv("ADMIN_DASHBOARD_TOKEN", "changeme_admin_token
 QWEEKLE_WEBHOOK_SECRET = os.getenv("QWEEKLE_WEBHOOK_SECRET", "")
 QWEEKLE_SOURCE_NAME = os.getenv("QWEEKLE_SOURCE_NAME", "retroworld-qweekle")
 
+
 # ---------------------------------------------------------
 # OUTILS GÉNÉRAUX
 # ---------------------------------------------------------
-
 
 def load_kb(brand: str) -> Dict[str, Any]:
     """
@@ -126,7 +125,7 @@ def build_prompt(
     """
     Construit la liste de messages au format OpenAI Chat :
     - un gros message system basé sur la KB
-    - éventuellement un message supplémentaire indiquant l'origine
+    - un message de contexte (source, URL, conversation_id)
     - puis l'historique utilisateur/assistant reçu
     """
     brand = brand.lower()
@@ -159,7 +158,7 @@ def build_prompt(
     elif isinstance(instr, str):
         system_parts.append(instr)
 
-    # On précise l'info sur brand d'entrée/effective si présente
+    # Info sur brand d'entrée/effective
     brand_entry = metadata.get("brand_entry")
     brand_effective = metadata.get("brand_effective")
     if brand_entry and brand_effective and brand_entry != brand_effective:
@@ -170,7 +169,7 @@ def build_prompt(
             "ou Runningman (action game, mini-jeux physiques)."
         )
 
-    # Empêche l'invention de prix / promos / liens
+    # Anti erreurs éventuelles (pas d'invention de prix / promos / liens)
     anti_err = kb.get("anti_erreurs")
     if isinstance(anti_err, list):
         for item in anti_err:
@@ -179,23 +178,31 @@ def build_prompt(
     elif isinstance(anti_err, str):
         system_parts.append(anti_err)
 
-    # Contexte final system
     system_text = "\n\n".join([p for p in system_parts if p.strip()])
 
     prompt_messages: List[Dict[str, str]] = []
     if system_text:
         prompt_messages.append({"role": "system", "content": system_text})
 
-    # On ajoute aussi un éventuel message "context" avec métadonnées basiques
-    meta_context = []
+    # Contexte métadonnées (source, URL, conversation_id partagé)
+    meta_context: List[str] = []
     if metadata.get("source"):
         meta_context.append(f"Source de la demande : {metadata['source']}.")
     if metadata.get("page_url"):
         meta_context.append(f"URL de la page : {metadata['page_url']}.")
+    conv_id = metadata.get("conversation_id")
+    if conv_id:
+        meta_context.append(
+            "ID de conversation partagé entre sites : "
+            f"{conv_id}. "
+            "Si tu proposes un lien vers Runningman ou Retroworld, "
+            "tu peux ajouter le paramètre ?convo_id="
+            f"{conv_id} pour que la conversation continue sur l'autre site."
+        )
     if meta_context:
         prompt_messages.append({"role": "system", "content": " ".join(meta_context)})
 
-    # Enfin, on concatène l'historique (user/assistant) tel que reçu
+    # Historique
     for msg in messages:
         role = msg.get("role")
         content = msg.get("content")
@@ -220,7 +227,6 @@ def append_conversation_log(
     Append un enregistrement dans un fichier JSONL par conversation.
     """
     if not conversation_id:
-        # fallback : timestamp basé
         conversation_id = f"conv_{int(time.time())}"
 
     path = os.path.join(CONVERSATIONS_LOG_DIR, f"{conversation_id}.jsonl")
@@ -242,7 +248,6 @@ def append_conversation_log(
 # ---------------------------------------------------------
 # ROUTAGE MARQUE (Runningman / Retroworld)
 # ---------------------------------------------------------
-
 
 def detect_brand_from_text(text: str, default: str = "runningman") -> str:
     """
@@ -346,7 +351,6 @@ def classify_conversation_brands(records: List[Dict[str, Any]]) -> Dict[str, Any
 # QWEEKLE – WEBHOOK (log brut pour l’instant)
 # ---------------------------------------------------------
 
-
 def append_qweekle_event(event_type: str, payload: Dict[str, Any]) -> None:
     """
     Log d'un événement Qweekle dans un fichier JSONL dédié par type d'event.
@@ -367,7 +371,6 @@ def append_qweekle_event(event_type: str, payload: Dict[str, Any]) -> None:
 # ---------------------------------------------------------
 # ENDPOINTS
 # ---------------------------------------------------------
-
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -413,7 +416,7 @@ def chat_route(brand: str):
     if brand_entry == "runningman":
         effective_brand = detect_brand_from_text(last_user_text, default="runningman")
 
-    # Metadata enrichi
+    # conversation_id : on fait confiance à ce que le front envoie
     conversation_id = metadata.get("conversation_id")
     if not conversation_id:
         conversation_id = f"{effective_brand}_{int(time.time() * 1000)}"
@@ -496,7 +499,6 @@ def qweekle_webhook():
     Réception des webhooks Qweekle.
     Pour l'instant : log brut, avec vérification du secret si défini.
     """
-    # optionnel : sécuriser avec un secret dans les headers
     if QWEEKLE_WEBHOOK_SECRET:
         incoming_secret = request.headers.get("X-Qweekle-Secret") or ""
         if incoming_secret != QWEEKLE_WEBHOOK_SECRET:
@@ -519,7 +521,6 @@ def qweekle_webhook():
 # ---------------------------------------------------------
 # ADMIN – API CONVERSATIONS
 # ---------------------------------------------------------
-
 
 @app.route("/admin/api/conversations", methods=["GET"])
 def admin_api_conversations():
@@ -561,7 +562,6 @@ def admin_api_conversations():
         if not records:
             continue
 
-        # Tri par timestamp
         records.sort(key=lambda r: r.get("timestamp") or 0.0)
         last = records[-1]
         ts = last.get("timestamp") or 0.0
@@ -570,11 +570,9 @@ def admin_api_conversations():
         meta = extra.get("metadata") or {}
         source = extra.get("source") or meta.get("source") or "unknown"
 
-        # résumé marque
         brand_info = classify_conversation_brands(records)
         brand_final = brand_info["brand_final"]
 
-        # preview du dernier message user
         preview = ""
         for rec in reversed(records):
             umsgs = rec.get("user_messages") or []
@@ -605,7 +603,6 @@ def admin_api_conversations():
 # ---------------------------------------------------------
 # ADMIN – INTERFACE HTML
 # ---------------------------------------------------------
-
 
 @app.route("/admin/conversations", methods=["GET"])
 def admin_conversations_page():
@@ -781,8 +778,8 @@ def admin_conversations_page():
     font-size: 11px;
   }
   @media (max-width: 768px) {
-    th:nth-child(2), td:nth-child(2) { display: none; }  /* canal */
-    th:nth-child(4), td:nth-child(4) { display: none; }  /* source */
+    th:nth-child(2), td:nth-child(2) { display: none; }
+    th:nth-child(4), td:nth-child(4) { display: none; }
   }
 </style>
 </head>
