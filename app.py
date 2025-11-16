@@ -1,35 +1,18 @@
 import os
 import json
+import time
 import logging
-import uuid
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-from flask import Flask, request, jsonify, Response, abort
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import urllib.request
-import urllib.error
+import urllib.parse
 
-# =========================================================
-# CONFIG GLOBALE & VARIABLES D’ENVIRONNEMENT
-# =========================================================
-# À définir dans Render (Environment) :
-#
-# OPENAI_API_KEY=...
-# OPENAI_MODEL=gpt-4.1-mini        (optionnel)
-# PUBLIC_BASE_URL=https://retroworld-ia.onrender.com
-#
-# ADMIN_DASHBOARD_TOKEN=...        (ou ADMIN_API_TOKEN=...)
-#
-# VONAGE_NUMBER_RETROWORLD=+33...
-# VONAGE_NUMBER_RUNNINGMAN=+33...  (optionnel)
-#
-# FORWARD_NUMBER_RETROWORLD=+33...
-# FORWARD_NUMBER_RUNNINGMAN=+33...
-#
-# (si FORWARD_NUMBER_* absents, on peut réutiliser
-#  FORWARD_NUMBERS_* existants en prenant le 1er numéro)
-# =========================================================
+# ---------------------------------------------------------
+# CONFIG GLOBALE
+# ---------------------------------------------------------
 
 app = Flask(__name__)
 CORS(app)
@@ -37,800 +20,938 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("retroworld-ia")
 
+# Dossiers de base
+BASE_DATA_DIR = "/mnt/data"
+BASE_APP_DIR = "/app"
+
+BASE_LOG_DIR = os.getenv("LOG_DIR", os.path.join(BASE_DATA_DIR, "logs"))
+CONVERSATIONS_LOG_DIR = os.path.join(BASE_LOG_DIR, "conversations")
+QWEEKLE_LOG_DIR = os.path.join(BASE_LOG_DIR, "qweekle")
+
+for d in [BASE_LOG_DIR, CONVERSATIONS_LOG_DIR, QWEEKLE_LOG_DIR]:
+    os.makedirs(d, exist_ok=True)
+
 # OpenAI
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_MODEL_DEFAULT = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")  # adapte si besoin
 
-# URL publique (Render)
-PUBLIC_BASE_URL = (os.getenv("PUBLIC_BASE_URL") or "").rstrip("/")
+# Admin
+ADMIN_DASHBOARD_TOKEN = os.getenv("ADMIN_DASHBOARD_TOKEN", "changeme_admin_token")
 
-# Marques gérées
-ALLOWED_BRANDS = {"retroworld", "runningman"}
+# Qweekle (webhook uniquement pour l’instant)
+QWEEKLE_WEBHOOK_SECRET = os.getenv("QWEEKLE_WEBHOOK_SECRET", "")
+QWEEKLE_SOURCE_NAME = os.getenv("QWEEKLE_SOURCE_NAME", "retroworld-qweekle")
 
-# Dossiers de log
-BASE_LOG_DIR = "/mnt/data/logs"
-CHAT_LOG_DIR = os.path.join(BASE_LOG_DIR, "chat")
-CALL_LOG_DIR = os.path.join(BASE_LOG_DIR, "calls")
-
-# Token admin (dashboard conversations)
-ADMIN_DASHBOARD_TOKEN = (
-    os.getenv("ADMIN_DASHBOARD_TOKEN")
-    or os.getenv("ADMIN_API_TOKEN")
-    or ""
-)
-
-# Numéros Vonage (numéros achetés chez Vonage)
-VONAGE_NUMBER_RETROWORLD = (os.getenv("VONAGE_NUMBER_RETROWORLD") or "").replace(" ", "")
-VONAGE_NUMBER_RUNNINGMAN = (os.getenv("VONAGE_NUMBER_RUNNINGMAN") or "").replace(" ", "")
-
-# Numéros de transfert vers humains
-FORWARD_NUMBER_RETROWORLD = os.getenv("FORWARD_NUMBER_RETROWORLD", "").replace(" ", "")
-FORWARD_NUMBER_RUNNINGMAN = os.getenv("FORWARD_NUMBER_RUNNINGMAN", "").replace(" ", "")
-
-# Compat avec anciennes variables (au cas où tu les as déjà)
-if not FORWARD_NUMBER_RETROWORLD:
-    plural = os.getenv("FORWARD_NUMBERS_RETROWORLD", "")
-    if plural:
-        FORWARD_NUMBER_RETROWORLD = plural.split(",")[0].strip()
-if not FORWARD_NUMBER_RUNNINGMAN:
-    plural = os.getenv("FORWARD_NUMBERS_RUNNINGMAN", "")
-    if plural:
-        FORWARD_NUMBER_RUNNINGMAN = plural.split(",")[0].strip()
-
-
-# =========================================================
-# OUTILS UTILITAIRES
-# =========================================================
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-
-def get_kb_paths(brand: str) -> Dict[str, str]:
-    filename = f"kb_{brand}.json"
-    return {
-        "mnt": os.path.join("/mnt/data", filename),
-        "app": os.path.join("/app", filename),
-    }
+# ---------------------------------------------------------
+# OUTILS GÉNÉRAUX
+# ---------------------------------------------------------
 
 
 def load_kb(brand: str) -> Dict[str, Any]:
     """
+    Charge la KB d'une marque :
     1) /mnt/data/kb_<brand>.json
     2) /app/kb_<brand>.json
-    3) KB minimale si rien trouvé
     """
-    paths = get_kb_paths(brand)
-
-    for label, path in paths.items():
-        try:
-            if os.path.exists(path):
+    brand = brand.lower()
+    candidates = [
+        os.path.join(BASE_DATA_DIR, f"kb_{brand}.json"),
+        os.path.join(BASE_APP_DIR, f"kb_{brand}.json"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
                 with open(path, "r", encoding="utf-8") as f:
-                    kb = json.load(f)
-                    logger.info("KB %s chargée depuis %s (%s)", brand, path, label)
-                    return kb
-        except Exception as e:
-            logger.error("Erreur chargement KB %s (%s): %s", brand, path, e)
-
-    logger.warning("Aucune KB trouvée pour %s, utilisation KB minimale.", brand)
-    return {
-        "identite": {
-            "nom": brand,
-            "description": f"KB minimale pour {brand}",
-        },
-        "prompt": {
-            "instructions_generales": [
-                "Tu es l'assistant de cette marque.",
-                "Réponds de manière professionnelle, claire et cohérente avec les règles.",
-            ]
-        },
-        "anti_erreurs": {},
-    }
+                    return json.load(f)
+            except Exception as e:
+                logger.error("Erreur lecture KB %s: %s", path, e)
+    logger.warning("KB introuvable pour brand %s, utilisation d'une KB vide.", brand)
+    return {}
 
 
-def save_kb(brand: str, kb_data: Dict[str, Any]) -> str:
-    paths = get_kb_paths(brand)
-    target = paths["mnt"]
-    ensure_dir(os.path.dirname(target))
-    with open(target, "w", encoding="utf-8") as f:
+def save_kb(brand: str, kb_data: Dict[str, Any]) -> None:
+    """
+    Sauvegarde/écrase la KB d'une marque dans /mnt/data/kb_<brand>.json
+    (sans toucher à /app).
+    """
+    brand = brand.lower()
+    path = os.path.join(BASE_DATA_DIR, f"kb_{brand}.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(kb_data, f, ensure_ascii=False, indent=2)
-    logger.info("KB %s sauvegardée dans %s", brand, target)
-    return target
+    logger.info("KB %s mise à jour dans %s", brand, path)
 
 
-def call_openai_chat(
-    messages: List[Dict[str, str]],
-    model: str = OPENAI_MODEL_DEFAULT,
-    temperature: float = 0.3,
-) -> str:
+def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any]]:
+    """
+    Appelle l'API OpenAI Chat. On passe une liste de messages.
+    Retourne (réponse_texte, usage_dict).
+    """
     if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY non défini.")
+        raise RuntimeError("OPENAI_API_KEY manquant")
 
-    payload = {"model": model, "messages": messages, "temperature": temperature}
-    data = json.dumps(payload).encode("utf-8")
+    url = "https://api.openai.com/v1/chat/completions"
+    payload = {
+        "model": OPENAI_MODEL,
+        "messages": messages,
+        "temperature": 0.4,
+    }
+    data_bytes = json.dumps(payload).encode("utf-8")
 
     req = urllib.request.Request(
-        OPENAI_API_URL,
-        data=data,
+        url,
+        data=data_bytes,
         headers={
-            "Content-Type": "application/json",
             "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json",
         },
         method="POST",
     )
 
-    try:
-        with urllib.request.urlopen(req) as resp:
-            body = resp.read().decode("utf-8")
-            obj = json.loads(body)
-            return obj["choices"][0]["message"]["content"]
-    except urllib.error.HTTPError as e:
-        logger.error("HTTPError OpenAI %s: %s", e.code, e.read().decode("utf-8", "ignore"))
-        raise
-    except Exception as e:
-        logger.error("Erreur OpenAI: %s", e)
-        raise
+    with urllib.request.urlopen(req) as resp:
+        body = resp.read().decode("utf-8")
+        obj = json.loads(body)
+
+    content = obj["choices"][0]["message"]["content"]
+    usage = obj.get("usage", {})
+    return content, usage
 
 
-def build_system_messages(brand: str, kb: Dict[str, Any], channel: str) -> List[Dict[str, str]]:
-    identite = kb.get("identite", {})
-    prompt = kb.get("prompt", {})
-    anti = kb.get("anti_erreurs", {})
+def build_prompt(
+    brand: str,
+    kb: Dict[str, Any],
+    messages: List[Dict[str, Any]],
+    metadata: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    """
+    Construit la liste de messages au format OpenAI Chat :
+    - un gros message system basé sur la KB
+    - éventuellement un message supplémentaire indiquant l'origine
+    - puis l'historique utilisateur/assistant reçu
+    """
+    brand = brand.lower()
 
-    nom = identite.get("nom", brand)
-    description = identite.get("description", "")
+    system_parts: List[str] = []
 
-    instructions_generales = prompt.get("instructions_generales", [])
-    style = prompt.get("style", "")
-    objectifs = prompt.get("objectifs", "")
+    identite = kb.get("identite")
+    if isinstance(identite, dict):
+        nom = identite.get("nom") or brand.title()
+        role = identite.get("role") or ""
+        system_parts.append(f"Tu es l'assistant IA de {nom}. {role}".strip())
+    elif isinstance(identite, str):
+        system_parts.append(identite)
 
-    kb_json = json.dumps(kb, ensure_ascii=False)
+    # prompt général
+    prompt_section = kb.get("prompt")
+    if isinstance(prompt_section, str):
+        system_parts.append(prompt_section)
+    elif isinstance(prompt_section, dict):
+        for v in prompt_section.values():
+            if isinstance(v, str) and v.strip():
+                system_parts.append(v.strip())
 
-    messages: List[Dict[str, str]] = [
-        {
-            "role": "system",
-            "content": (
-                f"Tu es l'assistant IA officiel de {nom}."
-                f" Description : {description}."
-                f" Canal : {channel}."
-                " Respecte strictement la base de connaissance JSON fournie."
-            ),
-        },
-        {
-            "role": "system",
-            "content": f"Style : {style}. Objectifs : {objectifs}.",
-        },
-        {
-            "role": "system",
-            "content": "Instructions générales :\n" + "\n".join(instructions_generales),
-        },
-        {
-            "role": "system",
-            "content": "Règles anti-erreurs : " + json.dumps(anti, ensure_ascii=False),
-        },
-        {
-            "role": "system",
-            "content": "BASE_DE_CONNAISSANCE_JSON:\n" + kb_json,
-        },
-    ]
+    # instructions globales éventuelles
+    instr = kb.get("instructions_generales")
+    if isinstance(instr, list):
+        for item in instr:
+            if isinstance(item, str):
+                system_parts.append(item)
+    elif isinstance(instr, str):
+        system_parts.append(instr)
 
-    if channel == "phone":
-        messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "Tu es en conversation téléphonique. Parle avec des phrases courtes et claires. "
-                    "Ne lis jamais les URLs à voix haute. "
-                    "Si tu dois envoyer un lien (paiement, réservation), indique seulement que le client "
-                    "le recevra par SMS ou email. "
-                    "Si l'appelant demande clairement un humain, écris exactement [[ACTION:TRANSFER_HUMAN]] "
-                    "sur une ligne séparée dans ta réponse."
-                ),
-            }
+    # On précise l'info sur brand d'entrée/effective si présente
+    brand_entry = metadata.get("brand_entry")
+    brand_effective = metadata.get("brand_effective")
+    if brand_entry and brand_effective and brand_entry != brand_effective:
+        system_parts.append(
+            f"La conversation vient d'un canal associé à '{brand_entry}', "
+            f"mais tu dois répondre en utilisant les règles et tarifs de '{brand_effective}'. "
+            "Explique clairement au client s'il s'agit de Retroworld (VR, quiz, salle enfant) "
+            "ou Runningman (action game, mini-jeux physiques)."
         )
 
-    return messages
+    # Empêche l'invention de prix / promos / liens
+    anti_err = kb.get("anti_erreurs")
+    if isinstance(anti_err, list):
+        for item in anti_err:
+            if isinstance(item, str):
+                system_parts.append(item)
+    elif isinstance(anti_err, str):
+        system_parts.append(anti_err)
 
+    # Contexte final system
+    system_text = "\n\n".join([p for p in system_parts if p.strip()])
 
-# =========================================================
-# LOGS CONVERSATIONS (WEB + TÉLÉPHONE)
-# =========================================================
+    prompt_messages: List[Dict[str, str]] = []
+    if system_text:
+        prompt_messages.append({"role": "system", "content": system_text})
 
-def get_conversation_log_path(conversation_id: str, channel: str) -> str:
-    ensure_dir(BASE_LOG_DIR)
-    if channel == "phone":
-        ensure_dir(CALL_LOG_DIR)
-        return os.path.join(CALL_LOG_DIR, f"{conversation_id}.jsonl")
-    ensure_dir(CHAT_LOG_DIR)
-    return os.path.join(CHAT_LOG_DIR, f"{conversation_id}.jsonl")
+    # On ajoute aussi un éventuel message "context" avec métadonnées basiques
+    meta_context = []
+    if metadata.get("source"):
+        meta_context.append(f"Source de la demande : {metadata['source']}.")
+    if metadata.get("page_url"):
+        meta_context.append(f"URL de la page : {metadata['page_url']}.")
+    if meta_context:
+        prompt_messages.append({"role": "system", "content": " ".join(meta_context)})
+
+    # Enfin, on concatène l'historique (user/assistant) tel que reçu
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content")
+        if not role or not content:
+            continue
+        if role not in ("user", "assistant", "system"):
+            continue
+        prompt_messages.append({"role": role, "content": str(content)})
+
+    return prompt_messages
 
 
 def append_conversation_log(
-    conversation_id: str,
+    conversation_id: Optional[str],
     brand: str,
     channel: str,
-    role: str,
-    content: str,
+    user_messages: List[Dict[str, Any]],
+    assistant_reply: str,
     extra: Optional[Dict[str, Any]] = None,
 ) -> None:
-    path = get_conversation_log_path(conversation_id, channel)
-    rec: Dict[str, Any] = {
-        "timestamp": now_iso(),
+    """
+    Append un enregistrement dans un fichier JSONL par conversation.
+    """
+    if not conversation_id:
+        # fallback : timestamp basé
+        conversation_id = f"conv_{int(time.time())}"
+
+    path = os.path.join(CONVERSATIONS_LOG_DIR, f"{conversation_id}.jsonl")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    record = {
+        "timestamp": time.time(),
         "conversation_id": conversation_id,
         "brand": brand,
         "channel": channel,
-        "role": role,
-        "content": content,
+        "user_messages": user_messages,
+        "assistant_reply": assistant_reply,
+        "extra": extra or {},
     }
-    if extra:
-        rec.update(extra)
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def load_conversation(conversation_id: str) -> Tuple[List[Dict[str, Any]], str]:
-    for channel in ("web", "phone"):
-        path = get_conversation_log_path(conversation_id, channel)
-        if os.path.exists(path):
-            out: List[Dict[str, Any]] = []
-            with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        out.append(json.loads(line))
-                    except Exception:
-                        continue
-            return out, channel
-    return [], ""
+# ---------------------------------------------------------
+# ROUTAGE MARQUE (Runningman / Retroworld)
+# ---------------------------------------------------------
 
 
-def list_conversations_summary() -> List[Dict[str, Any]]:
-    summaries: List[Dict[str, Any]] = []
+def detect_brand_from_text(text: str, default: str = "runningman") -> str:
+    """
+    Détecte si une demande parle plutôt de Retroworld (VR, quiz, salle enfant)
+    ou de Runningman (action game, mini-jeux physiques).
+    """
+    if not text:
+        return default
 
-    for channel, base_dir in (("web", CHAT_LOG_DIR), ("phone", CALL_LOG_DIR)):
-        if not os.path.isdir(base_dir):
-            continue
-        for filename in os.listdir(base_dir):
-            if not filename.endswith(".jsonl"):
-                continue
-            path = os.path.join(base_dir, filename)
-            conv_id = filename[:-6]
+    t = text.lower()
 
-            first = None
-            last = None
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            rec = json.loads(line)
-                        except Exception:
-                            continue
-                        if first is None:
-                            first = rec
-                        last = rec
-            except Exception:
-                continue
+    # Mots-clés typiques Retroworld
+    retro_keywords = [
+        "vr",
+        "réalité virtuelle",
+        "realite virtuelle",
+        "escape vr",
+        "escape game vr",
+        "jeux vr",
+        "jeu vr",
+        "casque vr",
+        "quiz",
+        "quizz",
+        "quiz interactif",
+        "salle enfant",
+        "mur interactif",
+        "anniversaire vr",
+        "retroworld",
+        "rétroworld",
+        "fidélité",
+        "fidelite",
+        "carte de fidélité",
+        "points fidélité",
+        "points de fidelite",
+    ]
 
-            if not first or not last:
-                continue
+    # Mots-clés typiques Runningman
+    running_keywords = [
+        "action game",
+        "game zone",
+        "runningman",
+        "running man",
+        "mini-jeux",
+        "mini jeux",
+        "parcours",
+        "parcour",
+        "salle runningman",
+        "gilet",
+        "capteur",
+        "mission physique",
+    ]
 
-            summaries.append(
-                {
-                    "conversation_id": conv_id,
-                    "channel": channel,
-                    "brand": first.get("brand", ""),
-                    "start": first.get("timestamp"),
-                    "end": last.get("timestamp"),
-                    "last_role": last.get("role"),
-                    "last_snippet": (last.get("content") or "")[:160],
-                }
-            )
+    retro_score = sum(1 for k in retro_keywords if k in t)
+    running_score = sum(1 for k in running_keywords if k in t)
 
-    summaries.sort(key=lambda s: s.get("end") or "", reverse=True)
-    return summaries
-
-
-# =========================================================
-# DÉTECTION MARQUE & NUMÉROS
-# =========================================================
-
-def detect_brand_from_to_number(to_number: str) -> str:
-    num = (to_number or "").replace(" ", "")
-    if VONAGE_NUMBER_RETROWORLD and num == VONAGE_NUMBER_RETROWORLD:
+    if retro_score > running_score and retro_score > 0:
         return "retroworld"
-    if VONAGE_NUMBER_RUNNINGMAN and num == VONAGE_NUMBER_RUNNINGMAN:
+    if running_score > retro_score and running_score > 0:
         return "runningman"
-    return "retroworld"  # défaut
+
+    if "retroworld" in t or "rétroworld" in t:
+        return "retroworld"
+    if "runningman" in t or "running man" in t:
+        return "runningman"
+
+    return default
 
 
-def get_forward_number_for_brand(brand: str) -> str:
-    if brand == "runningman" and FORWARD_NUMBER_RUNNINGMAN:
-        return FORWARD_NUMBER_RUNNINGMAN
-    return FORWARD_NUMBER_RETROWORLD or "+33494479464"
+def classify_conversation_brands(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Analyse les enregistrements d'une conversation pour déterminer :
+      - brand_final : "runningman", "retroworld", "mixed" ou "unknown"
+      - brands_seen : liste des marques rencontrées
+    L'intention finale est la dernière marque effective vue.
+    """
+    brands_seen = set()
+    last_effective = None
+
+    for rec in records:
+        extra = rec.get("extra") or {}
+        meta = extra.get("metadata") or {}
+        be = extra.get("brand_effective") or meta.get("brand_effective") or rec.get("brand")
+        if be in ("runningman", "retroworld"):
+            brands_seen.add(be)
+            last_effective = be
+
+    if not brands_seen:
+        return {"brand_final": "unknown", "brands_seen": []}
+
+    if len(brands_seen) == 1:
+        return {"brand_final": list(brands_seen)[0], "brands_seen": list(brands_seen)}
+
+    brand_final = last_effective or "mixed"
+    if brand_final not in ("runningman", "retroworld"):
+        brand_final = "mixed"
+
+    return {"brand_final": brand_final, "brands_seen": list(brands_seen)}
 
 
-# =========================================================
-# ENDPOINTS GÉNÉRAUX
-# =========================================================
+# ---------------------------------------------------------
+# QWEEKLE – WEBHOOK (log brut pour l’instant)
+# ---------------------------------------------------------
+
+
+def append_qweekle_event(event_type: str, payload: Dict[str, Any]) -> None:
+    """
+    Log d'un événement Qweekle dans un fichier JSONL dédié par type d'event.
+    """
+    fname = f"{event_type or 'unknown'}.jsonl"
+    path = os.path.join(QWEEKLE_LOG_DIR, fname)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    record = {
+        "timestamp": time.time(),
+        "event_type": event_type,
+        "payload": payload,
+        "source": QWEEKLE_SOURCE_NAME,
+    }
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+# ---------------------------------------------------------
+# ENDPOINTS
+# ---------------------------------------------------------
+
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok"}), 200
+    return jsonify({"status": "ok", "time": time.time()}), 200
 
-
-# =========================================================
-# CHAT WEB : /chat/<brand>
-# =========================================================
 
 @app.route("/chat/<brand>", methods=["POST"])
-def chat_brand(brand: str):
+def chat_route(brand: str):
     """
-    Endpoint pour le chat web (Retroworld / Runningman).
-
-    JSON attendu :
-    {
-      "messages": [ { "role": "user"|"assistant", "content": "..." }, ... ],
-      "metadata": { "conversation_id": "...", ... } (optionnel)
-    }
+    Endpoint générique de chat :
+    - /chat/retroworld
+    - /chat/runningman
+    Pour runningman, on route automatiquement vers Retroworld si la demande
+    porte clairement sur VR / quiz / salle enfant.
     """
-    brand = brand.lower()
-    if brand not in ALLOWED_BRANDS:
-        return jsonify({"error": "Marque inconnue.", "allowed_brands": list(ALLOWED_BRANDS)}), 400
-
     try:
         body = request.get_json(force=True)
     except Exception:
-        return jsonify({"error": "JSON invalide."}), 400
+        return jsonify({"error": "invalid_json"}), 400
 
     if not isinstance(body, dict):
-        return jsonify({"error": "Corps JSON invalide."}), 400
+        return jsonify({"error": "invalid_payload"}), 400
 
-    user_messages = body.get("messages")
+    messages = body.get("messages") or []
     metadata = body.get("metadata") or {}
+    if not isinstance(messages, list):
+        return jsonify({"error": "messages must be a list"}), 400
+    if not isinstance(metadata, dict):
+        metadata = {}
 
-    if not user_messages or not isinstance(user_messages, list):
-        return jsonify({"error": "'messages' (liste) est requis."}), 400
+    brand_entry = (brand or "").lower()
+    if brand_entry not in ("retroworld", "runningman"):
+        return jsonify({"error": "unknown_brand"}), 404
 
-    # conversation_id type tawk.to
-    conversation_id = metadata.get("conversation_id") or str(uuid.uuid4())
-    metadata["conversation_id"] = conversation_id
-
-    kb = load_kb(brand)
-    system_messages = build_system_messages(brand, kb, channel="web")
-
-    messages_for_openai = system_messages + user_messages
-
-    try:
-        assistant_reply = call_openai_chat(messages_for_openai, temperature=0.3)
-    except Exception as e:
-        logger.error("Erreur OpenAI chat %s: %s", brand, e)
-        return jsonify({"error": "Erreur IA interne."}), 500
-
-    # log dernier message user + réponse
-    last_user = ""
-    for msg in reversed(user_messages):
-        if msg.get("role") == "user":
-            last_user = msg.get("content", "")
+    # Dernier message user
+    last_user_text = ""
+    for msg in reversed(messages):
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            last_user_text = str(msg.get("content") or "")
             break
 
-    if last_user:
-        append_conversation_log(
-            conversation_id,
-            brand=brand,
-            channel="web",
-            role="user",
-            content=last_user,
-            extra={"metadata": metadata},
-        )
+    effective_brand = brand_entry
+    if brand_entry == "runningman":
+        effective_brand = detect_brand_from_text(last_user_text, default="runningman")
 
-    append_conversation_log(
-        conversation_id,
-        brand=brand,
-        channel="web",
-        role="assistant",
-        content=assistant_reply,
-        extra={"metadata": metadata},
-    )
+    # Metadata enrichi
+    conversation_id = metadata.get("conversation_id")
+    if not conversation_id:
+        conversation_id = f"{effective_brand}_{int(time.time() * 1000)}"
+        metadata["conversation_id"] = conversation_id
+
+    metadata["brand_entry"] = brand_entry
+    metadata["brand_effective"] = effective_brand
+
+    # Chargement KB
+    kb = load_kb(effective_brand)
+
+    # Prompt
+    try:
+        prompt_messages = build_prompt(effective_brand, kb, messages, metadata)
+    except Exception as e:
+        logger.error("Erreur build_prompt: %s", e)
+        return jsonify({"error": "prompt_build_failed"}), 500
+
+    # Appel OpenAI
+    try:
+        reply_text, usage = call_openai_chat(prompt_messages)
+    except Exception as e:
+        logger.error("Erreur OpenAI: %s", e)
+        return jsonify({"error": "openai_error", "details": str(e)}), 502
+
+    # Logs
+    try:
+        channel = metadata.get("source") or "web"
+        append_conversation_log(
+            conversation_id=conversation_id,
+            brand=effective_brand,
+            channel=channel,
+            user_messages=messages,
+            assistant_reply=reply_text,
+            extra={
+                "brand_entry": brand_entry,
+                "brand_effective": effective_brand,
+                "metadata": metadata,
+                "openai_usage": usage,
+            },
+        )
+    except Exception as e:
+        logger.error("Erreur append_conversation_log: %s", e)
 
     return jsonify(
         {
-            "reply": assistant_reply,
-            "brand": brand,
-            "conversation_id": conversation_id,
-            "metadata": metadata,
+            "reply": reply_text,
+            "brand_used": effective_brand,
+            "brand_entry": brand_entry,
         }
     ), 200
 
 
-# =========================================================
-# KB UPSERT
-# =========================================================
-
 @app.route("/kb/upsert/<brand>", methods=["POST"])
 def kb_upsert(brand: str):
-    brand = brand.lower()
-    if brand not in ALLOWED_BRANDS:
-        return jsonify({"error": "Marque inconnue."}), 400
-
+    """
+    Met à jour (ou crée) la KB d'une marque.
+    Écrit dans /mnt/data/kb_<brand>.json
+    """
     try:
-        kb = request.get_json(force=True)
+        body = request.get_json(force=True)
     except Exception:
-        return jsonify({"error": "JSON invalide."}), 400
+        return jsonify({"error": "invalid_json"}), 400
 
-    if not isinstance(kb, dict):
-        return jsonify({"error": "La KB doit être un objet JSON."}), 400
-
-    try:
-        path = save_kb(brand, kb)
-    except Exception as e:
-        logger.error("Erreur sauvegarde KB %s: %s", brand, e)
-        return jsonify({"error": "Impossible de sauvegarder la KB."}), 500
-
-    return jsonify({"status": "ok", "brand": brand, "saved_to": path}), 200
-
-
-# =========================================================
-# PARTIE TÉLÉPHONE / VONAGE
-# =========================================================
-
-@app.route("/voice/incoming", methods=["POST"])
-def voice_incoming():
-    """
-    Answer URL Vonage.
-    Renvoie une NCCO (JSON) : message de bienvenue + attente de parole.
-    """
-    data = request.get_json(force=True, silent=True) or {}
-    logger.info("Vonage incoming: %s", data)
-
-    to_num = data.get("to") or data.get("to_number", "")
-    from_num = data.get("from") or data.get("from_number", "")
-    call_uuid = data.get("uuid") or data.get("conversation_uuid") or str(uuid.uuid4())
-
-    brand = detect_brand_from_to_number(str(to_num))
-    kb = load_kb(brand)
-    nom = kb.get("identite", {}).get("nom", brand.capitalize())
-
-    append_conversation_log(
-        call_uuid,
-        brand=brand,
-        channel="phone",
-        role="system",
-        content="CALL_STARTED",
-        extra={"from": from_num, "to": to_num},
-    )
-
-    base_url = PUBLIC_BASE_URL or request.url_root.rstrip("/")
-    event_url = f"{base_url}/voice/assistant?brand={brand}"
-
-    greeting = (
-        f"Bonjour, vous êtes bien chez {nom}. "
-        "Je suis l'assistant vocal. Dites-moi en quelques mots ce que vous souhaitez : "
-        "par exemple réserver une partie, organiser un anniversaire ou avoir des informations."
-    )
-
-    ncco = [
-        {"action": "talk", "text": greeting, "language": "fr-FR"},
-        {
-            "action": "input",
-            "type": ["speech"],
-            "speech": {"language": "fr-FR", "endOnSilence": 1},
-            "eventUrl": [event_url],
-        },
-    ]
-    return jsonify(ncco), 200
-
-
-@app.route("/voice/assistant", methods=["POST"])
-def voice_assistant():
-    """
-    Event URL Vonage pour les résultats de reconnaissance vocale.
-    Reçoit le texte, appelle OpenAI, renvoie une nouvelle NCCO.
-    """
-    event = request.get_json(force=True, silent=True) or {}
-    logger.info("Vonage assistant event: %s", event)
-
-    brand = request.args.get("brand", "retroworld").lower()
-    if brand not in ALLOWED_BRANDS:
-        brand = "retroworld"
-
-    call_uuid = (
-        event.get("uuid")
-        or event.get("conversation_uuid")
-        or event.get("call_uuid")
-        or str(uuid.uuid4())
-    )
-    from_num = event.get("from") or ""
-    to_num = event.get("to") or ""
-
-    # texte reconnu
-    speech = event.get("speech") or {}
-    results = speech.get("results") or []
-    transcript = ""
-    if results and isinstance(results, list):
-        transcript = results[0].get("text", "") or ""
-
-    if not transcript.strip():
-        base_url = PUBLIC_BASE_URL or request.url_root.rstrip("/")
-        event_url = f"{base_url}/voice/assistant?brand={brand}"
-        ncco = [
-            {
-                "action": "talk",
-                "text": "Je n'ai pas bien compris. Pouvez-vous répéter, s'il vous plaît ?",
-                "language": "fr-FR",
-            },
-            {
-                "action": "input",
-                "type": ["speech"],
-                "speech": {"language": "fr-FR", "endOnSilence": 1},
-                "eventUrl": [event_url],
-            },
-        ]
-        return jsonify(ncco), 200
-
-    append_conversation_log(
-        call_uuid,
-        brand=brand,
-        channel="phone",
-        role="user",
-        content=transcript,
-        extra={"from": from_num, "to": to_num},
-    )
-
-    kb = load_kb(brand)
-    system_messages = build_system_messages(brand, kb, channel="phone")
-
-    # petit historique
-    old_records, _ = load_conversation(call_uuid)
-    history: List[Dict[str, str]] = []
-    for rec in old_records:
-        if rec.get("channel") != "phone":
-            continue
-        role = rec.get("role")
-        content = rec.get("content", "")
-        if role in ("user", "assistant"):
-            history.append({"role": role, "content": content})
-
-    messages = system_messages + history + [{"role": "user", "content": transcript}]
+    if not isinstance(body, dict):
+        return jsonify({"error": "invalid_kb"}), 400
 
     try:
-        assistant_reply = call_openai_chat(messages, temperature=0.4)
+        save_kb(brand, body)
     except Exception as e:
-        logger.error("Erreur IA téléphone %s: %s", call_uuid, e)
-        text = (
-            "Je rencontre un problème technique pour le moment. "
-            "Je vous invite à rappeler un peu plus tard ou à nous contacter via le site Retroworld France."
-        )
-        append_conversation_log(
-            call_uuid,
-            brand=brand,
-            channel="phone",
-            role="assistant",
-            content=text,
-            extra={"error": str(e)},
-        )
-        return jsonify([{"action": "talk", "text": text, "language": "fr-FR"}]), 200
+        logger.error("Erreur save_kb(%s): %s", brand, e)
+        return jsonify({"error": "kb_save_failed"}), 500
 
-    append_conversation_log(
-        call_uuid,
-        brand=brand,
-        channel="phone",
-        role="assistant",
-        content=assistant_reply,
-        extra={},
-    )
-
-    # détection transfert humain
-    transfer_requested = "[[ACTION:TRANSFER_HUMAN]]" in assistant_reply
-    spoken_reply = assistant_reply.replace("[[ACTION:TRANSFER_HUMAN]]", "").strip()
-    if len(spoken_reply) > 800:
-        spoken_reply = spoken_reply[:800]
-
-    base_url = PUBLIC_BASE_URL or request.url_root.rstrip("/")
-    event_url = f"{base_url}/voice/assistant?brand={brand}"
-
-    if transfer_requested:
-        human_number = get_forward_number_for_brand(brand)
-        ncco = [
-            {
-                "action": "talk",
-                "text": spoken_reply
-                or "Je vous mets en relation avec un membre de l'équipe.",
-                "language": "fr-FR",
-            },
-            {
-                "action": "connect",
-                "endpoint": [{"type": "phone", "number": human_number}],
-            },
-        ]
-        return jsonify(ncco), 200
-
-    ncco = [
-        {"action": "talk", "text": spoken_reply, "language": "fr-FR"},
-        {
-            "action": "input",
-            "type": ["speech"],
-            "speech": {"language": "fr-FR", "endOnSilence": 1},
-            "eventUrl": [event_url],
-        },
-    ]
-    return jsonify(ncco), 200
+    return jsonify({"status": "ok", "brand": brand}), 200
 
 
-@app.route("/voice/events", methods=["POST"])
-def voice_events():
-    event = request.get_json(force=True, silent=True) or {}
-    logger.info("Vonage event: %s", event)
-    call_uuid = (
-        event.get("uuid")
-        or event.get("conversation_uuid")
-        or event.get("call_uuid")
-        or ""
-    )
-    if call_uuid:
-        append_conversation_log(
-            call_uuid,
-            brand="retroworld",
-            channel="phone",
-            role="system",
-            content=f"EVENT:{event.get('status') or ''}",
-            extra={"raw": event},
-        )
-    return "", 204
+@app.route("/webhooks/qweekle", methods=["POST"])
+def qweekle_webhook():
+    """
+    Réception des webhooks Qweekle.
+    Pour l'instant : log brut, avec vérification du secret si défini.
+    """
+    # optionnel : sécuriser avec un secret dans les headers
+    if QWEEKLE_WEBHOOK_SECRET:
+        incoming_secret = request.headers.get("X-Qweekle-Secret") or ""
+        if incoming_secret != QWEEKLE_WEBHOOK_SECRET:
+            logger.warning("Webhook Qweekle rejeté (secret invalide)")
+            return jsonify({"error": "forbidden"}), 403
+
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid_json"}), 400
+
+    event_type = payload.get("event_type") or payload.get("type") or "unknown"
+    logger.info("Webhook Qweekle reçu: %s", event_type)
+    append_qweekle_event(event_type, payload)
+
+    # TODO plus tard : traitement booking.created, sale.created, etc.
+    return jsonify({"status": "ok", "event_type": event_type}), 200
 
 
-@app.route("/voice/fallback", methods=["POST"])
-def voice_fallback():
-    data = request.get_json(force=True, silent=True) or {}
-    logger.error("Vonage FALLBACK: %s", data)
-    text = (
-        "Nous rencontrons un problème temporaire avec le service automatique. "
-        "Merci de rappeler un peu plus tard ou de nous contacter via le site internet."
-    )
-    return jsonify([{"action": "talk", "text": text, "language": "fr-FR"}]), 200
+# ---------------------------------------------------------
+# ADMIN – API CONVERSATIONS
+# ---------------------------------------------------------
 
 
-# =========================================================
-# DASHBOARD ADMIN SIMPLE (type Tawk minimal)
-# =========================================================
-
-def require_admin_token() -> None:
-    if not ADMIN_DASHBOARD_TOKEN:
-        return
-    token = request.args.get("token", "")
+@app.route("/admin/api/conversations", methods=["GET"])
+def admin_api_conversations():
+    """
+    Retourne la liste des conversations pour l'admin.
+    GET ?token=ADMIN_DASHBOARD_TOKEN
+    """
+    token = request.args.get("token") or ""
     if token != ADMIN_DASHBOARD_TOKEN:
-        abort(403)
+        return jsonify({"error": "forbidden"}), 403
+
+    convs: List[Dict[str, Any]] = []
+
+    if not os.path.isdir(CONVERSATIONS_LOG_DIR):
+        return jsonify(convs), 200
+
+    for fname in os.listdir(CONVERSATIONS_LOG_DIR):
+        if not fname.endswith(".jsonl"):
+            continue
+        fpath = os.path.join(CONVERSATIONS_LOG_DIR, fname)
+        conversation_id = fname.replace(".jsonl", "")
+
+        records: List[Dict[str, Any]] = []
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        records.append(rec)
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.error("Erreur lecture conversation %s: %s", conversation_id, e)
+            continue
+
+        if not records:
+            continue
+
+        # Tri par timestamp
+        records.sort(key=lambda r: r.get("timestamp") or 0.0)
+        last = records[-1]
+        ts = last.get("timestamp") or 0.0
+        channel = last.get("channel") or "web"
+        extra = last.get("extra") or {}
+        meta = extra.get("metadata") or {}
+        source = extra.get("source") or meta.get("source") or "unknown"
+
+        # résumé marque
+        brand_info = classify_conversation_brands(records)
+        brand_final = brand_info["brand_final"]
+
+        # preview du dernier message user
+        preview = ""
+        for rec in reversed(records):
+            umsgs = rec.get("user_messages") or []
+            for m in reversed(umsgs):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    preview = str(m.get("content") or "")
+                    break
+            if preview:
+                break
+        if len(preview) > 120:
+            preview = preview[:117] + "..."
+
+        convs.append(
+            {
+                "conversation_id": conversation_id,
+                "timestamp": ts,
+                "channel": channel,
+                "source": source,
+                "preview": preview,
+                "brand_final": brand_final,
+            }
+        )
+
+    convs.sort(key=lambda c: c["timestamp"], reverse=True)
+    return jsonify(convs), 200
+
+
+# ---------------------------------------------------------
+# ADMIN – INTERFACE HTML
+# ---------------------------------------------------------
 
 
 @app.route("/admin/conversations", methods=["GET"])
-def admin_conversations():
+def admin_conversations_page():
+    token = request.args.get("token") or ""
+    if token != ADMIN_DASHBOARD_TOKEN:
+        return "Forbidden", 403
+
+    return """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Admin IA – Conversations</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #020617;
+    --bg-card: #0b1120;
+    --border: #1f2937;
+    --text: #e5e7eb;
+    --muted: #9ca3af;
+    --accent: #38bdf8;
+    --brand-retro: #6366f1;
+    --brand-run: #22c55e;
+    --brand-mix: #f97316;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: radial-gradient(circle at top, #0f172a, #020617 55%);
+    color: var(--text);
+  }
+  .admin-shell {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px 16px 40px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  .title-block h1 {
+    margin: 0;
+    font-size: 24px;
+  }
+  .title-block p {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .chip {
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    background: rgba(15,23,42,0.9);
+    color: var(--muted);
+  }
+  .chip.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(56, 189, 248, 0.1);
+  }
+  .chip[data-brand="runningman"].active { border-color: var(--brand-run); color: var(--brand-run); }
+  .chip[data-brand="retroworld"].active { border-color: var(--brand-retro); color: var(--brand-retro); }
+  .chip[data-brand="mixed"].active { border-color: var(--brand-mix); color: var(--brand-mix); }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+    align-items: center;
+  }
+  .search-input {
+    flex: 1;
+    min-width: 200px;
+  }
+  .search-input input {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: #020617;
+    color: var(--text);
+    font-size: 13px;
+  }
+  .btn-small {
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    font-size: 12px;
+    background: #020617;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .btn-small:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .table-wrapper {
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: rgba(15,23,42,0.95);
+    overflow: hidden;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead {
+    background: #020617;
+  }
+  th, td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+  tr:hover td {
+    background: rgba(15,23,42,0.7);
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .badge-run { background: rgba(34,197,94,0.18); color: #4ade80; }
+  .badge-retro { background: rgba(99,102,241,0.18); color: #a5b4fc; }
+  .badge-mix { background: rgba(249,115,22,0.18); color: #fbbf24; }
+  .badge-unknown { background: rgba(148,163,184,0.18); color: #cbd5f5; }
+
+  .pill {
+    display: inline-flex;
+    border-radius: 999px;
+    padding: 2px 7px;
+    font-size: 11px;
+    color: var(--muted);
+    border: 1px solid rgba(148,163,184,0.3);
+  }
+  .pill-channel {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .preview {
+    color: var(--text);
+  }
+  .muted {
+    color: var(--muted);
+    font-size: 11px;
+  }
+  @media (max-width: 768px) {
+    th:nth-child(2), td:nth-child(2) { display: none; }  /* canal */
+    th:nth-child(4), td:nth-child(4) { display: none; }  /* source */
+  }
+</style>
+</head>
+<body>
+<div class="admin-shell">
+  <header>
+    <div class="title-block">
+      <h1>Conversations IA</h1>
+      <p>Vue d'ensemble des échanges Retroworld / Runningman (chat & téléphone).</p>
+    </div>
+    <div class="filters">
+      <button class="chip active" data-filter="all">Tout</button>
+      <button class="chip" data-filter="runningman" data-brand="runningman">Runningman</button>
+      <button class="chip" data-filter="retroworld" data-brand="retroworld">Retroworld</button>
+      <button class="chip" data-filter="mixed" data-brand="mixed">Mix des deux</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="search-input">
+      <input type="text" id="search" placeholder="Rechercher dans les questions, sources, IDs…" />
+    </div>
+    <button class="btn-small" id="btn-refresh">Rafraîchir</button>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 155px;">Date</th>
+          <th style="width: 85px;">Canal</th>
+          <th style="width: 120px;">Marque</th>
+          <th style="width: 150px;">Source</th>
+          <th>Dernière question / aperçu</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="5" class="muted">Chargement…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token") || "";
+  const rowsEl = document.getElementById("rows");
+  const searchInput = document.getElementById("search");
+  const btnRefresh = document.getElementById("btn-refresh");
+  const chips = Array.from(document.querySelectorAll(".chip"));
+
+  let allData = [];
+  let currentFilter = "all";
+  let searchTerm = "";
+
+  function formatDate(ts) {
+    if (!ts) return "";
+    try {
+      const d = new Date(ts * 1000);
+      return d.toLocaleString("fr-FR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    } catch(e) { return ""; }
+  }
+
+  function brandBadge(conv) {
+    const b = conv.brand_final;
+    if (b === "runningman") return '<span class="badge badge-run">Runningman</span>';
+    if (b === "retroworld") return '<span class="badge badge-retro">Retroworld</span>';
+    if (b === "mixed") return '<span class="badge badge-mix">Mix</span>';
+    return '<span class="badge badge-unknown">Inconnu</span>';
+  }
+
+  function channelPill(conv) {
+    const ch = (conv.channel || "web").toUpperCase();
+    return '<span class="pill pill-channel">' + ch + '</span>';
+  }
+
+  function sourcePill(conv) {
+    const s = conv.source || "n/a";
+    return '<span class="pill">' + s + '</span>';
+  }
+
+  function render() {
+    const term = searchTerm.trim().toLowerCase();
+    let filtered = allData.slice();
+
+    if (currentFilter !== "all") {
+      filtered = filtered.filter(c => {
+        if (currentFilter === "mixed") return c.brand_final === "mixed";
+        return c.brand_final === currentFilter;
+      });
+    }
+
+    if (term) {
+      filtered = filtered.filter(c =>
+        (c.preview && c.preview.toLowerCase().includes(term)) ||
+        (c.source && c.source.toLowerCase().includes(term)) ||
+        (c.conversation_id && c.conversation_id.toLowerCase().includes(term))
+      );
+    }
+
+    if (!filtered.length) {
+      rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Aucune conversation trouvée.</td></tr>';
+      return;
+    }
+
+    const html = filtered.map(c => `
+      <tr>
+        <td>
+          <div>${formatDate(c.timestamp)}</div>
+          <div class="muted">${c.conversation_id}</div>
+        </td>
+        <td>${channelPill(c)}</td>
+        <td>${brandBadge(c)}</td>
+        <td>${sourcePill(c)}</td>
+        <td>
+          <div class="preview">${c.preview || "<span class='muted'>(pas de message utilisateur)</span>"}</div>
+        </td>
+      </tr>
+    `).join("");
+    rowsEl.innerHTML = html;
+  }
+
+  async function loadData() {
+    rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Chargement…</td></tr>';
+    try {
+      const res = await fetch(`/admin/api/conversations?token=${encodeURIComponent(token)}`);
+      if (!res.ok) {
+        rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Erreur de chargement ('+res.status+')</td></tr>';
+        return;
+      }
+      allData = await res.json();
+      render();
+    } catch (e) {
+      console.error(e);
+      rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Erreur réseau.</td></tr>';
+    }
+  }
+
+  searchInput.addEventListener("input", function() {
+    searchTerm = this.value;
+    render();
+  });
+
+  btnRefresh.addEventListener("click", loadData);
+
+  chips.forEach(chip => {
+    chip.addEventListener("click", () => {
+      chips.forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      currentFilter = chip.getAttribute("data-filter") || "all";
+      render();
+    });
+  });
+
+  loadData();
+})();
+</script>
+</body>
+</html>
     """
-    Liste simple des conversations, style tableau HTML.
-    """
-    require_admin_token()
-    summaries = list_conversations_summary()
 
-    token_suffix = ""
-    if ADMIN_DASHBOARD_TOKEN:
-        token_suffix = f"?token={ADMIN_DASHBOARD_TOKEN}"
-
-    lines = [
-        "<!DOCTYPE html>",
-        "<html lang='fr'>",
-        "<head>",
-        "<meta charset='UTF-8'/>",
-        "<title>Conversations IA</title>",
-        "<style>",
-        "body{font-family:Arial,sans-serif;background:#101016;color:#f5f5f5;padding:20px;}",
-        "h1{margin-bottom:10px;}",
-        "table{width:100%;border-collapse:collapse;margin-top:10px;}",
-        "th,td{padding:8px 10px;border-bottom:1px solid #333;font-size:13px;}",
-        "th{background:#181820;text-align:left;}",
-        "tr:hover{background:#1d1d26;}",
-        "a{color:#4fc3f7;text-decoration:none;}",
-        "a:hover{text-decoration:underline;}",
-        ".tag{padding:2px 6px;border-radius:4px;font-size:11px;}",
-        ".tag-web{background:#2e7d32;}",
-        ".tag-phone{background:#c62828;}",
-        "</style>",
-        "</head>",
-        "<body>",
-        "<h1>Conversations IA Retroworld / Runningman</h1>",
-        f"<p>Total : {len(summaries)}</p>",
-        "<table>",
-        "<tr><th>ID</th><th>Canal</th><th>Marque</th><th>Début</th><th>Fin</th><th>Dernier rôle</th><th>Dernier message</th></tr>",
-    ]
-
-    for s in summaries:
-        conv_id = s["conversation_id"]
-        channel = s["channel"]
-        brand = s.get("brand", "")
-        start = s.get("start", "") or ""
-        end = s.get("end", "") or ""
-        last_role = s.get("last_role", "")
-        snippet = (s.get("last_snippet", "") or "").replace("<", "&lt;").replace(">", "&gt;")
-
-        tag_class = "tag-phone" if channel == "phone" else "tag-web"
-
-        lines.append(
-            "<tr>"
-            f"<td><a href='/admin/conversations/{conv_id}{token_suffix}'>{conv_id}</a></td>"
-            f"<td><span class='tag {tag_class}'>{channel}</span></td>"
-            f"<td>{brand}</td>"
-            f"<td>{start}</td>"
-            f"<td>{end}</td>"
-            f"<td>{last_role}</td>"
-            f"<td>{snippet}</td>"
-            "</tr>"
-        )
-
-    lines.extend(["</table>", "</body>", "</html>"])
-    return Response("\n".join(lines), mimetype="text/html")
-
-
-@app.route("/admin/conversations/<conversation_id>", methods=["GET"])
-def admin_conversation_detail(conversation_id: str):
-    """
-    Détail d’une conversation sous forme de bulles simples.
-    """
-    require_admin_token()
-    records, channel = load_conversation(conversation_id)
-    if not records:
-        return Response("<h1>Conversation introuvable</h1>", mimetype="text/html", status=404)
-
-    brand = records[0].get("brand", "")
-    lines = [
-        "<!DOCTYPE html>",
-        "<html lang='fr'>",
-        "<head>",
-        "<meta charset='UTF-8'/>",
-        f"<title>Conversation {conversation_id}</title>",
-        "<style>",
-        "body{font-family:Arial,sans-serif;background:#101016;color:#f5f5f5;padding:20px;}",
-        ".meta{font-size:13px;color:#bbb;margin-bottom:10px;}",
-        ".container{display:flex;flex-direction:column;gap:4px;}",
-        ".bubble{max-width:70%;padding:8px 12px;border-radius:10px;font-size:14px;white-space:pre-wrap;}",
-        ".user{background:#263238;align-self:flex-start;}",
-        ".assistant{background:#283593;align-self:flex-end;}",
-        ".system{background:#424242;align-self:center;font-size:11px;}",
-        ".ts{font-size:11px;color:#888;margin-bottom:4px;}",
-        "</style>",
-        "</head>",
-        "<body>",
-        f"<h1>Conversation {conversation_id}</h1>",
-        f"<div class='meta'>Canal : {channel} — Marque : {brand}</div>",
-        "<div class='container'>",
-    ]
-
-    for rec in records:
-        role = rec.get("role", "")
-        content = rec.get("content", "") or ""
-        ts = rec.get("timestamp", "")
-
-        safe_content = content.replace("<", "&lt;").replace(">", "&gt;")
-
-        if role == "user":
-            css = "user"
-        elif role == "assistant":
-            css = "assistant"
-        else:
-            css = "system"
-
-        if ts:
-            lines.append(f"<div class='ts'>{ts} — {role}</div>")
-        lines.append(f"<div class='bubble {css}'>{safe_content}</div>")
-
-    lines.extend(["</div>", "</body>", "</html>"])
-    return Response("\n".join(lines), mimetype="text/html")
-
-
-# =========================================================
-# MAIN LOCAL
-# =========================================================
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    port = int(os.getenv("PORT", "10000"))
+    app.run(host="0.0.0.0", port=port)
