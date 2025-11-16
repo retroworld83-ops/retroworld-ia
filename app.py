@@ -245,6 +245,30 @@ def append_conversation_log(
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def load_conversation_records(conversation_id: str) -> List[Dict[str, Any]]:
+    """
+    Lit tous les enregistrements d'une conversation (JSONL) et les renvoie triés par timestamp.
+    """
+    path = os.path.join(CONVERSATIONS_LOG_DIR, f"{conversation_id}.jsonl")
+    if not os.path.exists(path):
+        return []
+
+    records: List[Dict[str, Any]] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                records.append(rec)
+            except Exception:
+                continue
+
+    records.sort(key=lambda r: r.get("timestamp") or 0.0)
+    return records
+
+
 # ---------------------------------------------------------
 # ROUTAGE MARQUE (Runningman / Retroworld)
 # ---------------------------------------------------------
@@ -543,26 +567,10 @@ def admin_api_conversations():
         fpath = os.path.join(CONVERSATIONS_LOG_DIR, fname)
         conversation_id = fname.replace(".jsonl", "")
 
-        records: List[Dict[str, Any]] = []
-        try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                        records.append(rec)
-                    except Exception:
-                        continue
-        except Exception as e:
-            logger.error("Erreur lecture conversation %s: %s", conversation_id, e)
-            continue
-
+        records = load_conversation_records(conversation_id)
         if not records:
             continue
 
-        records.sort(key=lambda r: r.get("timestamp") or 0.0)
         last = records[-1]
         ts = last.get("timestamp") or 0.0
         channel = last.get("channel") or "web"
@@ -598,6 +606,28 @@ def admin_api_conversations():
 
     convs.sort(key=lambda c: c["timestamp"], reverse=True)
     return jsonify(convs), 200
+
+
+@app.route("/admin/api/conversation/<conversation_id>", methods=["GET"])
+def admin_api_conversation_detail(conversation_id: str):
+    """
+    Retourne le détail complet d'une conversation (tous les tours).
+    GET ?token=ADMIN_DASHBOARD_TOKEN
+    """
+    token = request.args.get("token") or ""
+    if token != ADMIN_DASHBOARD_TOKEN:
+        return jsonify({"error": "forbidden"}), 403
+
+    records = load_conversation_records(conversation_id)
+    if not records:
+        return jsonify({"error": "not_found"}), 404
+
+    return jsonify(
+        {
+            "conversation_id": conversation_id,
+            "records": records,
+        }
+    ), 200
 
 
 # ---------------------------------------------------------
@@ -781,6 +811,46 @@ def admin_conversations_page():
     th:nth-child(2), td:nth-child(2) { display: none; }
     th:nth-child(4), td:nth-child(4) { display: none; }
   }
+
+  .conv-detail {
+    margin-top: 18px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 45%), #020617;
+    padding: 14px;
+    max-height: 420px;
+    overflow: auto;
+  }
+  .conv-detail-title {
+    font-size: 13px;
+    margin-bottom: 8px;
+    color: var(--muted);
+  }
+  .bubble {
+    max-width: 75%;
+    margin-bottom: 8px;
+    padding: 7px 10px;
+    border-radius: 14px;
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+  }
+  .bubble-user {
+    margin-left: auto;
+    background: #1f2937;
+    border-bottom-right-radius: 4px;
+  }
+  .bubble-bot {
+    margin-right: auto;
+    background: #020617;
+    border: 1px solid #1f2937;
+    border-bottom-left-radius: 4px;
+  }
+  .meta-line {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
 </style>
 </head>
 <body>
@@ -821,6 +891,11 @@ def admin_conversations_page():
       </tbody>
     </table>
   </div>
+
+  <div class="conv-detail" id="convDetail">
+    <div class="conv-detail-title">Détail de la conversation</div>
+    <div class="muted">Cliquez sur une conversation dans le tableau pour voir le fil complet ici.</div>
+  </div>
 </div>
 
 <script>
@@ -831,10 +906,12 @@ def admin_conversations_page():
   const searchInput = document.getElementById("search");
   const btnRefresh = document.getElementById("btn-refresh");
   const chips = Array.from(document.querySelectorAll(".chip"));
+  const convDetail = document.getElementById("convDetail");
 
   let allData = [];
   let currentFilter = "all";
   let searchTerm = "";
+  let currentConvId = null;
 
   function formatDate(ts) {
     if (!ts) return "";
@@ -893,7 +970,7 @@ def admin_conversations_page():
     }
 
     const html = filtered.map(c => `
-      <tr>
+      <tr onclick="viewConversation('${c.conversation_id}')">
         <td>
           <div>${formatDate(c.timestamp)}</div>
           <div class="muted">${c.conversation_id}</div>
@@ -922,6 +999,46 @@ def admin_conversations_page():
     } catch (e) {
       console.error(e);
       rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Erreur réseau.</td></tr>';
+    }
+  }
+
+  window.viewConversation = async function(id) {
+    currentConvId = id;
+    convDetail.innerHTML = '<div class="conv-detail-title">Conversation ' + id + '</div><div class="muted">Chargement…</div>';
+    try {
+      const res = await fetch(`/admin/api/conversation/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`);
+      if (!res.ok) {
+        convDetail.innerHTML = '<div class="conv-detail-title">Conversation ' + id + '</div><div class="muted">Erreur de chargement ('+res.status+')</div>';
+        return;
+      }
+      const data = await res.json();
+      const records = data.records || [];
+      if (!records.length) {
+        convDetail.innerHTML = '<div class="conv-detail-title">Conversation ' + id + '</div><div class="muted">Aucun enregistrement pour cette conversation.</div>';
+        return;
+      }
+      let html = '<div class="conv-detail-title">Conversation ' + id + '</div>';
+      records.forEach(rec => {
+        const userMsgs = rec.user_messages || [];
+        const reply = rec.assistant_reply || "";
+        userMsgs
+          .filter(m => m.role === "user")
+          .forEach(m => {
+            html += '<div class="bubble bubble-user">' + (m.content || "") + '</div>';
+          });
+        if (reply) {
+          html += '<div class="bubble bubble-bot">' + reply + '</div>';
+        }
+        if (rec.timestamp) {
+          const d = new Date(rec.timestamp * 1000).toLocaleString("fr-FR");
+          html += '<div class="meta-line">' + d + '</div>';
+        }
+      });
+      convDetail.innerHTML = html;
+      convDetail.scrollTop = convDetail.scrollHeight;
+    } catch (e) {
+      console.error(e);
+      convDetail.innerHTML = '<div class="conv-detail-title">Conversation ' + id + '</div><div class="muted">Erreur réseau.</div>';
     }
   }
 
