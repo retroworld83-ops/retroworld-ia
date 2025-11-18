@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import urllib.request
+import urllib.error
 
 # ---------------------------------------------------------
 # CONFIG GLOBALE
@@ -41,6 +42,9 @@ ADMIN_DASHBOARD_TOKEN = os.getenv("ADMIN_DASHBOARD_TOKEN", "changeme_admin_token
 QWEEKLE_WEBHOOK_SECRET = os.getenv("QWEEKLE_WEBHOOK_SECRET", "")
 QWEEKLE_SOURCE_NAME = os.getenv("QWEEKLE_SOURCE_NAME", "retroworld-qweekle")
 
+# Marques supportées
+SUPPORTED_BRANDS = {"retroworld", "runningman"}
+
 
 # ---------------------------------------------------------
 # OUTILS GÉNÉRAUX
@@ -49,8 +53,8 @@ QWEEKLE_SOURCE_NAME = os.getenv("QWEEKLE_SOURCE_NAME", "retroworld-qweekle")
 def load_kb(brand: str) -> Dict[str, Any]:
     """
     Charge la KB d'une marque :
-    1) /mnt/data/kb_<brand>.json
-    2) /app/kb_<brand>.json
+    1) /mnt/data/kb_<brand>.json (prioritaire, version modifiable)
+    2) /app/kb_<brand>.json (version embarquée dans l'image)
     """
     brand = brand.lower()
     candidates = [
@@ -61,7 +65,9 @@ def load_kb(brand: str) -> Dict[str, Any]:
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    kb = json.load(f)
+                logger.info("KB chargée pour %s depuis %s", brand, path)
+                return kb
             except Exception as e:
                 logger.error("Erreur lecture KB %s: %s", path, e)
     logger.warning("KB introuvable pour brand %s, utilisation d'une KB vide.", brand)
@@ -107,10 +113,19 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
         method="POST",
     )
 
-    with urllib.request.urlopen(req) as resp:
-        body = resp.read().decode("utf-8")
-        obj = json.loads(body)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        # Log détaillé pour debug
+        err_body = e.read().decode("utf-8", errors="ignore")
+        logger.error("HTTPError OpenAI (%s): %s", e.code, err_body)
+        raise
+    except urllib.error.URLError as e:
+        logger.error("URLError OpenAI: %s", e)
+        raise
 
+    obj = json.loads(body)
     content = obj["choices"][0]["message"]["content"]
     usage = obj.get("usage", {})
     return content, usage
@@ -124,7 +139,7 @@ def build_prompt(
 ) -> List[Dict[str, str]]:
     """
     Construit la liste de messages au format OpenAI Chat :
-    - un gros message system basé sur la KB
+    - un gros message system basé sur la KB (+ fallback si KB vide)
     - un message de contexte (source, URL, conversation_id)
     - puis l'historique utilisateur/assistant reçu
     """
@@ -132,7 +147,8 @@ def build_prompt(
 
     system_parts: List[str] = []
 
-    identite = kb.get("identite")
+    # 1) Identité
+    identite = kb.get("identite") if isinstance(kb, dict) else None
     if isinstance(identite, dict):
         nom = identite.get("nom") or brand.title()
         role = identite.get("role") or ""
@@ -140,17 +156,19 @@ def build_prompt(
     elif isinstance(identite, str):
         system_parts.append(identite)
 
-    # prompt général
-    prompt_section = kb.get("prompt")
+    # 2) Prompt général détaillé
+    prompt_section = kb.get("prompt") if isinstance(kb, dict) else None
     if isinstance(prompt_section, str):
         system_parts.append(prompt_section)
     elif isinstance(prompt_section, dict):
-        for v in prompt_section.values():
+        # On parcourt dans l'ordre stable des clés pour que le comportement soit reproductible
+        for key in sorted(prompt_section.keys()):
+            v = prompt_section[key]
             if isinstance(v, str) and v.strip():
                 system_parts.append(v.strip())
 
-    # instructions globales éventuelles
-    instr = kb.get("instructions_generales")
+    # 3) Instructions générales éventuelles
+    instr = kb.get("instructions_generales") if isinstance(kb, dict) else None
     if isinstance(instr, list):
         for item in instr:
             if isinstance(item, str):
@@ -158,7 +176,7 @@ def build_prompt(
     elif isinstance(instr, str):
         system_parts.append(instr)
 
-    # Info sur brand d'entrée/effective
+    # 4) Rappel éventuel sur la marque d'entrée vs marque effective
     brand_entry = metadata.get("brand_entry")
     brand_effective = metadata.get("brand_effective")
     if brand_entry and brand_effective and brand_entry != brand_effective:
@@ -166,17 +184,35 @@ def build_prompt(
             f"La conversation vient d'un canal associé à '{brand_entry}', "
             f"mais tu dois répondre en utilisant les règles et tarifs de '{brand_effective}'. "
             "Explique clairement au client s'il s'agit de Retroworld (VR, quiz, salle enfant) "
-            "ou Runningman (action game, mini-jeux physiques)."
+            "ou de Runningman (action game, mini-jeux physiques)."
         )
 
-    # Anti erreurs éventuelles (pas d'invention de prix / promos / liens)
-    anti_err = kb.get("anti_erreurs")
+    # 5) Anti erreurs (pas d'invention de prix / promos / liens)
+    anti_err = kb.get("anti_erreurs") if isinstance(kb, dict) else None
     if isinstance(anti_err, list):
         for item in anti_err:
             if isinstance(item, str):
                 system_parts.append(item)
     elif isinstance(anti_err, str):
         system_parts.append(anti_err)
+
+    # 6) Fallback de sécurité si KB vide ou très courte
+    if not kb or not system_parts:
+        if brand == "retroworld":
+            system_parts.append(
+                "Tu es l'assistant officiel de Retroworld France à Draguignan. "
+                "Tu réponds en français, vouvoiement uniquement, sur les sujets suivants : "
+                "jeux VR, escape games VR, quiz interactif, salle enfant, anniversaires et fidélité. "
+                "Tu donnes toujours rapidement les prix, la durée et le nombre de joueurs possibles. "
+                "Si tu n'es pas sûr d'une information, tu le dis et proposes au client d'appeler Retroworld au 04 94 47 94 64."
+            )
+        elif brand == "runningman":
+            system_parts.append(
+                "Tu es l'assistant pour Runningman Game Zone. "
+                "Tu expliques que pour les informations précises (tarifs, réservations) concernant l'action game, "
+                "il faut contacter directement Runningman au 04 98 09 30 59 ou via leur site www.runningmangames.fr. "
+                "Tu peux néanmoins orienter le client vers Retroworld pour les activités VR, escape games VR, quiz et salle enfant."
+            )
 
     system_text = "\n\n".join([p for p in system_parts if p.strip()])
 
@@ -202,11 +238,11 @@ def build_prompt(
     if meta_context:
         prompt_messages.append({"role": "system", "content": " ".join(meta_context)})
 
-    # Historique
+    # Historique utilisateur / assistant
     for msg in messages:
         role = msg.get("role")
         content = msg.get("content")
-        if not role or not content:
+        if not role or content is None:
             continue
         if role not in ("user", "assistant", "system"):
             continue
@@ -396,6 +432,31 @@ def append_qweekle_event(event_type: str, payload: Dict[str, Any]) -> None:
 # ENDPOINTS
 # ---------------------------------------------------------
 
+@app.route("/", methods=["GET", "HEAD"])
+def root():
+    """
+    Petit endpoint racine pour les checks Render / humains.
+    Évite un 404 sur HEAD / et donne un aperçu rapide de l'état.
+    """
+    return jsonify(
+        {
+            "service": "retroworld-ia",
+            "status": "ok",
+            "time": time.time(),
+            "brands": list(SUPPORTED_BRANDS),
+        }
+    ), 200
+
+
+@app.route("/favicon.ico", methods=["GET"])
+def favicon():
+    """
+    Empêche les 404 gênants sur /favicon.ico dans les logs.
+    On ne renvoie pas d'icône pour l'instant.
+    """
+    return "", 204
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "time": time.time()}), 200
@@ -407,8 +468,14 @@ def chat_route(brand: str):
     Endpoint générique de chat :
     - /chat/retroworld
     - /chat/runningman
+
     Pour runningman, on route automatiquement vers Retroworld si la demande
     porte clairement sur VR / quiz / salle enfant.
+
+    Le même endpoint servira pour :
+    - le widget web,
+    - le téléphone (Vonage) : il suffit d'envoyer un 'source': 'phone' dans metadata,
+      et éventuellement un conversation_id partagé entre web et téléphone.
     """
     try:
         body = request.get_json(force=True)
@@ -426,7 +493,7 @@ def chat_route(brand: str):
         metadata = {}
 
     brand_entry = (brand or "").lower()
-    if brand_entry not in ("retroworld", "runningman"):
+    if brand_entry not in SUPPORTED_BRANDS:
         return jsonify({"error": "unknown_brand"}), 404
 
     # Dernier message user
@@ -436,6 +503,7 @@ def chat_route(brand: str):
             last_user_text = str(msg.get("content") or "")
             break
 
+    # Détermination de la marque effective
     effective_brand = brand_entry
     if brand_entry == "runningman":
         effective_brand = detect_brand_from_text(last_user_text, default="runningman")
@@ -452,7 +520,7 @@ def chat_route(brand: str):
     # Chargement KB
     kb = load_kb(effective_brand)
 
-    # Prompt
+    # Construction du prompt
     try:
         prompt_messages = build_prompt(effective_brand, kb, messages, metadata)
     except Exception as e:
@@ -1068,4 +1136,5 @@ def admin_conversations_page():
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
+    # Lancement du service Flask (web + futur assistant téléphone via même /chat/<brand>)
     app.run(host="0.0.0.0", port=port)
