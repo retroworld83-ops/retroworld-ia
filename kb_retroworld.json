@@ -66,7 +66,7 @@
       "description": "Salle enfant avec jeux en bois, mur interactif, balles, balayeuse et espace goûter. Idéale pour les anniversaires.",
       "capacite": {
         "joueurs_min": 1,
-        "joueurs_max": null
+        "joueurs_max": 5
       }
     }
   },
@@ -75,7 +75,7 @@
     "jeux_vr": {
       "standard": 15,
       "avant_11h": 20,
-      "apres_20h": 17,
+      "apres_20h": 20,
       "unite": "prix par joueur"
     },
     "escape_vr": {
