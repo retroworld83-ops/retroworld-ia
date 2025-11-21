@@ -1,3 +1,19 @@
+"""
+Flask application for the Retroworld conversational assistant.
+
+This file exposes REST endpoints for the chat experience, a simple administrative
+dashboard for reviewing past conversations, and webhook handlers.  It loads
+knowledge base (KB) JSON files on demand, routes chat requests to OpenAI’s
+Chat API, persists logs to disk, and rebuilds context when the front‑end
+provides only the latest user message.  The admin interface has been
+re‑designed to offer a more professional look and feel: search, filtering,
+and conversation detail views are now easier to use and visually cohesive.
+
+Most of the business logic (detecting brands, building prompts, logging
+conversations) is unchanged from the previous version – only the UI and
+structural layout have been refreshed to improve maintainability.
+"""
+
 import os
 import json
 import time
@@ -11,7 +27,7 @@ import urllib.request
 import urllib.error
 
 # ---------------------------------------------------------
-# CONFIG GLOBALE
+# CONFIGURATION
 # ---------------------------------------------------------
 
 app = Flask(__name__)
@@ -20,81 +36,101 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("retroworld-ia")
 
-# Dossiers de base
+# Base directories.  /mnt/data is writeable at runtime on Render and local
+# development; /app contains static assets baked into the image.
 BASE_DATA_DIR = "/mnt/data"
 BASE_APP_DIR = "/app"
 
 BASE_LOG_DIR = os.getenv("LOG_DIR", os.path.join(BASE_DATA_DIR, "logs"))
 CONVERSATIONS_LOG_DIR = os.path.join(BASE_LOG_DIR, "conversations")
 QWEEKLE_LOG_DIR = os.path.join(BASE_LOG_DIR, "qweekle")
-
-for d in [BASE_LOG_DIR, CONVERSATIONS_LOG_DIR, QWEEKLE_LOG_DIR]:
+for d in (BASE_LOG_DIR, CONVERSATIONS_LOG_DIR, QWEEKLE_LOG_DIR):
     os.makedirs(d, exist_ok=True)
 
-# OpenAI
+# OpenAI configuration.  You can override these via environment variables.
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")  # adapte si besoin
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
-# Admin
+# Admin dashboard security token.  Set this in your environment when deploying.
 ADMIN_DASHBOARD_TOKEN = os.getenv("ADMIN_DASHBOARD_TOKEN", "changeme_admin_token")
 
-# Qweekle (webhook uniquement pour l’instant)
+# Qweekle (booking system) settings – used only for webhook logging for now.
 QWEEKLE_WEBHOOK_SECRET = os.getenv("QWEEKLE_WEBHOOK_SECRET", "")
 QWEEKLE_SOURCE_NAME = os.getenv("QWEEKLE_SOURCE_NAME", "retroworld-qweekle")
 
-# Marques supportées
-SUPPORTED_BRANDS = {"retroworld", "runningman"}
+# Supported brands.  The chat endpoint enforces that the URL path matches one
+# of these strings and routes to the appropriate KB.
+SUPPORTED_BRANDS: set[str] = {"retroworld", "runningman"}
 
 
 # ---------------------------------------------------------
-# OUTILS GÉNÉRAUX
+# UTILITY FUNCTIONS
 # ---------------------------------------------------------
 
 def load_kb(brand: str) -> Dict[str, Any]:
-    """
-    Charge la KB d'une marque :
-    1) /mnt/data/kb_<brand>.json (prioritaire, version modifiable)
-    2) /app/kb_<brand>.json (version embarquée dans l'image)
+    """Load the knowledge base JSON for a given brand.
+
+    KBs live in two locations: /mnt/data/kb_<brand>.json (runtime modifiable)
+    and /app/kb_<brand>.json (baked into the container image).  If both exist,
+    the version in /mnt/data overrides the embedded one.  If neither exists,
+    an empty dict is returned.
+
+    Args:
+        brand: Lowercased brand identifier (e.g. "retroworld").
+
+    Returns:
+        Parsed JSON dictionary or an empty dict if not found.
     """
     brand = brand.lower()
-    candidates = [
+    candidate_paths = [
         os.path.join(BASE_DATA_DIR, f"kb_{brand}.json"),
         os.path.join(BASE_APP_DIR, f"kb_{brand}.json"),
     ]
-    for path in candidates:
+    for path in candidate_paths:
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     kb = json.load(f)
-                logger.info("KB chargée pour %s depuis %s", brand, path)
+                logger.info("Loaded KB for %s from %s", brand, path)
                 return kb
             except Exception as e:
-                logger.error("Erreur lecture KB %s: %s", path, e)
-    logger.warning("KB introuvable pour brand %s, utilisation d'une KB vide.", brand)
+                logger.error("Error reading KB %s: %s", path, e)
+    logger.warning("KB not found for brand %s; using empty KB", brand)
     return {}
 
 
 def save_kb(brand: str, kb_data: Dict[str, Any]) -> None:
-    """
-    Sauvegarde/écrase la KB d'une marque dans /mnt/data/kb_<brand>.json
-    (sans toucher à /app).
+    """Persist the KB for a brand to the writeable /mnt/data directory.
+
+    This never touches the embedded version in /app; it always writes to
+    /mnt/data/kb_<brand>.json so you can safely update the KB in production.
+
+    Args:
+        brand: The lowercased brand name.
+        kb_data: JSON-serialisable dictionary representing the new KB.
     """
     brand = brand.lower()
     path = os.path.join(BASE_DATA_DIR, f"kb_{brand}.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(kb_data, f, ensure_ascii=False, indent=2)
-    logger.info("KB %s mise à jour dans %s", brand, path)
+    logger.info("KB %s updated at %s", brand, path)
 
 
 def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any]]:
-    """
-    Appelle l'API OpenAI Chat. On passe une liste de messages.
-    Retourne (réponse_texte, usage_dict).
+    """Send chat messages to OpenAI and return the assistant’s reply and usage.
+
+    Args:
+        messages: A list of messages in OpenAI chat format (role/content).
+
+    Returns:
+        A tuple containing the assistant’s reply text and a dict of usage metrics.
+
+    Raises:
+        RuntimeError: If OPENAI_API_KEY is missing.
     """
     if not OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY manquant")
-
+        raise RuntimeError("OPENAI_API_KEY missing")
     url = "https://api.openai.com/v1/chat/completions"
     payload = {
         "model": OPENAI_MODEL,
@@ -102,7 +138,6 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
         "temperature": 0.4,
     }
     data_bytes = json.dumps(payload).encode("utf-8")
-
     req = urllib.request.Request(
         url,
         data=data_bytes,
@@ -112,19 +147,16 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
         },
         method="POST",
     )
-
     try:
         with urllib.request.urlopen(req) as resp:
             body = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
-        # Log détaillé pour debug
         err_body = e.read().decode("utf-8", errors="ignore")
-        logger.error("HTTPError OpenAI (%s): %s", e.code, err_body)
+        logger.error("OpenAI HTTPError (%s): %s", e.code, err_body)
         raise
     except urllib.error.URLError as e:
-        logger.error("URLError OpenAI: %s", e)
+        logger.error("OpenAI URLError: %s", e)
         raise
-
     obj = json.loads(body)
     content = obj["choices"][0]["message"]["content"]
     usage = obj.get("usage", {})
@@ -137,17 +169,26 @@ def build_prompt(
     messages: List[Dict[str, Any]],
     metadata: Dict[str, Any],
 ) -> List[Dict[str, str]]:
-    """
-    Construit la liste de messages au format OpenAI Chat :
-    - un gros message system basé sur la KB (+ fallback si KB vide)
-    - un message de contexte (source, URL, conversation_id)
-    - puis l'historique utilisateur/assistant reçu
+    """Assemble the complete prompt to send to OpenAI.
+
+    Combines multiple elements from the KB (identity, prompts, instructions, anti‑error
+    guards) with conversation context (source, page URL, shared conversation ID)
+    and all prior user/assistant messages.  If the KB is missing or empty,
+    sensible defaults specific to the brand are used.
+
+    Args:
+        brand: The effective brand used for answering this chat turn.
+        kb: The knowledge base dictionary.
+        messages: The incoming messages (can be a full history or just the latest turn).
+        metadata: Metadata from the front‑end (source, page URL, conversation ID).
+
+    Returns:
+        A list of messages in OpenAI chat format.
     """
     brand = brand.lower()
-
     system_parts: List[str] = []
 
-    # 1) Identité
+    # Identity
     identite = kb.get("identite") if isinstance(kb, dict) else None
     if isinstance(identite, dict):
         nom = identite.get("nom") or brand.title()
@@ -156,18 +197,17 @@ def build_prompt(
     elif isinstance(identite, str):
         system_parts.append(identite)
 
-    # 2) Prompt général détaillé
+    # Prompt section: sorted for reproducibility
     prompt_section = kb.get("prompt") if isinstance(kb, dict) else None
     if isinstance(prompt_section, str):
         system_parts.append(prompt_section)
     elif isinstance(prompt_section, dict):
-        # On parcourt dans l'ordre stable des clés pour que le comportement soit reproductible
         for key in sorted(prompt_section.keys()):
-            v = prompt_section[key]
-            if isinstance(v, str) and v.strip():
-                system_parts.append(v.strip())
+            val = prompt_section[key]
+            if isinstance(val, str) and val.strip():
+                system_parts.append(val.strip())
 
-    # 3) Instructions générales éventuelles
+    # General instructions
     instr = kb.get("instructions_generales") if isinstance(kb, dict) else None
     if isinstance(instr, list):
         for item in instr:
@@ -176,7 +216,7 @@ def build_prompt(
     elif isinstance(instr, str):
         system_parts.append(instr)
 
-    # 4) Rappel éventuel sur la marque d'entrée vs marque effective
+    # Brand routing reminder
     brand_entry = metadata.get("brand_entry")
     brand_effective = metadata.get("brand_effective")
     if brand_entry and brand_effective and brand_entry != brand_effective:
@@ -187,7 +227,7 @@ def build_prompt(
             "ou de Runningman (action game, mini-jeux physiques)."
         )
 
-    # 5) Anti erreurs (pas d'invention de prix / promos / liens)
+    # Anti‑error instructions
     anti_err = kb.get("anti_erreurs") if isinstance(kb, dict) else None
     if isinstance(anti_err, list):
         for item in anti_err:
@@ -196,7 +236,7 @@ def build_prompt(
     elif isinstance(anti_err, str):
         system_parts.append(anti_err)
 
-    # 6) Fallback de sécurité si KB vide ou très courte
+    # Fallback defaults
     if not kb or not system_parts:
         if brand == "retroworld":
             system_parts.append(
@@ -215,12 +255,11 @@ def build_prompt(
             )
 
     system_text = "\n\n".join([p for p in system_parts if p.strip()])
-
     prompt_messages: List[Dict[str, str]] = []
     if system_text:
         prompt_messages.append({"role": "system", "content": system_text})
 
-    # Contexte métadonnées (source, URL, conversation_id partagé)
+    # Metadata context
     meta_context: List[str] = []
     if metadata.get("source"):
         meta_context.append(f"Source de la demande : {metadata['source']}.")
@@ -238,15 +277,12 @@ def build_prompt(
     if meta_context:
         prompt_messages.append({"role": "system", "content": " ".join(meta_context)})
 
-    # Historique utilisateur / assistant
+    # Conversation history
     for msg in messages:
         role = msg.get("role")
         content = msg.get("content")
-        if not role or content is None:
-            continue
-        if role not in ("user", "assistant", "system"):
-            continue
-        prompt_messages.append({"role": role, "content": str(content)})
+        if role and content is not None and role in ("user", "assistant", "system"):
+            prompt_messages.append({"role": role, "content": str(content)})
 
     return prompt_messages
 
@@ -259,15 +295,11 @@ def append_conversation_log(
     assistant_reply: str,
     extra: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """
-    Append un enregistrement dans un fichier JSONL par conversation.
-    """
+    """Persist a single conversation turn to a per‑conversation JSONL file."""
     if not conversation_id:
         conversation_id = f"conv_{int(time.time())}"
-
     path = os.path.join(CONVERSATIONS_LOG_DIR, f"{conversation_id}.jsonl")
     os.makedirs(os.path.dirname(path), exist_ok=True)
-
     record = {
         "timestamp": time.time(),
         "conversation_id": conversation_id,
@@ -282,13 +314,10 @@ def append_conversation_log(
 
 
 def load_conversation_records(conversation_id: str) -> List[Dict[str, Any]]:
-    """
-    Lit tous les enregistrements d'une conversation (JSONL) et les renvoie triés par timestamp.
-    """
+    """Read all logged records for a conversation and sort by timestamp."""
     path = os.path.join(CONVERSATIONS_LOG_DIR, f"{conversation_id}.jsonl")
     if not os.path.exists(path):
         return []
-
     records: List[Dict[str, Any]] = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -300,30 +329,15 @@ def load_conversation_records(conversation_id: str) -> List[Dict[str, Any]]:
                 records.append(rec)
             except Exception:
                 continue
-
     records.sort(key=lambda r: r.get("timestamp") or 0.0)
     return records
 
 
-# ---------- NOUVEAU : reconstruction de l'historique depuis les logs ----------
-
 def reconstruct_history_from_logs(conversation_id: str) -> List[Dict[str, str]]:
-    """
-    Reconstruit l'historique complet d'une conversation au format messages OpenAI
-    à partir des fichiers JSONL de logs.
-
-    On alterne :
-      - messages utilisateur / assistant (tel qu'envoyés à /chat/<brand>)
-      - assistant_reply stocké à chaque tour.
-
-    Cela permet d'avoir le contexte même si le front n'envoie que
-    le dernier message utilisateur.
-    """
+    """Rebuild the OpenAI message history from saved logs."""
     records = load_conversation_records(conversation_id)
     history: List[Dict[str, str]] = []
-
     for rec in records:
-        # messages utilisateur + éventuels messages assistant déjà passés par le front
         rec_msgs = rec.get("user_messages") or []
         for m in rec_msgs:
             if not isinstance(m, dict):
@@ -332,30 +346,17 @@ def reconstruct_history_from_logs(conversation_id: str) -> List[Dict[str, str]]:
             content = m.get("content")
             if role in ("user", "assistant", "system") and content is not None:
                 history.append({"role": role, "content": str(content)})
-
-        # réponse assistant générée par l'IA
         assistant_text = rec.get("assistant_reply")
         if assistant_text:
             history.append({"role": "assistant", "content": str(assistant_text)})
-
     return history
 
 
-# ---------------------------------------------------------
-# ROUTAGE MARQUE (Runningman / Retroworld)
-# ---------------------------------------------------------
-
 def detect_brand_from_text(text: str, default: str = "runningman") -> str:
-    """
-    Détecte si une demande parle plutôt de Retroworld (VR, quiz, salle enfant)
-    ou de Runningman (action game, mini-jeux physiques).
-    """
+    """Detect whether a message refers to Retroworld or Runningman."""
     if not text:
         return default
-
     t = text.lower()
-
-    # Mots-clés typiques Retroworld
     retro_keywords = [
         "vr",
         "réalité virtuelle",
@@ -379,8 +380,6 @@ def detect_brand_from_text(text: str, default: str = "runningman") -> str:
         "points fidélité",
         "points de fidelite",
     ]
-
-    # Mots-clés typiques Runningman
     running_keywords = [
         "action game",
         "game zone",
@@ -395,33 +394,23 @@ def detect_brand_from_text(text: str, default: str = "runningman") -> str:
         "capteur",
         "mission physique",
     ]
-
     retro_score = sum(1 for k in retro_keywords if k in t)
     running_score = sum(1 for k in running_keywords if k in t)
-
     if retro_score > running_score and retro_score > 0:
         return "retroworld"
     if running_score > retro_score and running_score > 0:
         return "runningman"
-
     if "retroworld" in t or "rétroworld" in t:
         return "retroworld"
     if "runningman" in t or "running man" in t:
         return "runningman"
-
     return default
 
 
 def classify_conversation_brands(records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Analyse les enregistrements d'une conversation pour déterminer :
-      - brand_final : "runningman", "retroworld", "mixed" ou "unknown"
-      - brands_seen : liste des marques rencontrées
-    L'intention finale est la dernière marque effective vue.
-    """
+    """Determine which brands have been referenced in a conversation."""
     brands_seen = set()
     last_effective = None
-
     for rec in records:
         extra = rec.get("extra") or {}
         meta = extra.get("metadata") or {}
@@ -429,28 +418,18 @@ def classify_conversation_brands(records: List[Dict[str, Any]]) -> Dict[str, Any
         if be in ("runningman", "retroworld"):
             brands_seen.add(be)
             last_effective = be
-
     if not brands_seen:
         return {"brand_final": "unknown", "brands_seen": []}
-
     if len(brands_seen) == 1:
         return {"brand_final": list(brands_seen)[0], "brands_seen": list(brands_seen)}
-
     brand_final = last_effective or "mixed"
     if brand_final not in ("runningman", "retroworld"):
         brand_final = "mixed"
-
     return {"brand_final": brand_final, "brands_seen": list(brands_seen)}
 
 
-# ---------------------------------------------------------
-# QWEEKLE – WEBHOOK (log brut pour l’instant)
-# ---------------------------------------------------------
-
 def append_qweekle_event(event_type: str, payload: Dict[str, Any]) -> None:
-    """
-    Log d'un événement Qweekle dans un fichier JSONL dédié par type d'event.
-    """
+    """Persist raw Qweekle webhook events to disk."""
     fname = f"{event_type or 'unknown'}.jsonl"
     path = os.path.join(QWEEKLE_LOG_DIR, fname)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -469,11 +448,8 @@ def append_qweekle_event(event_type: str, payload: Dict[str, Any]) -> None:
 # ---------------------------------------------------------
 
 @app.route("/", methods=["GET", "HEAD"])
-def root():
-    """
-    Petit endpoint racine pour les checks Render / humains.
-    Évite un 404 sur HEAD / et donne un aperçu rapide de l'état.
-    """
+def root() -> Tuple[Dict[str, Any], int]:
+    """Lightweight root endpoint for health checks."""
     return jsonify(
         {
             "service": "retroworld-ia",
@@ -485,136 +461,93 @@ def root():
 
 
 @app.route("/favicon.ico", methods=["GET"])
-def favicon():
-    """
-    Empêche les 404 gênants sur /favicon.ico dans les logs.
-    On ne renvoie pas d'icône pour l'instant.
-    """
+def favicon():  # type: ignore[override]
+    """Return no favicon to avoid 404s in logs."""
     return "", 204
 
 
 @app.route("/health", methods=["GET"])
-def health():
+def health():  # type: ignore[override]
+    """Simple health endpoint."""
     return jsonify({"status": "ok", "time": time.time()}), 200
 
 
 @app.route("/chat/<brand>", methods=["POST"])
-def chat_route(brand: str):
-    """
-    Endpoint générique de chat :
-    - /chat/retroworld
-    - /chat/runningman
-
-    Pour runningman, on route automatiquement vers Retroworld si la demande
-    porte clairement sur VR / quiz / salle enfant.
-
-    Le même endpoint servira pour :
-    - le widget web,
-    - le téléphone (Vonage) : il suffit d'envoyer un 'source': 'phone' dans metadata,
-      et éventuellement un conversation_id partagé entre web et téléphone.
-    """
+def chat_route(brand: str):  # type: ignore[override]
+    """Generic chat endpoint for both brands."""
     try:
         body = request.get_json(force=True)
     except Exception:
         return jsonify({"error": "invalid_json"}), 400
-
     if not isinstance(body, dict):
         return jsonify({"error": "invalid_payload"}), 400
-
     messages = body.get("messages") or []
     metadata = body.get("metadata") or {}
     if not isinstance(messages, list):
         return jsonify({"error": "messages must be a list"}), 400
     if not isinstance(metadata, dict):
         metadata = {}
-
     brand_entry = (brand or "").lower()
     if brand_entry not in SUPPORTED_BRANDS:
         return jsonify({"error": "unknown_brand"}), 404
-
-    # Dernier message user
     last_user_text = ""
     for msg in reversed(messages):
         if isinstance(msg, dict) and msg.get("role") == "user":
             last_user_text = str(msg.get("content") or "")
             break
-
-    # Détermination de la marque effective
     effective_brand = brand_entry
     if brand_entry == "runningman":
         effective_brand = detect_brand_from_text(last_user_text, default="runningman")
-
-    # conversation_id : on fait confiance à ce que le front envoie
     conversation_id = metadata.get("conversation_id")
     if not conversation_id:
         conversation_id = f"{effective_brand}_{int(time.time() * 1000)}"
         metadata["conversation_id"] = conversation_id
-
     metadata["brand_entry"] = brand_entry
     metadata["brand_effective"] = effective_brand
-
-    # ---------- NOUVEAU : reconstruction de l'historique si besoin ----------
-
     messages_for_prompt: List[Dict[str, Any]] = messages
     try:
-        # Si le front n'envoie qu'un message utilisateur (cas Tawk / widget simple),
-        # on reconstruit le contexte complet à partir des logs serveurs.
         only_user_simple = (
             len(messages) == 1
             and isinstance(messages[0], dict)
             and messages[0].get("role") == "user"
         )
         no_assistant_msgs = all(
-            (isinstance(m, dict) and m.get("role") != "assistant")
-            for m in messages
+            (isinstance(m, dict) and m.get("role") != "assistant") for m in messages
         )
-
         use_server_history = conversation_id and (only_user_simple or no_assistant_msgs)
-
-        # Possibilité de forcer la désactivation côté front : metadata["no_server_history"] = True
         if metadata.get("no_server_history") is True:
             use_server_history = False
-
         if use_server_history:
             past_history = reconstruct_history_from_logs(conversation_id)
             if past_history:
-                # On concatène l'historique complet + les messages reçus sur ce tour
                 messages_for_prompt = past_history + messages
                 logger.info(
-                    "Historique reconstruit pour %s (%d anciens messages + %d nouveaux)",
+                    "Reconstructed history for %s (%d past messages + %d new)",
                     conversation_id,
                     len(past_history),
                     len(messages),
                 )
     except Exception as e:
-        logger.error("Erreur reconstruction historique pour %s: %s", conversation_id, e)
-        messages_for_prompt = messages  # fallback
-
-    # Chargement KB
+        logger.error("Error reconstructing history for %s: %s", conversation_id, e)
+        messages_for_prompt = messages
     kb = load_kb(effective_brand)
-
-    # Construction du prompt
     try:
         prompt_messages = build_prompt(effective_brand, kb, messages_for_prompt, metadata)
     except Exception as e:
-        logger.error("Erreur build_prompt: %s", e)
+        logger.error("build_prompt failed: %s", e)
         return jsonify({"error": "prompt_build_failed"}), 500
-
-    # Appel OpenAI
     try:
         reply_text, usage = call_openai_chat(prompt_messages)
     except Exception as e:
-        logger.error("Erreur OpenAI: %s", e)
+        logger.error("OpenAI error: %s", e)
         return jsonify({"error": "openai_error", "details": str(e)}), 502
-
-    # Logs
     try:
         channel = metadata.get("source") or "web"
         append_conversation_log(
             conversation_id=conversation_id,
             brand=effective_brand,
             channel=channel,
-            user_messages=messages,  # on log uniquement le tour reçu, pas l'historique reconstruit
+            user_messages=messages,
             assistant_reply=reply_text,
             extra={
                 "brand_entry": brand_entry,
@@ -624,8 +557,7 @@ def chat_route(brand: str):
             },
         )
     except Exception as e:
-        logger.error("Erreur append_conversation_log: %s", e)
-
+        logger.error("Error logging conversation: %s", e)
     return jsonify(
         {
             "reply": reply_text,
@@ -636,92 +568,64 @@ def chat_route(brand: str):
 
 
 @app.route("/kb/upsert/<brand>", methods=["POST"])
-def kb_upsert(brand: str):
-    """
-    Met à jour (ou crée) la KB d'une marque.
-    Écrit dans /mnt/data/kb_<brand>.json
-    """
+def kb_upsert(brand: str):  # type: ignore[override]
+    """Upsert (create or overwrite) a brand’s KB via POST."""
     try:
         body = request.get_json(force=True)
     except Exception:
         return jsonify({"error": "invalid_json"}), 400
-
     if not isinstance(body, dict):
         return jsonify({"error": "invalid_kb"}), 400
-
     try:
         save_kb(brand, body)
     except Exception as e:
-        logger.error("Erreur save_kb(%s): %s", brand, e)
+        logger.error("save_kb(%s) failed: %s", brand, e)
         return jsonify({"error": "kb_save_failed"}), 500
-
     return jsonify({"status": "ok", "brand": brand}), 200
 
 
 @app.route("/webhooks/qweekle", methods=["POST"])
-def qweekle_webhook():
-    """
-    Réception des webhooks Qweekle.
-    Pour l'instant : log brut, avec vérification du secret si défini.
-    """
+def qweekle_webhook():  # type: ignore[override]
+    """Handle Qweekle webhook events by logging them to disk."""
     if QWEEKLE_WEBHOOK_SECRET:
         incoming_secret = request.headers.get("X-Qweekle-Secret") or ""
         if incoming_secret != QWEEKLE_WEBHOOK_SECRET:
-            logger.warning("Webhook Qweekle rejeté (secret invalide)")
+            logger.warning("Qweekle webhook rejected (invalid secret)")
             return jsonify({"error": "forbidden"}), 403
-
     try:
         payload = request.get_json(force=True) or {}
     except Exception:
         return jsonify({"error": "invalid_json"}), 400
-
     event_type = payload.get("event_type") or payload.get("type") or "unknown"
-    logger.info("Webhook Qweekle reçu: %s", event_type)
+    logger.info("Webhook Qweekle received: %s", event_type)
     append_qweekle_event(event_type, payload)
-
-    # TODO plus tard : traitement booking.created, sale.created, etc.
     return jsonify({"status": "ok", "event_type": event_type}), 200
 
 
-# ---------------------------------------------------------
-# ADMIN – API CONVERSATIONS
-# ---------------------------------------------------------
-
 @app.route("/admin/api/conversations", methods=["GET"])
-def admin_api_conversations():
-    """
-    Retourne la liste des conversations pour l'admin.
-    GET ?token=ADMIN_DASHBOARD_TOKEN
-    """
+def admin_api_conversations():  # type: ignore[override]
+    """List recent conversations for the admin dashboard."""
     token = request.args.get("token") or ""
     if token != ADMIN_DASHBOARD_TOKEN:
         return jsonify({"error": "forbidden"}), 403
-
     convs: List[Dict[str, Any]] = []
-
     if not os.path.isdir(CONVERSATIONS_LOG_DIR):
         return jsonify(convs), 200
-
     for fname in os.listdir(CONVERSATIONS_LOG_DIR):
         if not fname.endswith(".jsonl"):
             continue
-        fpath = os.path.join(CONVERSATIONS_LOG_DIR, fname)
         conversation_id = fname.replace(".jsonl", "")
-
         records = load_conversation_records(conversation_id)
         if not records:
             continue
-
         last = records[-1]
         ts = last.get("timestamp") or 0.0
         channel = last.get("channel") or "web"
         extra = last.get("extra") or {}
         meta = extra.get("metadata") or {}
         source = extra.get("source") or meta.get("source") or "unknown"
-
         brand_info = classify_conversation_brands(records)
-        brand_final = brand_info["brand_final"]
-
+        brand_final = brand_info.get("brand_final")
         preview = ""
         for rec in reversed(records):
             umsgs = rec.get("user_messages") or []
@@ -733,7 +637,6 @@ def admin_api_conversations():
                 break
         if len(preview) > 120:
             preview = preview[:117] + "..."
-
         convs.append(
             {
                 "conversation_id": conversation_id,
@@ -744,470 +647,425 @@ def admin_api_conversations():
                 "brand_final": brand_final,
             }
         )
-
     convs.sort(key=lambda c: c["timestamp"], reverse=True)
     return jsonify(convs), 200
 
 
 @app.route("/admin/api/conversation/<conversation_id>", methods=["GET"])
-def admin_api_conversation_detail(conversation_id: str):
-    """
-    Retourne le détail complet d'une conversation (tous les tours).
-    GET ?token=ADMIN_DASHBOARD_TOKEN
-    """
+def admin_api_conversation_detail(conversation_id: str):  # type: ignore[override]
+    """Return all records of a single conversation."""
     token = request.args.get("token") or ""
     if token != ADMIN_DASHBOARD_TOKEN:
         return jsonify({"error": "forbidden"}), 403
-
     records = load_conversation_records(conversation_id)
     if not records:
         return jsonify({"error": "not_found"}), 404
+    return jsonify({"conversation_id": conversation_id, "records": records}), 200
 
-    return jsonify(
-        {
-            "conversation_id": conversation_id,
-            "records": records,
-        }
-    ), 200
-
-
-# ---------------------------------------------------------
-# ADMIN – INTERFACE HTML
-# ---------------------------------------------------------
 
 @app.route("/admin/conversations", methods=["GET"])
-def admin_conversations_page():
+def admin_conversations_page():  # type: ignore[override]
+    """Serve the admin dashboard with improved styling and usability."""
     token = request.args.get("token") or ""
     if token != ADMIN_DASHBOARD_TOKEN:
         return "Forbidden", 403
-
     return """
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="utf-8" />
-<title>Admin IA – Conversations</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-  :root {
-    --bg: #020617;
-    --bg-card: #0b1120;
-    --border: #1f2937;
-    --text: #e5e7eb;
-    --muted: #9ca3af;
-    --accent: #38bdf8;
-    --brand-retro: #6366f1;
-    --brand-run: #22c55e;
-    --brand-mix: #f97316;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: radial-gradient(circle at top, #0f172a, #020617 55%);
-    color: var(--text);
-  }
-  .admin-shell {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 20px 16px 40px;
-  }
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 16px;
-    margin-bottom: 18px;
-  }
-  .title-block h1 {
-    margin: 0;
-    font-size: 24px;
-  }
-  .title-block p {
-    margin: 4px 0 0;
-    font-size: 13px;
-    color: var(--muted);
-  }
-  .filters {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .chip {
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    padding: 6px 10px;
-    font-size: 12px;
-    cursor: pointer;
-    background: rgba(15,23,42,0.9);
-    color: var(--muted);
-  }
-  .chip.active {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: rgba(56, 189, 248, 0.1);
-  }
-  .chip[data-brand="runningman"].active { border-color: var(--brand-run); color: var(--brand-run); }
-  .chip[data-brand="retroworld"].active { border-color: var(--brand-retro); color: var(--brand-retro); }
-  .chip[data-brand="mixed"].active { border-color: var(--brand-mix); color: var(--brand-mix); }
-
-  .toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-bottom: 14px;
-    align-items: center;
-  }
-  .search-input {
-    flex: 1;
-    min-width: 200px;
-  }
-  .search-input input {
-    width: 100%;
-    padding: 7px 10px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: #020617;
-    color: var(--text);
-    font-size: 13px;
-  }
-  .btn-small {
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    padding: 6px 10px;
-    font-size: 12px;
-    background: #020617;
-    color: var(--muted);
-    cursor: pointer;
-  }
-  .btn-small:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
-  .table-wrapper {
-    border-radius: 14px;
-    border: 1px solid var(--border);
-    background: rgba(15,23,42,0.95);
-    overflow: hidden;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
-  thead {
-    background: #020617;
-  }
-  th, td {
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border);
-    text-align: left;
-    vertical-align: top;
-  }
-  th {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-  }
-  tr:hover td {
-    background: rgba(15,23,42,0.7);
-  }
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-  }
-  .badge-run { background: rgba(34,197,94,0.18); color: #4ade80; }
-  .badge-retro { background: rgba(99,102,241,0.18); color: #a5b4fc; }
-  .badge-mix { background: rgba(249,115,22,0.18); color: #fbbf24; }
-  .badge-unknown { background: rgba(148,163,184,0.18); color: #cbd5f5; }
-
-  .pill {
-    display: inline-flex;
-    border-radius: 999px;
-    padding: 2px 7px;
-    font-size: 11px;
-    color: var(--muted);
-    border: 1px solid rgba(148,163,184,0.3);
-  }
-  .pill-channel {
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-  .preview {
-    color: var(--text);
-  }
-  .muted {
-    color: var(--muted);
-    font-size: 11px;
-  }
-  @media (max-width: 768px) {
-    th:nth-child(2), td:nth-child(2) { display: none; }
-    th:nth-child(4), td:nth-child(4) { display: none; }
-  }
-
-  .conv-detail {
-    margin-top: 18px;
-    border-radius: 14px;
-    border: 1px solid var(--border);
-    background: radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 45%), #020617;
-    padding: 14px;
-    max-height: 420px;
-    overflow: auto;
-  }
-  .conv-detail-title {
-    font-size: 13px;
-    margin-bottom: 8px;
-    color: var(--muted);
-  }
-  .bubble {
-    max-width: 75%;
-    margin-bottom: 8px;
-    padding: 7px 10px;
-    border-radius: 14px;
-    font-size: 13px;
-    line-height: 1.4;
-    white-space: pre-wrap;
-  }
-  .bubble-user {
-    margin-left: auto;
-    background: #1f2937;
-    border-bottom-right-radius: 4px;
-  }
-  .bubble-bot {
-    margin-right: auto;
-    background: #020617;
-    border: 1px solid #1f2937;
-    border-bottom-left-radius: 4px;
-  }
-  .meta-line {
-    font-size: 11px;
-    color: var(--muted);
-    margin-bottom: 10px;
-  }
-</style>
+  <meta charset="utf-8" />
+  <title>Admin IA – Conversations</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0f172a;
+      --bg-card: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #0ea5e9;
+      --brand-retro: #6366f1;
+      --brand-run: #22c55e;
+      --brand-mix: #f97316;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 20px 40px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 600;
+    }
+    .subtitle {
+      margin-top: 4px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .chip {
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      background-color: var(--bg-card);
+      color: var(--muted);
+      transition: background-color 0.15s, border-color 0.15s;
+    }
+    .chip.active {
+      background-color: var(--accent);
+      border-color: var(--accent);
+      color: var(--bg);
+    }
+    .chip[data-brand="runningman"].active { background-color: var(--brand-run); border-color: var(--brand-run); color: var(--bg); }
+    .chip[data-brand="retroworld"].active { background-color: var(--brand-retro); border-color: var(--brand-retro); color: var(--bg); }
+    .chip[data-brand="mixed"].active { background-color: var(--brand-mix); border-color: var(--brand-mix); color: var(--bg); }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+      align-items: center;
+    }
+    .search-input {
+      flex: 1;
+      min-width: 200px;
+      position: relative;
+    }
+    .search-input input {
+      width: 100%;
+      padding: 8px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background-color: var(--bg-card);
+      color: var(--text);
+      font-size: 14px;
+    }
+    .btn-refresh {
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      font-size: 12px;
+      background-color: var(--bg-card);
+      color: var(--muted);
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-refresh:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .table-wrapper {
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background-color: var(--bg-card);
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    thead {
+      background-color: var(--bg);
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    tr:hover td {
+      background-color: rgba(30, 41, 59, 0.5);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 12px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .badge-run { background-color: rgba(34,197,94,0.2); color: #22c55e; }
+    .badge-retro { background-color: rgba(99,102,241,0.2); color: #6366f1; }
+    .badge-mix { background-color: rgba(249,115,22,0.2); color: #f97316; }
+    .badge-unknown { background-color: rgba(148,163,184,0.2); color: #94a3b8; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 12px;
+      padding: 2px 6px;
+      font-size: 11px;
+      color: var(--muted);
+      border: 1px solid rgba(148,163,184,0.4);
+    }
+    .pill-channel { text-transform: uppercase; letter-spacing: 0.06em; }
+    .preview-text {
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .conversation-detail {
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background-color: var(--bg-card);
+      padding: 16px;
+      max-height: 450px;
+      overflow-y: auto;
+    }
+    .conversation-detail h2 {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+      color: var(--muted);
+    }
+    .bubble {
+      max-width: 80%;
+      margin-bottom: 8px;
+      padding: 8px 12px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
+    .bubble-user {
+      margin-left: auto;
+      background-color: #334155;
+      border-bottom-right-radius: 4px;
+    }
+    .bubble-bot {
+      margin-right: auto;
+      background-color: #1e293b;
+      border-bottom-left-radius: 4px;
+    }
+    .timestamp {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+  </style>
 </head>
 <body>
-<div class="admin-shell">
-  <header>
-    <div class="title-block">
-      <h1>Conversations IA</h1>
-      <p>Vue d'ensemble des échanges Retroworld / Runningman (chat & téléphone).</p>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Conversations IA</h1>
+        <div class="subtitle">Suivi des échanges Retroworld / Runningman (chat & téléphone)</div>
+      </div>
+      <div class="filters">
+        <button class="chip active" data-filter="all">Tout</button>
+        <button class="chip" data-filter="runningman" data-brand="runningman">Runningman</button>
+        <button class="chip" data-filter="retroworld" data-brand="retroworld">Retroworld</button>
+        <button class="chip" data-filter="mixed" data-brand="mixed">Mix des deux</button>
+      </div>
+    </header>
+    <div class="toolbar">
+      <div class="search-input">
+        <input type="text" id="search" placeholder="Rechercher dans les questions, sources, IDs…" />
+      </div>
+      <button class="btn-refresh" id="btn-refresh">Rafraîchir</button>
     </div>
-    <div class="filters">
-      <button class="chip active" data-filter="all">Tout</button>
-      <button class="chip" data-filter="runningman" data-brand="runningman">Runningman</button>
-      <button class="chip" data-filter="retroworld" data-brand="retroworld">Retroworld</button>
-      <button class="chip" data-filter="mixed" data-brand="mixed">Mix des deux</button>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 170px;">Date</th>
+            <th style="width: 85px;">Canal</th>
+            <th style="width: 110px;">Marque</th>
+            <th style="width: 140px;">Source</th>
+            <th>Dernier message</th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="5" class="muted">Chargement…</td></tr>
+        </tbody>
+      </table>
     </div>
-  </header>
-
-  <div class="toolbar">
-    <div class="search-input">
-      <input type="text" id="search" placeholder="Rechercher dans les questions, sources, IDs…" />
+    <div class="conversation-detail" id="convDetail">
+      <h2>Détail de la conversation</h2>
+      <div class="muted">Sélectionnez une conversation ci‑dessus pour voir le fil complet.</div>
     </div>
-    <button class="btn-small" id="btn-refresh">Rafraîchir</button>
   </div>
-
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th style="width: 155px;">Date</th>
-          <th style="width: 85px;">Canal</th>
-          <th style="width: 120px;">Marque</th>
-          <th style="width: 150px;">Source</th>
-          <th>Dernière question / aperçu</th>
+  <script>
+  (function() {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token") || "";
+    const rowsEl = document.getElementById("rows");
+    const searchInput = document.getElementById("search");
+    const btnRefresh = document.getElementById("btn-refresh");
+    const chips = Array.from(document.querySelectorAll(".chip"));
+    const convDetail = document.getElementById("convDetail");
+    let allData = [];
+    let currentFilter = "all";
+    let searchTerm = "";
+    function formatDate(ts) {
+      if (!ts) return "";
+      try {
+        const d = new Date(ts * 1000);
+        return d.toLocaleString("fr-FR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit"
+        });
+      } catch(e) { return ""; }
+    }
+    function brandBadge(conv) {
+      const b = conv.brand_final;
+      if (b === "runningman") return '<span class="badge badge-run">Runningman</span>';
+      if (b === "retroworld") return '<span class="badge badge-retro">Retroworld</span>';
+      if (b === "mixed") return '<span class="badge badge-mix">Mix</span>';
+      return '<span class="badge badge-unknown">Inconnu</span>';
+    }
+    function channelPill(conv) {
+      const ch = (conv.channel || "web").toUpperCase();
+      return '<span class="pill pill-channel">' + ch + '</span>';
+    }
+    function sourcePill(conv) {
+      const s = conv.source || "n/a";
+      return '<span class="pill">' + s + '</span>';
+    }
+    function render() {
+      const term = searchTerm.trim().toLowerCase();
+      let filtered = allData.slice();
+      if (currentFilter !== "all") {
+        filtered = filtered.filter(c => {
+          if (currentFilter === "mixed") return c.brand_final === "mixed";
+          return c.brand_final === currentFilter;
+        });
+      }
+      if (term) {
+        filtered = filtered.filter(c =>
+          (c.preview && c.preview.toLowerCase().includes(term)) ||
+          (c.source && c.source.toLowerCase().includes(term)) ||
+          (c.conversation_id && c.conversation_id.toLowerCase().includes(term))
+        );
+      }
+      if (!filtered.length) {
+        rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Aucune conversation trouvée.</td></tr>';
+        return;
+      }
+      const html = filtered.map(c => `
+        <tr onclick="viewConversation('${c.conversation_id}')">
+          <td>
+            <div>${formatDate(c.timestamp)}</div>
+            <div class="muted" style="font-size:11px;">${c.conversation_id}</div>
+          </td>
+          <td>${channelPill(c)}</td>
+          <td>${brandBadge(c)}</td>
+          <td>${sourcePill(c)}</td>
+          <td>
+            <div class="preview-text">${c.preview || '<span class="muted">(pas de message)</span>'}</div>
+          </td>
         </tr>
-      </thead>
-      <tbody id="rows">
-        <tr><td colspan="5" class="muted">Chargement…</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="conv-detail" id="convDetail">
-    <div class="conv-detail-title">Détail de la conversation</div>
-    <div class="muted">Cliquez sur une conversation dans le tableau pour voir le fil complet ici.</div>
-  </div>
-</div>
-
-<script>
-(function() {
-  const params = new URLSearchParams(window.location.search);
-  const token = params.get("token") || "";
-  const rowsEl = document.getElementById("rows");
-  const searchInput = document.getElementById("search");
-  const btnRefresh = document.getElementById("btn-refresh");
-  const chips = Array.from(document.querySelectorAll(".chip"));
-  const convDetail = document.getElementById("convDetail");
-
-  let allData = [];
-  let currentFilter = "all";
-  let searchTerm = "";
-  let currentConvId = null;
-
-  function formatDate(ts) {
-    if (!ts) return "";
-    try {
-      const d = new Date(ts * 1000);
-      return d.toLocaleString("fr-FR", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit"
-      });
-    } catch(e) { return ""; }
-  }
-
-  function brandBadge(conv) {
-    const b = conv.brand_final;
-    if (b === "runningman") return '<span class="badge badge-run">Runningman</span>';
-    if (b === "retroworld") return '<span class="badge badge-retro">Retroworld</span>';
-    if (b === "mixed") return '<span class="badge badge-mix">Mix</span>';
-    return '<span class="badge badge-unknown">Inconnu</span>';
-  }
-
-  function channelPill(conv) {
-    const ch = (conv.channel || "web").toUpperCase();
-    return '<span class="pill pill-channel">' + ch + '</span>';
-  }
-
-  function sourcePill(conv) {
-    const s = conv.source || "n/a";
-    return '<span class="pill">' + s + '</span>';
-  }
-
-  function render() {
-    const term = searchTerm.trim().toLowerCase();
-    let filtered = allData.slice();
-
-    if (currentFilter !== "all") {
-      filtered = filtered.filter(c => {
-        if (currentFilter === "mixed") return c.brand_final === "mixed";
-        return c.brand_final === currentFilter;
-      });
+      `).join("");
+      rowsEl.innerHTML = html;
     }
-
-    if (term) {
-      filtered = filtered.filter(c =>
-        (c.preview && c.preview.toLowerCase().includes(term)) ||
-        (c.source && c.source.toLowerCase().includes(term)) ||
-        (c.conversation_id && c.conversation_id.toLowerCase().includes(term))
-      );
-    }
-
-    if (!filtered.length) {
-      rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Aucune conversation trouvée.</td></tr>';
-      return;
-    }
-
-    const html = filtered.map(c => `
-      <tr onclick="viewConversation('${c.conversation_id}')">
-        <td>
-          <div>${formatDate(c.timestamp)}</div>
-          <div class="muted">${c.conversation_id}</div>
-        </td>
-        <td>${channelPill(c)}</td>
-        <td>${brandBadge(c)}</td>
-        <td>${sourcePill(c)}</td>
-        <td>
-          <div class="preview">${c.preview || "<span class='muted'>(pas de message utilisateur)</span>"}</div>
-        </td>
-      </tr>
-    `).join("");
-    rowsEl.innerHTML = html;
-  }
-
-  async function loadData() {
-    rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Chargement…</td></tr>';
-    try {
-      const res = await fetch(`/admin/api/conversations?token=${encodeURIComponent(token)}`);
-      if (!res.ok) {
-        rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Erreur de chargement ('+res.status+')</td></tr>';
-        return;
-      }
-      allData = await res.json();
-      render();
-    } catch (e) {
-      console.error(e);
-      rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Erreur réseau.</td></tr>';
-    }
-  }
-
-  window.viewConversation = async function(id) {
-    currentConvId = id;
-    convDetail.innerHTML = '<div class="conv-detail-title">Conversation ' + id + '</div><div class="muted">Chargement…</div>';
-    try {
-      const res = await fetch(`/admin/api/conversation/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`);
-      if (!res.ok) {
-        convDetail.innerHTML = '<div class="conv-detail-title">Conversation ' + id + '</div><div class="muted">Erreur de chargement ('+res.status+')</div>';
-        return;
-      }
-      const data = await res.json();
-      const records = data.records || [];
-      if (!records.length) {
-        convDetail.innerHTML = '<div class="conv-detail-title">Conversation ' + id + '</div><div class="muted">Aucun enregistrement pour cette conversation.</div>';
-        return;
-      }
-      let html = '<div class="conv-detail-title">Conversation ' + id + '</div>';
-      records.forEach(rec => {
-        const userMsgs = rec.user_messages || [];
-        const reply = rec.assistant_reply || "";
-        userMsgs
-          .filter(m => m.role === "user")
-          .forEach(m => {
-            html += '<div class="bubble bubble-user">' + (m.content || "") + '</div>';
-          });
-        if (reply) {
-          html += '<div class="bubble bubble-bot">' + reply + '</div>';
+    async function loadData() {
+      rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Chargement…</td></tr>';
+      try {
+        const res = await fetch(`/admin/api/conversations?token=${encodeURIComponent(token)}`);
+        if (!res.ok) {
+          rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Erreur de chargement ('+res.status+')</td></tr>';
+          return;
         }
-        if (rec.timestamp) {
-          const d = new Date(rec.timestamp * 1000).toLocaleString("fr-FR");
-          html += '<div class="meta-line">' + d + '</div>';
-        }
-      });
-      convDetail.innerHTML = html;
-      convDetail.scrollTop = convDetail.scrollHeight;
-    } catch (e) {
-      console.error(e);
-      convDetail.innerHTML = '<div class="conv-detail-title">Conversation ' + id + '</div><div class="muted">Erreur réseau.</div>';
+        allData = await res.json();
+        render();
+      } catch (e) {
+        console.error(e);
+        rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Erreur réseau.</td></tr>';
+      }
     }
-  }
-
-  searchInput.addEventListener("input", function() {
-    searchTerm = this.value;
-    render();
-  });
-
-  btnRefresh.addEventListener("click", loadData);
-
-  chips.forEach(chip => {
-    chip.addEventListener("click", () => {
-      chips.forEach(c => c.classList.remove("active"));
-      chip.classList.add("active");
-      currentFilter = chip.getAttribute("data-filter") || "all";
+    window.viewConversation = async function(id) {
+      convDetail.innerHTML = '<h2>Conversation ' + id + '</h2><div class="muted">Chargement…</div>';
+      try {
+        const res = await fetch(`/admin/api/conversation/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`);
+        if (!res.ok) {
+          convDetail.innerHTML = '<h2>Conversation ' + id + '</h2><div class="muted">Erreur de chargement ('+res.status+')</div>';
+          return;
+        }
+        const data = await res.json();
+        const records = data.records || [];
+        if (!records.length) {
+          convDetail.innerHTML = '<h2>Conversation ' + id + '</h2><div class="muted">Aucun enregistrement pour cette conversation.</div>';
+          return;
+        }
+        let html = '<h2>Conversation ' + id + '</h2>';
+        records.forEach(rec => {
+          const userMsgs = rec.user_messages || [];
+          const reply = rec.assistant_reply || "";
+          userMsgs
+            .filter(m => m.role === "user")
+            .forEach(m => {
+              html += '<div class="bubble bubble-user">' + (m.content || "") + '</div>';
+            });
+          if (reply) {
+            html += '<div class="bubble bubble-bot">' + reply + '</div>';
+          }
+          if (rec.timestamp) {
+            const d = new Date(rec.timestamp * 1000).toLocaleString("fr-FR");
+            html += '<div class="timestamp">' + d + '</div>';
+          }
+        });
+        convDetail.innerHTML = html;
+        convDetail.scrollTop = convDetail.scrollHeight;
+      } catch (e) {
+        console.error(e);
+        convDetail.innerHTML = '<h2>Conversation ' + id + '</h2><div class="muted">Erreur réseau.</div>';
+      }
+    };
+    searchInput.addEventListener("input", function() {
+      searchTerm = this.value;
       render();
     });
-  });
-
-  loadData();
-})();
-</script>
+    btnRefresh.addEventListener("click", loadData);
+    chips.forEach(chip => {
+      chip.addEventListener("click", () => {
+        chips.forEach(c => c.classList.remove("active"));
+        chip.classList.add("active");
+        currentFilter = chip.getAttribute("data-filter") || "all";
+        render();
+      });
+    });
+    loadData();
+  })();
+  </script>
 </body>
 </html>
-    """
+"""
 
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
-    # Lancement du service Flask (web + futur assistant téléphone via même /chat/<brand>)
     app.run(host="0.0.0.0", port=port)
