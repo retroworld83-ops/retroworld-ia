@@ -305,6 +305,42 @@ def load_conversation_records(conversation_id: str) -> List[Dict[str, Any]]:
     return records
 
 
+# ---------- NOUVEAU : reconstruction de l'historique depuis les logs ----------
+
+def reconstruct_history_from_logs(conversation_id: str) -> List[Dict[str, str]]:
+    """
+    Reconstruit l'historique complet d'une conversation au format messages OpenAI
+    à partir des fichiers JSONL de logs.
+
+    On alterne :
+      - messages utilisateur / assistant (tel qu'envoyés à /chat/<brand>)
+      - assistant_reply stocké à chaque tour.
+
+    Cela permet d'avoir le contexte même si le front n'envoie que
+    le dernier message utilisateur.
+    """
+    records = load_conversation_records(conversation_id)
+    history: List[Dict[str, str]] = []
+
+    for rec in records:
+        # messages utilisateur + éventuels messages assistant déjà passés par le front
+        rec_msgs = rec.get("user_messages") or []
+        for m in rec_msgs:
+            if not isinstance(m, dict):
+                continue
+            role = m.get("role")
+            content = m.get("content")
+            if role in ("user", "assistant", "system") and content is not None:
+                history.append({"role": role, "content": str(content)})
+
+        # réponse assistant générée par l'IA
+        assistant_text = rec.get("assistant_reply")
+        if assistant_text:
+            history.append({"role": "assistant", "content": str(assistant_text)})
+
+    return history
+
+
 # ---------------------------------------------------------
 # ROUTAGE MARQUE (Runningman / Retroworld)
 # ---------------------------------------------------------
@@ -517,12 +553,49 @@ def chat_route(brand: str):
     metadata["brand_entry"] = brand_entry
     metadata["brand_effective"] = effective_brand
 
+    # ---------- NOUVEAU : reconstruction de l'historique si besoin ----------
+
+    messages_for_prompt: List[Dict[str, Any]] = messages
+    try:
+        # Si le front n'envoie qu'un message utilisateur (cas Tawk / widget simple),
+        # on reconstruit le contexte complet à partir des logs serveurs.
+        only_user_simple = (
+            len(messages) == 1
+            and isinstance(messages[0], dict)
+            and messages[0].get("role") == "user"
+        )
+        no_assistant_msgs = all(
+            (isinstance(m, dict) and m.get("role") != "assistant")
+            for m in messages
+        )
+
+        use_server_history = conversation_id and (only_user_simple or no_assistant_msgs)
+
+        # Possibilité de forcer la désactivation côté front : metadata["no_server_history"] = True
+        if metadata.get("no_server_history") is True:
+            use_server_history = False
+
+        if use_server_history:
+            past_history = reconstruct_history_from_logs(conversation_id)
+            if past_history:
+                # On concatène l'historique complet + les messages reçus sur ce tour
+                messages_for_prompt = past_history + messages
+                logger.info(
+                    "Historique reconstruit pour %s (%d anciens messages + %d nouveaux)",
+                    conversation_id,
+                    len(past_history),
+                    len(messages),
+                )
+    except Exception as e:
+        logger.error("Erreur reconstruction historique pour %s: %s", conversation_id, e)
+        messages_for_prompt = messages  # fallback
+
     # Chargement KB
     kb = load_kb(effective_brand)
 
     # Construction du prompt
     try:
-        prompt_messages = build_prompt(effective_brand, kb, messages, metadata)
+        prompt_messages = build_prompt(effective_brand, kb, messages_for_prompt, metadata)
     except Exception as e:
         logger.error("Erreur build_prompt: %s", e)
         return jsonify({"error": "prompt_build_failed"}), 500
@@ -541,7 +614,7 @@ def chat_route(brand: str):
             conversation_id=conversation_id,
             brand=effective_brand,
             channel=channel,
-            user_messages=messages,
+            user_messages=messages,  # on log uniquement le tour reçu, pas l'historique reconstruit
             assistant_reply=reply_text,
             extra={
                 "brand_entry": brand_entry,
