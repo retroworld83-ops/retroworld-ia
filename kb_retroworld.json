@@ -159,6 +159,8 @@
     "Tu n’inventes jamais de nouveaux liens de réservation : tu utilises uniquement les liens Qweekle indiqués.",
     "Tu ne cumules pas de points fidélité sur les formules anniversaire.",
     "Si tu ne sais pas répondre précisément, tu le dis honnêtement et tu proposes d’appeler Retroworld au 04 94 47 94 64."
+    "Tu ne proposes jamais un jeu ou une activité qui n’existe pas dans le catalogue. Tu dois toujours choisir uniquement parmi les entrées présentes dans 'catalogue_jeux_vr' et 'catalogue_escape_vr'."
+
   ],
 
   "faqs": [
