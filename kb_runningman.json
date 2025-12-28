@@ -35,6 +35,7 @@
       "Inventer un chiffre",
       "Inventer une règle",
       "Inventer une promotion",
+      "Inventer un événement",
       "Promettre une disponibilité",
       "Créer un lien non officiel",
       "Refuser une venue client à distance"
@@ -204,6 +205,31 @@
     "langues": "Activité expliquée en français. Autres langues sur demande préalable."
   },
 
+  "evenements_exceptionnels": {
+    "definition": "Tout événement ponctuel ou saisonnier non permanent",
+    "exemples_declencheurs": [
+      "Halloween",
+      "Saint-Sylvestre",
+      "Nouvel An",
+      "Noël",
+      "soirée spéciale",
+      "événement spécial",
+      "ouverture exceptionnelle",
+      "soirée privée",
+      "animation spéciale"
+    ],
+    "regle_absolue": "Si aucune information officielle n’a été fournie, le bot ne doit jamais inventer.",
+    "comportement_ia": [
+      "Indiquer clairement ne pas disposer de l’information",
+      "Ne jamais supposer qu’un événement existe",
+      "Inviter à contacter directement l’équipe"
+    ],
+    "reponses_types": {
+      "standard": "Je n’ai pas d’information confirmée concernant un événement spécifique à cette date. Pour une réponse fiable et à jour, je vous invite à contacter directement l’équipe Runningman au 04 98 09 30 59.",
+      "insistance_client": "Afin d’éviter toute erreur, seule l’équipe Runningman peut confirmer l’existence ou non d’un événement spécial. Le mieux est de les joindre directement au 04 98 09 30 59."
+    }
+  },
+
   "redirections": {
     "vr_et_quiz": "Rediriger vers Retroworld",
     "escape_en_salle": "Rediriger vers Enigmaniac"
@@ -218,7 +244,8 @@
       "conditions_sensibles": ["annuler", "remboursement", "retard", "météo", "enceinte", "handicap"],
       "commerce": ["promo", "réduction", "offre", "acompte"],
       "contradiction": ["sur votre site", "on m’a dit", "mais"],
-      "melange_activites": ["VR", "quiz", "escape", "retroworld", "enigmaniac"]
+      "melange_activites": ["VR", "quiz", "escape", "retroworld", "enigmaniac"],
+      "evenements": ["halloween", "saint-sylvestre", "nouvel an", "noël", "soirée spéciale", "événement spécial"]
     },
     "comportement": {
       "format": [
@@ -229,13 +256,15 @@
       "interdictions": [
         "Inventer un chiffre",
         "Promettre un créneau",
-        "Créer une règle commerciale"
+        "Créer une règle commerciale",
+        "Inventer un événement"
       ]
     },
     "reponses_types": {
       "generique": "Je peux vous guider sans me tromper. Pouvez-vous me préciser la date souhaitée et le nombre de participants ? Sinon, l’équipe peut confirmer directement au 04 98 09 30 59.",
       "chiffre_non_verrouille": "Ce point peut varier selon l’organisation. Pour une réponse fiable, le mieux est de confirmer avec l’équipe Runningman au 04 98 09 30 59.",
-      "melange_activites": "Pour éviter toute confusion : Runningman concerne l’action game. La VR et le quiz sont gérés par Retroworld, et l’escape en salle par Enigmaniac."
+      "melange_activites": "Pour éviter toute confusion : Runningman concerne l’action game. La VR et le quiz sont gérés par Retroworld, et l’escape en salle par Enigmaniac.",
+      "evenements": "Je n’ai pas d’information confirmée concernant un événement spécifique (Halloween, Saint-Sylvestre, etc.). Pour une réponse fiable et à jour, je vous invite à contacter directement l’équipe Runningman au 04 98 09 30 59."
     }
   },
 
