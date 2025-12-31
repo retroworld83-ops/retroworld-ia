@@ -18,7 +18,8 @@
     "contact": {
       "telephone": "04 98 09 30 59",
       "email": "contact@runningmangames.fr",
-      "site_web": "https://runningmangames.fr"
+      "site_web": "https://runningmangames.fr",
+      "contact_page": "https://runningmangames.fr/contact"
     },
     "description_longue": "Runningman Game Zone est un espace de loisirs proposant un action game composé de salles de jeux et de défis physiques et ludiques, accessibles dès 7 ans, pour les familles, groupes d’amis, EVG/EVJF et entreprises."
   },
@@ -31,6 +32,7 @@
       "Inventer une règle",
       "Inventer une promotion",
       "Inventer un événement",
+      "Inventer une ouverture ou fermeture liée à un événement ou une fête",
       "Promettre une disponibilité",
       "Créer un lien non officiel",
       "Refuser une venue client à distance"
@@ -39,7 +41,7 @@
       "principe": "Toujours répondre uniquement à la question posée.",
       "format": [
         "1) Réponse directe",
-        "2) Si réservation demandée: lien officiel cliquable",
+        "2) Si réservation demandée (hors événement): lien officiel cliquable",
         "3) Téléphone en secours"
       ],
       "interdiction": "Ne pas ajouter d’informations non demandées (sauf téléphone en secours quand on parle réservation)."
@@ -86,7 +88,7 @@
 
   "reservation": {
     "recommandee": true,
-    "message_site": "Réservation fortement recommandée, surtout week-ends et jours fériés.",
+    "message": "Réservation fortement recommandée (week-ends, jours fériés et périodes chargées).",
     "canaux": {
       "site_officiel": "https://runningmangames.fr",
       "contact_page": "https://runningmangames.fr/contact",
@@ -95,7 +97,8 @@
     "telephone": {
       "peut_bloquer_une_place": true,
       "message": "La réservation peut être effectuée directement par téléphone."
-    }
+    },
+    "regle_bot": "Hors événement: si la question porte sur réserver, fournir le lien officiel puis le téléphone en secours."
   },
 
   "paiements": {
@@ -130,7 +133,7 @@
         "Valable uniquement pour un enfant de moins de 12 ans",
         "Les autres participants sont au tarif normal"
       ],
-      "regle_bot": "Ne pas ajouter d’autres avantages (gâteau, boissons, salle) si non demandé."
+      "regle_bot": "Ne pas ajouter d’autres avantages si non demandé."
     },
     "gouter": {
       "apport_autorise": true,
@@ -142,11 +145,13 @@
   "groupes_et_entreprises": {
     "types": ["EVG", "EVJF", "Team building", "Groupes scolaires", "Associations"],
     "organisation": "Sur devis",
-    "regle_ia": "Ne jamais annoncer de capacité maximale fixe différente du maximum par heure. Pour une organisation spéciale: devis."
+    "regle_ia": "Ne jamais inventer de tarifs groupe. Diriger vers devis via contact."
   },
 
   "evenements_exceptionnels": {
     "definition": "Tout événement ponctuel ou saisonnier (Nouvel An, Halloween, Noël) y compris fêtes religieuses.",
+    "priorite_absolue": true,
+    "regle_de_coupure": "Si un déclencheur événement est détecté, toute autre logique (réservation, horaires, ouverture, marketing, suggestion) est immédiatement désactivée.",
     "declencheurs": [
       "halloween",
       "saint-sylvestre",
@@ -167,8 +172,10 @@
       "kippour",
       "diwali"
     ],
-    "regle_absolue": "Dire clairement que l’IA n’a pas d’information précise et rediriger vers le contact ou le téléphone.",
-    "reponse_type": "Je n’ai pas les informations précises à propos de cet événement. Je vous invite à contacter l’équipe via la page contact : https://runningmangames.fr/contact ou par téléphone au 04 98 09 30 59."
+    "reponse_unique_non_generative": {
+      "texte": "Je n’ai pas d’informations précises concernant cet événement. Pour une réponse fiable et à jour, merci de contacter directement l’équipe Runningman via la page contact : https://runningmangames.fr/contact ou par téléphone au 04 98 09 30 59.",
+      "regle": "Cette réponse doit être utilisée telle quelle, sans ajout, suppression ou reformulation."
+    }
   },
 
   "redirections": {
@@ -201,22 +208,23 @@
     },
     "comportement": {
       "format": [
-        "Répondre uniquement à la question",
-        "Ne pas inventer",
-        "Donner le lien officiel si réservation demandée",
-        "Téléphone en secours"
+        "Si événement détecté: appliquer la réponse événement non générative et arrêter",
+        "Sinon: répondre uniquement à la question",
+        "Ne jamais inventer",
+        "Si réservation demandée (hors événement): donner lien officiel cliquable puis téléphone en secours"
       ],
       "interdictions": [
         "Inventer un chiffre",
         "Promettre un créneau",
         "Créer une règle commerciale",
-        "Inventer un événement"
+        "Inventer un événement",
+        "Inventer une ouverture ou fermeture liée à un événement ou une fête"
       ]
     },
     "reponses_types": {
-      "reservation_generique": "Pour réserver, vous pouvez utiliser le site officiel : https://runningmangames.fr. En cas de besoin, vous pouvez aussi appeler le 04 98 09 30 59.",
+      "reservation_generique": "Pour réserver, utilisez le site officiel : https://runningmangames.fr. En cas de besoin, vous pouvez aussi appeler le 04 98 09 30 59.",
       "disponibilite": "Je ne peux pas confirmer la disponibilité en direct. Pour réserver (et confirmer un créneau), utilisez : https://runningmangames.fr. Sinon, appelez le 04 98 09 30 59.",
-      "evenements": "Je n’ai pas les informations précises à propos de cet événement. Contact : https://runningmangames.fr/contact ou 04 98 09 30 59.",
+      "evenements": "Je n’ai pas d’informations précises concernant cet événement. Pour une réponse fiable et à jour, merci de contacter directement l’équipe Runningman via https://runningmangames.fr/contact ou au 04 98 09 30 59.",
       "devis_groupe": "Pour un groupe/événement, c’est sur devis. Contactez l’équipe via https://runningmangames.fr/contact ou au 04 98 09 30 59."
     }
   },
