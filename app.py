@@ -1,35 +1,35 @@
 """
 Flask application for the Retroworld / Runningman conversational assistant.
 
-- /chat/<brand> : chat endpoint
-- /kb/upsert/<brand> : update KB JSON
-- /admin/conversations : admin dashboard (conversations + test bench)
-- /admin/api/conversations, /admin/api/conversation/<id> : admin APIs
-- /admin/api/test : test bench API (multi-questions or raw JSON payload)
-- /webhooks/qweekle : webhook logger
+Goals (hard requirements):
+- Zero hallucination on business rules/prices/capacities: if uncertain -> say so and redirect to official contact.
+- Never confirm availability in-chat.
+- Avoid brand mixing: detect intent (Retroworld vs Runningman) and answer with the correct rules.
+- Provide fast, deterministic answers for the common questions (address, prices, duration, capacity, booking, events…).
+- Offer a professional admin dashboard + an integrated test console to debug multi-question payloads quickly.
 
-Key goals:
-- Zero hallucinations on sensitive topics (events, availability, promos, etc.)
-- No brand mixing (Retroworld vs Runningman)
-- Deterministic "fast answers" for common FAQs
-- Clean admin UI + quick test tooling
+Runtime notes:
+- KB JSON files are loaded from /mnt/data/kb_<brand>.json (overrides) or /app/kb_<brand>.json (embedded).
+- Conversation logs are stored as JSONL files in /mnt/data/logs/conversations/.
 """
 
-import os
+from __future__ import annotations
+
 import json
-import time
 import logging
+import os
 import re
-from datetime import datetime
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
-import urllib.request
-import urllib.error
 
 # ---------------------------------------------------------
-# CONFIGURATION
+# CONFIG
 # ---------------------------------------------------------
 
 app = Flask(__name__)
@@ -44,12 +44,12 @@ BASE_APP_DIR = "/app"
 BASE_LOG_DIR = os.getenv("LOG_DIR", os.path.join(BASE_DATA_DIR, "logs"))
 CONVERSATIONS_LOG_DIR = os.path.join(BASE_LOG_DIR, "conversations")
 QWEEKLE_LOG_DIR = os.path.join(BASE_LOG_DIR, "qweekle")
+
 for d in (BASE_LOG_DIR, CONVERSATIONS_LOG_DIR, QWEEKLE_LOG_DIR):
     os.makedirs(d, exist_ok=True)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-
 ADMIN_DASHBOARD_TOKEN = os.getenv("ADMIN_DASHBOARD_TOKEN", "changeme_admin_token")
 
 QWEEKLE_WEBHOOK_SECRET = os.getenv("QWEEKLE_WEBHOOK_SECRET", "")
@@ -59,95 +59,59 @@ SUPPORTED_BRANDS: set[str] = {"retroworld", "runningman"}
 
 
 # ---------------------------------------------------------
-# CONSTANTS (BUSINESS RULES - LOCKED)
+# KB CACHE
 # ---------------------------------------------------------
 
-RUNNINGMAN = {
-    "name": "Runningman Game Zone",
-    "address": "815 avenue Pierre Brossolette, 83300 Draguignan, France",
-    "same_building_as": "Retroworld",
-    "site": "https://runningmangames.fr",
-    "contact": "https://runningmangames.fr/contact-us/",
-    "phone": "04 98 09 30 59",
-    "session_minutes": 60,
-    "slots": "Créneaux fixes chaque heure",
-    "max_per_hour": 25,
-    "age_min": 7,
-    "needs_adult_under_12": True,
-    "no_adult_from_12": True,
-    "price_under_12": "15€ / personne (moins de 12 ans)",
-    "price_12_plus": "20€ / personne (12 ans et +)",
-    "birthday_offer": "Pour le moment : l’enfant de moins de 12 ans qui fête son anniversaire est offert (les autres participants au tarif normal).",
-    "cake_ok": "Oui, vous pouvez apporter gâteau et boissons.",
-    "fridge": "Oui, un frigo est dédié.",
-    "groups_quote": "Groupes / entreprise / EVG / EVJF / scolaire : sur demande et devis.",
-}
-
-RETROWORLD = {
-    "name": "Retroworld France",
-    "address": "815 avenue Pierre Brossolette, 83300 Draguignan, France",
-    "site": "https://www.retroworldfrance.com",
-    "phone": "04 94 47 94 64",
-    "vr_price": "Jeux VR : 15€ / joueur",
-    "vr_players": "Jusqu’à 5 joueurs",
-    "vr_note": "Une session = 1 jeu (au choix dans le catalogue).",
-    "escape_vr_price": "Escape Game VR : 30€ / joueur",
-    "quiz_prices": "Quiz interactif : 8€ (30min), 15€ (60min), 20€ (90min) – jusqu’à 12 joueurs",
-    "quiz_age": "Dès 10 ans avec accompagnant",
-    "kids_room": "Salle enfant : 50€ / heure (+20€ / demi-heure supplémentaire) – jeux en bois, mur interactif, etc.",
-    "waiting_room": "Salle d’attente : canapés, boissons/snacks, baby-foot, air hockey, borne de basket.",
-}
-
-# Events / holidays / religious triggers (must NOT hallucinate)
-EVENT_TRIGGERS = [
-    # generic
-    "événement", "evenement", "soirée", "soiree", "animation", "spécial", "special",
-    "jour férié", "jour ferie", "férié", "ferie",
-    # common dates
-    "saint-sylvestre", "st sylvestre", "sylvestre", "nouvel an", "nouveau an", "new year",
-    "noël", "noel", "réveillon", "reveillon",
-    "halloween", "pâques", "paques", "toussaint",
-    "ascension", "pentecôte", "pentecote",
-    "1er mai", "premier mai", "fête du travail", "fete du travail",
-    "14 juillet", "15 août", "15 aout", "11 novembre", "8 mai",
-    # religious / cultural
-    "ramadan", "aïd", "aid", "eid", "hanouka", "hanukkah", "kippour", "yom kippur", "diwali",
-]
-
-# Availability triggers (must NOT confirm)
-AVAIL_TRIGGERS = [
-    "dispo", "disponible", "disponibilité", "disponibilite", "il reste", "reste des places",
-    "complet", "complets", "places", "vous avez une place", "vous avez de la place", "créneau", "creneau"
-]
-
-# Booking triggers (link + phone)
-BOOKING_TRIGGERS = [
-    "réserver", "reserver", "réservation", "reservation", "bloquer", "book", "réserve", "reserve",
-    "lien", "où réserver", "ou reserver"
-]
+@dataclass
+class _KBCacheEntry:
+    path: str
+    mtime: float
+    data: Dict[str, Any]
 
 
-# ---------------------------------------------------------
-# UTILITY FUNCTIONS
-# ---------------------------------------------------------
+_KB_CACHE: Dict[str, _KBCacheEntry] = {}
+
+
+def _read_json(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
 
 def load_kb(brand: str) -> Dict[str, Any]:
+    """Load KB with caching and /mnt/data override."""
     brand = (brand or "").lower()
-    candidate_paths = [
+    if brand not in SUPPORTED_BRANDS:
+        return {}
+
+    candidates = [
         os.path.join(BASE_DATA_DIR, f"kb_{brand}.json"),
         os.path.join(BASE_APP_DIR, f"kb_{brand}.json"),
     ]
-    for path in candidate_paths:
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    kb = json.load(f)
-                logger.info("Loaded KB for %s from %s", brand, path)
-                return kb
-            except Exception as e:
-                logger.error("Error reading KB %s: %s", path, e)
-    logger.warning("KB not found for brand %s; using empty KB", brand)
-    return {}
+
+    chosen = None
+    for p in candidates:
+        if os.path.exists(p):
+            chosen = p
+            break
+
+    if not chosen:
+        logger.warning("KB not found for %s; using empty KB", brand)
+        return {}
+
+    try:
+        mtime = os.path.getmtime(chosen)
+        cached = _KB_CACHE.get(brand)
+        if cached and cached.path == chosen and cached.mtime == mtime:
+            return cached.data
+        data = _read_json(chosen)
+        if not isinstance(data, dict):
+            data = {}
+        _KB_CACHE[brand] = _KBCacheEntry(path=chosen, mtime=mtime, data=data)
+        logger.info("Loaded KB for %s from %s", brand, chosen)
+        return data
+    except Exception as e:
+        logger.error("Error reading KB %s: %s", chosen, e)
+        return {}
 
 
 def save_kb(brand: str, kb_data: Dict[str, Any]) -> None:
@@ -156,17 +120,25 @@ def save_kb(brand: str, kb_data: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(kb_data, f, ensure_ascii=False, indent=2)
+    # bust cache
+    if brand in _KB_CACHE:
+        _KB_CACHE.pop(brand, None)
     logger.info("KB %s updated at %s", brand, path)
 
+
+# ---------------------------------------------------------
+# OPENAI CALL
+# ---------------------------------------------------------
 
 def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any]]:
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY missing")
+
     url = "https://api.openai.com/v1/chat/completions"
     payload = {
         "model": OPENAI_MODEL,
         "messages": messages,
-        "temperature": 0.4,
+        "temperature": 0.2,
     }
     data_bytes = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -178,6 +150,7 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
         },
         method="POST",
     )
+
     try:
         with urllib.request.urlopen(req) as resp:
             body = resp.read().decode("utf-8")
@@ -188,60 +161,36 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
     except urllib.error.URLError as e:
         logger.error("OpenAI URLError: %s", e)
         raise
+
     obj = json.loads(body)
     content = obj["choices"][0]["message"]["content"]
     usage = obj.get("usage", {})
-    return content, usage
+    return str(content or ""), usage
 
 
-def _norm(text: str) -> str:
-    return (text or "").strip().lower()
+# ---------------------------------------------------------
+# BRAND DETECTION & SAFE RULES
+# ---------------------------------------------------------
+
+_RETRO_KEYWORDS = [
+    "vr", "réalité virtuelle", "realite virtuelle", "escape vr", "escape game vr",
+    "jeux vr", "jeu vr", "casque", "meta quest", "vive pro", "quiz", "quizz",
+    "quiz interactif", "salle enfant", "mur interactif", "retroworld", "rétroworld",
+    "fidélité", "fidelite", "points", "qr code", "carte cadeau", "billard",
+]
+_RUNNING_KEYWORDS = [
+    "action game", "game zone", "runningman", "running man", "mini-jeux",
+    "mini jeux", "défis", "defis", "physique", "capteur", "gilet",
+]
 
 
-def _contains_any(text: str, needles: List[str]) -> bool:
-    t = _norm(text)
-    return any(n in t for n in needles)
-
-
-def _is_question_about_address(text: str) -> bool:
-    t = _norm(text)
-    return any(k in t for k in ["adresse", "où êtes", "ou êtes", "où etes", "ou etes", "où", "ou ", "localisation", "venir", "comment venir"]) and \
-           any(k in t for k in ["adresse", "où", "ou", "localisation", "venir"])
-
-
-def _is_question_about_building(text: str) -> bool:
-    t = _norm(text)
-    return any(k in t for k in ["bâtiment", "batiment", "même bâtiment", "meme batiment", "dans quel bâtiment", "dans quel batiment"])
-
-
-def _is_simple_greeting(text: str) -> bool:
-    t = _norm(text)
-    return t in ("bonjour", "bonsoir", "salut", "hello", "coucou")
-
-
-def detect_brand_from_text(text: str, default: str = "runningman") -> str:
-    if not text:
-        return default
-    t = text.lower()
-    retro_keywords = [
-        "vr", "réalité virtuelle", "realite virtuelle",
-        "escape vr", "escape game vr",
-        "jeux vr", "jeu vr", "casque vr",
-        "quiz", "quizz", "quiz interactif",
-        "salle enfant", "mur interactif",
-        "anniversaire vr", "retroworld", "rétroworld",
-        "fidélité", "fidelite", "carte de fidélité", "points fidélité", "points de fidelite",
-    ]
-    running_keywords = [
-        "action game", "game zone", "runningman", "running man",
-        "mini-jeux", "mini jeux", "parcours",
-        "gilet", "capteur", "mission physique",
-    ]
-    retro_score = sum(1 for k in retro_keywords if k in t)
-    running_score = sum(1 for k in running_keywords if k in t)
-    if retro_score > running_score and retro_score > 0:
+def detect_brand_from_text(text: str, default: str) -> str:
+    t = (text or "").lower()
+    retro_score = sum(1 for k in _RETRO_KEYWORDS if k in t)
+    run_score = sum(1 for k in _RUNNING_KEYWORDS if k in t)
+    if retro_score > run_score and retro_score > 0:
         return "retroworld"
-    if running_score > retro_score and running_score > 0:
+    if run_score > retro_score and run_score > 0:
         return "runningman"
     if "retroworld" in t or "rétroworld" in t:
         return "retroworld"
@@ -250,109 +199,550 @@ def detect_brand_from_text(text: str, default: str = "runningman") -> str:
     return default
 
 
+# ---------------------------------------------------------
+# FAST ANSWERS (DETERMINISTIC)
+# ---------------------------------------------------------
+
+def _norm(s: str) -> str:
+    s = (s or "").strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    return s
+
+
+def _get_nested(d: Dict[str, Any], path: str, default: Any = None) -> Any:
+    cur: Any = d
+    for key in path.split("."):
+        if not isinstance(cur, dict):
+            return default
+        cur = cur.get(key)
+    return default if cur is None else cur
+
+
+def _retroworld_defaults() -> Dict[str, Any]:
+    # Hard facts, to stop hallucinations even if KB is empty or outdated.
+    return {
+        "adresse": "815 avenue Pierre Brossolette, 83300 Draguignan, France",
+        "site": "https://www.retroworldfrance.com",
+        "tel": "04 94 47 94 64",
+        "vr": {"prix_normal": 15, "prix_majoré": 17, "max_joueurs": 5, "session": "Une session = 1 jeu (au choix dans le catalogue)."},
+        "escape_vr": {"prix_normal": 30, "prix_majoré": 35, "max_joueurs": 5},
+        "quiz": {"prix_30": 8, "prix_60": 15, "prix_90": 20, "max_joueurs": 12, "age": "Dès 10 ans avec accompagnant."},
+        "salle_enfant": {"prix_h": 50, "prix_demi_h_sup": 20, "details": "Jeux en bois, mur interactif, ballayeuse, stockage goûter."},
+        "attente": {"details": "Canapés, boissons/snacks, baby-foot, air hockey, borne de basketball, billard (10€/h), écrans pour suivre les sessions.", "billard": "10€ / heure"},
+        "equipement": "Casques VR professionnels : Vive Pro 2 et Meta Quest 3. Équipements nettoyés entre chaque session.",
+        "jeux_counts": {"jeux_vr": 31, "escape_vr": 28},
+        "horaires_prix": "Tarifs standard de 11h à 20h. Tarifs majorés de 9h à 11h et de 20h à 23h.",
+        "fidelite": {
+            "gains": "1 partie VR = 1 point. 1 escape game VR = 2 points. Pas de points sur les formules anniversaire.",
+            "recompenses": "5 points = 1 quiz 30 min offert. 10 points = 1 partie VR offerte. 20 points = 1 escape game VR offert. Goodies échangeables contre des points.",
+            "utilisation": "Pour cumuler des points, le client doit présenter son QR code ou informer l’équipe avant de jouer. Pour utiliser ses points, il suffit d’en informer un agent/gamemaster lors de la visite.",
+            "consultation": "Points consultables via l’application Retroworld (Android) ou sur le site en se connectant à son compte.",
+        },
+    }
+
+
+def _runningman_defaults() -> Dict[str, Any]:
+    return {
+        "adresse": "815 avenue Pierre Brossolette, 83300 Draguignan, France",
+        "site": "https://runningmangames.fr",
+        "contact": "https://runningmangames.fr/contact",
+        "tel": "04 98 09 30 59",
+        "session": "60 minutes (créneaux fixes chaque heure).",
+        "capacite": "Jusqu’à 25 personnes par heure (organisation selon réservation).",
+        "age": "Accessible dès 7 ans. Les moins de 12 ans doivent être accompagnés d’un adulte.",
+        "tarifs": "15€ / personne (moins de 12 ans) et 20€ / personne (12 ans et + / adulte).",
+        "events_reply": "Je n’ai pas les informations précises à propos de cet événement. Je vous invite à contacter l’équipe via la page contact : https://runningmangames.fr/contact ou par téléphone au 04 98 09 30 59.",
+        "reservation_reply": "Pour réserver, vous pouvez utiliser le site officiel : https://runningmangames.fr. En cas de besoin, vous pouvez aussi appeler le 04 98 09 30 59.",
+        "dispo_reply": "Je ne peux pas confirmer la disponibilité en direct. Pour réserver (et confirmer un créneau), utilisez : https://runningmangames.fr. Sinon, appelez le 04 98 09 30 59.",
+    }
+
+
+def _merge_defaults(brand: str, kb: Dict[str, Any]) -> Dict[str, Any]:
+    base = _retroworld_defaults() if brand == "retroworld" else _runningman_defaults()
+    if not isinstance(kb, dict):
+        return base
+
+    # overlay a few known KB fields if present (non-breaking)
+    if brand == "runningman":
+        adresse = _get_nested(kb, "identite.localisation.adresse_complete")
+        if isinstance(adresse, str) and adresse.strip():
+            base["adresse"] = adresse.strip()
+        tel = _get_nested(kb, "identite.contact.telephone")
+        if isinstance(tel, str) and tel.strip():
+            base["tel"] = tel.strip()
+        site = _get_nested(kb, "identite.contact.site_web")
+        if isinstance(site, str) and site.strip():
+            base["site"] = site.strip()
+        contact = _get_nested(kb, "reservation.canaux.contact_page")
+        if isinstance(contact, str) and contact.strip():
+            base["contact"] = contact.strip()
+
+        # tariffs
+        prix_enfant = _get_nested(kb, "tarification.action_game.enfant.prix")
+        prix_adulte = _get_nested(kb, "tarification.action_game.adulte_accompagnateur.prix")
+        if isinstance(prix_enfant, (int, float)) and isinstance(prix_adulte, (int, float)):
+            base["tarifs"] = f"{int(prix_enfant)}€ / personne (moins de 12 ans) et {int(prix_adulte)}€ / personne (12 ans et + / adulte)."
+
+        # session duration
+        duree = _get_nested(kb, "horaires_et_creneaux.duree_session")
+        if isinstance(duree, str) and duree.strip():
+            base["session"] = duree.strip()
+
+        cap = _get_nested(kb, "horaires_et_creneaux.capacite.maximum_par_heure")
+        if isinstance(cap, (int, float)):
+            base["capacite"] = f"Jusqu’à {int(cap)} personnes par heure (organisation selon réservation)."
+
+    else:
+        # Retroworld: use memory/confirmed facts; if KB provides more, we can overlay carefully.
+        site = _get_nested(kb, "liens_officiels.site")
+        if isinstance(site, str) and site.strip():
+            base["site"] = site.strip()
+        tel = _get_nested(kb, "contact.telephone")
+        if isinstance(tel, str) and tel.strip():
+            base["tel"] = tel.strip()
+
+        # counts
+        n_vr = kb.get("nombre_jeux_vr")
+        n_escape = kb.get("nombre_escape_vr")
+        if isinstance(n_vr, int):
+            base["jeux_counts"]["jeux_vr"] = n_vr
+        if isinstance(n_escape, int):
+            base["jeux_counts"]["escape_vr"] = n_escape
+
+        # pricing blocks if available
+        tarifs = kb.get("tarifs")
+        if isinstance(tarifs, dict):
+            vr = tarifs.get("vr") if isinstance(tarifs.get("vr"), dict) else {}
+            if isinstance(vr, dict):
+                pn = vr.get("horaire_normal")
+                pm = vr.get("horaire_supplement")
+                if isinstance(pn, (int, float)):
+                    base["vr"]["prix_normal"] = int(pn)
+                if isinstance(pm, (int, float)):
+                    base["vr"]["prix_majoré"] = int(pm)
+
+            escape = tarifs.get("escape_vr") if isinstance(tarifs.get("escape_vr"), dict) else {}
+            if isinstance(escape, dict):
+                pn = escape.get("horaire_normal")
+                pm = escape.get("horaire_supplement")
+                if isinstance(pn, (int, float)):
+                    base["escape_vr"]["prix_normal"] = int(pn)
+                if isinstance(pm, (int, float)):
+                    base["escape_vr"]["prix_majoré"] = int(pm)
+
+            quiz = tarifs.get("quiz") if isinstance(tarifs.get("quiz"), dict) else {}
+            if isinstance(quiz, dict):
+                if isinstance(quiz.get("30min"), (int, float)):
+                    base["quiz"]["prix_30"] = int(quiz["30min"])
+                if isinstance(quiz.get("60min"), (int, float)):
+                    base["quiz"]["prix_60"] = int(quiz["60min"])
+                if isinstance(quiz.get("90min"), (int, float)):
+                    base["quiz"]["prix_90"] = int(quiz["90min"])
+
+            salle = tarifs.get("salle_enfant") if isinstance(tarifs.get("salle_enfant"), dict) else {}
+            if isinstance(salle, dict):
+                if isinstance(salle.get("heure"), (int, float)):
+                    base["salle_enfant"]["prix_h"] = int(salle["heure"])
+                if isinstance(salle.get("demi_heure_supplement"), (int, float)):
+                    base["salle_enfant"]["prix_demi_h_sup"] = int(salle["demi_heure_supplement"])
+
+    return base
+
+
+def _is_reservation_intent(t: str) -> bool:
+    t = _norm(t)
+    return any(k in t for k in [
+        "réserver", "reserver", "reservation", "réservation", "bloquer", "creneau", "créneau",
+        "lien", "dispo", "disponible", "place", "places", "complet", "complets",
+    ])
+
+
+def _is_event_intent(t: str) -> bool:
+    t = _norm(t)
+    return any(k in t for k in [
+        "halloween", "saint-sylvestre", "saint sylvestre", "nouvel an", "noël", "noel",
+        "ramadan", "aïd", "aid", "eid", "pâques", "paques", "toussaint", "hanouka",
+        "kippour", "diwali", "jour férié", "jour ferie", "week-end férié", "week end ferie",
+        "événement", "evenement", "soirée spéciale", "soiree speciale",
+    ])
+
+
+def answer_fast(brand: str, kb: Dict[str, Any], text: str, metadata: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Return a deterministic answer when the intent is clearly covered."""
+    brand = (brand or "").lower()
+    facts = _merge_defaults(brand, kb)
+    t = _norm(text)
+    convo_id = ""
+    if isinstance(metadata, dict):
+        convo_id = str(metadata.get("conversation_id") or "").strip()
+
+    # helpers for links
+    def with_convo(url: str) -> str:
+        if not convo_id:
+            return url
+        if "?" in url:
+            return f"{url}&convo_id={convo_id}"
+        return f"{url}?convo_id={convo_id}"
+
+    if brand == "runningman":
+        # Address / location
+        if re.search(r"\b(adresse|où|ou|localisation|vous êtes où|vous etes ou)\b", t) and "vr" not in t:
+            if "bâtiment" in t or "batiment" in t or "même bâtiment" in t or "meme batiment" in t:
+                return f"Nous sommes dans le même bâtiment que Retroworld : {facts['adresse']}."
+            return f"Adresse : {facts['adresse']}."
+
+        # What is it / what do you do
+        if any(k in t for k in ["c’est quoi runningman", "c'est quoi runningman", "il y a quoi", "vous faites quoi", "action game", "mini-jeux", "mini jeux"]) and "retroworld" not in t:
+            return (
+                "Runningman Game Zone propose un action game (mini-jeux physiques) en équipe : "
+                f"{facts['session']} {facts['capacite']} {facts['age']}"
+            )
+
+        # Not laser / not room escape (redirect)
+        if "laser" in t:
+            return f"Non, ici c’est un action game (mini-jeux physiques), pas un laser game. Pour réserver : {facts['site']} | {facts['tel']}."
+        if ("escape" in t and "vr" not in t) or "escape game en salle" in t:
+            return (
+                "Runningman concerne l’action game. Pour un escape game en salle, c’est Enigmaniac (organisation séparée). "
+                f"Pour Runningman : {facts['site']} | {facts['tel']}."
+            )
+
+        # Duration / sessions
+        if any(k in t for k in ["durée", "duree", "combien de temps", "1h", "60"]):
+            return f"Une session dure {facts['session']}"
+
+        # Capacity
+        if any(k in t for k in ["combien de personnes", "capacité", "capacite", "personnes max", "maximum"]):
+            return facts["capacite"]
+        if re.search(r"\b(on est|nous sommes)\s+(\d+)\b", t):
+            m = re.search(r"\b(on est|nous sommes)\s+(\d+)\b", t)
+            if m:
+                n = int(m.group(2))
+                if n <= 25:
+                    return f"Oui, jusqu’à 25 personnes par heure (selon réservation). Pour réserver : {facts['site']} | {facts['tel']}."
+                return (
+                    "La capacité est de 25 personnes par heure. Au-delà, c’est possible uniquement sur organisation (sur demande/devis). "
+                    f"Contact : {facts['contact']} | {facts['tel']}."
+                )
+
+        # Prices
+        if any(k in t for k in ["tarif", "tarifs", "prix", "c’est combien", "ça coûte", "ca coute"]):
+            return f"Tarifs : {facts['tarifs']}"
+
+        # Age / accompaniment
+        if any(k in t for k in ["âge", "age", "à partir", "dès quel", "des quel", "enfant", "mon fils", "accompagn"]):
+            return facts["age"]
+
+        # Booking / availability
+        if _is_event_intent(t):
+            return facts["events_reply"]
+        if any(k in t for k in ["dispo", "disponible", "places", "place", "complet", "complets"]):
+            return facts["dispo_reply"]
+        if _is_reservation_intent(t):
+            return facts["reservation_reply"]
+
+        # Groups / companies -> devis
+        if any(k in t for k in ["entreprise", "team", "devis", "evg", "evjf", "scolaire", "association", "groupe"]):
+            return f"Groupes / entreprise / EVG / EVJF / scolaire : sur demande et devis. Contact : {facts['contact']} | {facts['tel']}."
+
+        # Birthday basics from KB if present
+        if "anniversaire" in t:
+            return (
+                "Oui, les anniversaires sont possibles sur demande. "
+                "Pour le moment : l’enfant de moins de 12 ans qui fête son anniversaire est offert (les autres participants au tarif normal). "
+                "Vous pouvez apporter gâteau et boissons, et un frigo est dédié. "
+                f"Contact : {facts['contact']} | {facts['tel']}."
+            )
+        if "gâteau" in t or "gateau" in t or "boisson" in t or "frigo" in t:
+            return "Oui, vous pouvez apporter gâteau et boissons. Un frigo est dédié."
+
+        return None
+
+    # -----------------------------------------------------
+    # RETROWORLD
+    # -----------------------------------------------------
+
+    # Address / location
+    if re.search(r"\b(adresse|où|ou|localisation|vous êtes où|vous etes ou)\b", t):
+        if "bâtiment" in t or "batiment" in t:
+            return f"Nous sommes dans le même bâtiment que Runningman : {facts['adresse']}."
+        return f"Adresse : {facts['adresse']}."
+
+    # Brand confusion
+    if any(k in t for k in ["runningman", "action game", "mini-jeux", "mini jeux", "physique"]) and not any(k in t for k in ["vr", "quiz", "salle enfant", "escape vr", "retroworld"]):
+        return (
+            "Pour l’action game / mini-jeux physiques, c’est Runningman Game Zone (même bâtiment). "
+            f"Contact Runningman : {with_convo(_runningman_defaults()['site'])} | 04 98 09 30 59."
+        )
+
+    # What is Retroworld / activities
+    if any(k in t for k in ["c’est quoi retroworld", "c'est quoi retroworld", "vous faites quoi", "activités", "activites"]):
+        jc = facts["jeux_counts"]
+        return (
+            "Retroworld propose : jeux VR, escape games VR, quiz interactifs et salle enfant. "
+            f"Catalogue : {jc['jeux_vr']} jeux VR et {jc['escape_vr']} scénarios d’escape VR. "
+            f"{facts['horaires_prix']} "
+            f"Adresse : {facts['adresse']}."
+        )
+
+    # VR
+    if "vr" in t or "réalité virtuelle" in t or "realite virtuelle" in t:
+        if any(k in t for k in ["prix", "tarif", "ça coûte", "ca coute", "combien"]):
+            return f"Jeux VR : {facts['vr']['prix_normal']}€ / joueur (tarif standard 11h-20h) et {facts['vr']['prix_majoré']}€ / joueur (9h-11h & 20h-23h). Jusqu’à {facts['vr']['max_joueurs']} joueurs. {facts['vr']['session']}"
+        if any(k in t for k in ["combien de joueurs", "joueurs max", "max", "on peut être", "on peut etre", "solo", "duo", "trio"]):
+            return f"Jeux VR : jusqu’à {facts['vr']['max_joueurs']} joueurs en même temps. {facts['vr']['session']}"
+        if any(k in t for k in ["session", "un jeu", "choisir", "catalogue"]):
+            return f"{facts['vr']['session']} Catalogue : {facts['jeux_counts']['jeux_vr']} jeux VR."
+        return f"Jeux VR : {facts['vr']['prix_normal']}€ / joueur (jusqu’à {facts['vr']['max_joueurs']} joueurs). {facts['vr']['session']}"
+
+    # Escape VR
+    if "escape" in t and "vr" in t:
+        if any(k in t for k in ["prix", "tarif", "30", "combien"]):
+            return f"Escape game VR : {facts['escape_vr']['prix_normal']}€ / joueur (tarif standard 11h-20h) et {facts['escape_vr']['prix_majoré']}€ / joueur (9h-11h & 20h-23h). Jusqu’à {facts['escape_vr']['max_joueurs']} joueurs."
+        if any(k in t for k in ["combien de joueurs", "joueurs max", "max", "à 2", "a 2", "à 5", "a 5"]):
+            return f"Escape game VR : jusqu’à {facts['escape_vr']['max_joueurs']} joueurs (selon scénario)."
+        if any(k in t for k in ["scénarios", "scenarios", "catalogue"]):
+            return f"Nous avons {facts['jeux_counts']['escape_vr']} scénarios d’escape game VR."
+        return f"Escape game VR : {facts['escape_vr']['prix_normal']}€ / joueur (jusqu’à {facts['escape_vr']['max_joueurs']} joueurs)."
+
+    # Escape in room (not VR) -> redirect Enigmaniac
+    if ("escape" in t and "vr" not in t) or "escape game en salle" in t:
+        return "Nous proposons des escape games en VR. Pour un escape game en salle (non-VR), c’est Enigmaniac (organisation séparée)."
+
+    # Quiz
+    if "quiz" in t or "quizz" in t:
+        q = facts["quiz"]
+        if any(k in t for k in ["prix", "tarif", "30", "60", "90"]):
+            return f"Quiz interactif : {q['prix_30']}€ (30min), {q['prix_60']}€ (60min), {q['prix_90']}€ (90min) – jusqu’à {q['max_joueurs']} joueurs. {q['age']}"
+        if any(k in t for k in ["combien de joueurs", "jusqu", "max", "12", "14"]):
+            return f"Quiz interactif : jusqu’à {q['max_joueurs']} joueurs. {q['age']}"
+        if any(k in t for k in ["âge", "age", "enfant", "10", "9"]):
+            return f"Quiz interactif : {q['age']}"
+        return f"Quiz interactif : {q['prix_30']}€ (30min), {q['prix_60']}€ (60min), {q['prix_90']}€ (90min) – jusqu’à {q['max_joueurs']} joueurs. {q['age']}"
+
+    # Salle enfant
+    if "salle enfant" in t or ("salle" in t and "enfant" in t):
+        s = facts["salle_enfant"]
+        if any(k in t for k in ["prix", "tarif", "combien", "50", "20", "demi"]):
+            return f"Salle enfant : {s['prix_h']}€ / heure (+{s['prix_demi_h_sup']}€ / demi-heure supplémentaire) – {s['details']}"
+        if any(k in t for k in ["contient", "mur", "stock", "goûter", "gouter"]):
+            return f"Salle enfant : {s['details']} (goûter possible sur devis)."
+        return f"Salle enfant : {s['prix_h']}€ / heure (+{s['prix_demi_h_sup']}€ / demi-heure supplémentaire) – {s['details']}"
+
+    # Salle d'attente
+    if "salle d’attente" in t or "salle d'attente" in t or "attente" in t or "baby-foot" in t or "babyfoot" in t or "air hockey" in t or "basket" in t or "snack" in t or "café" in t or "cafe" in t or "billard" in t:
+        return f"Salle d’attente : {facts['attente']['details']}"
+
+    # Hygiene / equipment
+    if any(k in t for k in ["netto", "désinfect", "desinfect", "casque", "vive pro", "quest"]):
+        return facts["equipement"]
+
+    # Loyalty
+    if any(k in t for k in ["fidél", "fidel", "points", "palier", "qr code", "qr"]):
+        f = facts["fidelite"]
+        if any(k in t for k in ["10", "palier 10"]):
+            return "Palier 10 points : 1 partie VR offerte."
+        if any(k in t for k in ["20", "palier 20"]):
+            return "Palier 20 points : 1 escape game VR offert."
+        if any(k in t for k in ["5", "palier 5"]):
+            return "Palier 5 points : 1 quiz de 30 minutes offert."
+        if "comment" in t and "consult" in t:
+            return f"Pour consulter vos points : {f['consultation']}"
+        if "qr" in t:
+            return f["utilisation"]
+        return f"{f['gains']} Récompenses : {f['recompenses']}"
+
+    # Payments (never guarantee beyond what is known)
+    if any(k in t for k in ["chèque vacances", "cheque vacances", "ancv"]):
+        return "Oui, nous acceptons les chèques vacances."
+    if "ticket resto" in t or "tickets resto" in t:
+        return "Non, nous n’acceptons pas les tickets restaurant."
+    if "carte" in t and any(k in t for k in ["payer", "paiement", "cb", "bancaire"]):
+        return "Nous acceptons les paiements par carte bancaire."
+    if "espèce" in t or "espece" in t:
+        return "Oui, les paiements en espèces sont acceptés."
+
+    # Events: never invent
+    if _is_event_intent(t):
+        return f"Je n’ai pas d’informations précises concernant cet événement. Pour une réponse fiable et à jour, merci de contacter l’équipe Retroworld au {facts['tel']} ou via le site : {facts['site']}."
+
+    # Booking / availability (Retroworld: always say "Disponible" but do not confirm time slot)
+    if any(k in t for k in ["place", "places", "dispo", "disponible", "complet", "complets"]) and any(k in t for k in ["18h", "19h", "20h", "ce soir", "demain"]):
+        return f"Je ne peux pas confirmer la disponibilité en direct via le chat. Pour une confirmation rapide, vous pouvez appeler le {facts['tel']} ou réserver via {facts['site']}."
+    if _is_reservation_intent(t):
+        if "lien" in t or "où réserver" in t or "ou reserver" in t:
+            return f"Pour réserver : {facts['site']} (ou par téléphone au {facts['tel']})."
+        gouter_hint = ""
+        if "samedi" in t and ("2 semaines" in t or "deux semaines" in t):
+            gouter_hint = " Si c’est un anniversaire un samedi dans 2 semaines ou plus, nous pouvons proposer l’option goûter (sur devis)."
+        return (
+            "Disponible. Pouvez-vous me préciser la date, l’heure souhaitée, le nombre de participants et l’âge des enfants (s’il y en a) ?"
+            f"{gouter_hint} Site : {facts['site']} | Téléphone : {facts['tel']}."
+        )
+
+    return None
+
+
+# ---------------------------------------------------------
+# PROMPT BUILDING (STRICT)
+# ---------------------------------------------------------
+
+def _kb_identity_line(brand: str, kb: Dict[str, Any]) -> str:
+    if brand == "runningman":
+        ident = kb.get("identite") if isinstance(kb, dict) else None
+        if isinstance(ident, dict):
+            nom = ident.get("nom") or "Runningman Game Zone"
+            role_ia = ident.get("role_ia") or "Assistant IA"
+            return f"Vous êtes {role_ia} de {nom}."
+        return "Vous êtes l’assistant IA de Runningman Game Zone."
+    else:
+        ident = kb.get("identite") if isinstance(kb, dict) else None
+        if isinstance(ident, dict):
+            nom = ident.get("nom") or "Retroworld France"
+            return f"Vous êtes l’assistant IA officiel de {nom}."
+        return "Vous êtes l’assistant IA officiel de Retroworld France."
+
+
 def build_prompt(
     brand: str,
     kb: Dict[str, Any],
     messages: List[Dict[str, Any]],
     metadata: Dict[str, Any],
 ) -> List[Dict[str, str]]:
+    """
+    Build a strict system prompt:
+    - Use ONLY the facts below. If a fact isn't present, say you don't know and redirect to official contact.
+    - Never confirm availability in chat.
+    - Avoid mixing brands.
+    """
     brand = (brand or "").lower()
-    system_parts: List[str] = []
+    facts = _merge_defaults(brand, kb)
 
-    identite = kb.get("identite") if isinstance(kb, dict) else None
-    if isinstance(identite, dict):
-        nom = identite.get("nom") or brand.title()
-        role = identite.get("role_ia") or identite.get("role") or ""
-        system_parts.append(f"Tu es l'assistant IA de {nom}. {role}".strip())
-    elif isinstance(identite, str):
-        system_parts.append(identite)
+    system_rules = [
+        _kb_identity_line(brand, kb),
+        "Vous répondez en français. Vouvoiement obligatoire.",
+        "Règle d’or : N’inventez jamais un chiffre, une règle, une promo, un événement ou un horaire non confirmé.",
+        "Si une info n’est pas dans les FACTS ci-dessous, dites clairement que vous n’avez pas l’information et redirigez vers le contact officiel.",
+        "Disponibilités : ne jamais confirmer un créneau ou dire 'il reste de la place'. Orientez vers réservation / téléphone.",
+        "Marques : Retroworld (VR, escape VR, quiz, salle enfant). Runningman (action game, mini-jeux physiques). Ne mélangez pas tarifs/règles.",
+        "Format : 1) réponse directe. 2) si réservation demandée -> lien officiel. 3) téléphone en secours.",
+        "Ne pas ajouter d’informations non demandées (sauf le téléphone quand on parle réservation).",
+    ]
 
-    prompt_section = kb.get("prompt") if isinstance(kb, dict) else None
-    if isinstance(prompt_section, str):
-        system_parts.append(prompt_section)
-    elif isinstance(prompt_section, dict):
-        for key in sorted(prompt_section.keys()):
-            val = prompt_section[key]
-            if isinstance(val, str) and val.strip():
-                system_parts.append(val.strip())
+    # Brand-specific contacts + key facts
+    if brand == "runningman":
+        facts_block = [
+            f"Adresse : {facts['adresse']}",
+            f"Réservation : {facts['site']} (contact : {facts['contact']}) | {facts['tel']}",
+            f"Session : {facts['session']}",
+            f"Capacité : {facts['capacite']}",
+            f"Âge : {facts['age']}",
+            f"Tarifs : {facts['tarifs']}",
+            "Événements/horaires fériés : si demandé, répondre que vous n’avez pas l’info précise et rediriger vers la page contact ou téléphone.",
+        ]
+    else:
+        jc = facts["jeux_counts"]
+        facts_block = [
+            f"Adresse : {facts['adresse']}",
+            f"Contact : {facts['site']} | {facts['tel']}",
+            f"Catalogue : {jc['jeux_vr']} jeux VR et {jc['escape_vr']} scénarios d’escape VR",
+            f"Plages tarifaires : {facts['horaires_prix']}",
+            f"Jeux VR : {facts['vr']['prix_normal']}€ (standard) / {facts['vr']['prix_majoré']}€ (majoré) par joueur, jusqu’à {facts['vr']['max_joueurs']} joueurs. {facts['vr']['session']}",
+            f"Escape VR : {facts['escape_vr']['prix_normal']}€ (standard) / {facts['escape_vr']['prix_majoré']}€ (majoré) par joueur, jusqu’à {facts['escape_vr']['max_joueurs']} joueurs.",
+            f"Quiz : {facts['quiz']['prix_30']}€ (30min), {facts['quiz']['prix_60']}€ (60min), {facts['quiz']['prix_90']}€ (90min), jusqu’à {facts['quiz']['max_joueurs']} joueurs. {facts['quiz']['age']}",
+            f"Salle enfant : {facts['salle_enfant']['prix_h']}€ /h (+{facts['salle_enfant']['prix_demi_h_sup']}€ / 30 min), {facts['salle_enfant']['details']} (goûter possible sur devis).",
+            f"Salle d’attente : {facts['attente']['details']}",
+            f"Hygiène/matériel : {facts['equipement']}",
+            f"Fidélité : {facts['fidelite']['gains']} Récompenses : {facts['fidelite']['recompenses']} {facts['fidelite']['utilisation']} {facts['fidelite']['consultation']}",
+            "Événements/horaires fériés : si demandé, répondre que vous n’avez pas l’info précise et rediriger vers Retroworld (site/téléphone).",
+            "IMPORTANT : la formule 'goûter à volonté' est périmée -> ne jamais la proposer. Goûter uniquement sur devis.",
+        ]
 
-    instr = kb.get("instructions_generales") if isinstance(kb, dict) else None
-    if isinstance(instr, list):
-        for item in instr:
-            if isinstance(item, str) and item.strip():
-                system_parts.append(item.strip())
-    elif isinstance(instr, str) and instr.strip():
-        system_parts.append(instr.strip())
-
-    brand_entry = metadata.get("brand_entry")
-    brand_effective = metadata.get("brand_effective")
-    if brand_entry and brand_effective and brand_entry != brand_effective:
-        system_parts.append(
-            f"La conversation vient d'un canal associé à '{brand_entry}', "
-            f"mais tu dois répondre en utilisant les règles et tarifs de '{brand_effective}'. "
-            "Explique clairement au client si c'est Retroworld (VR, quiz, salle enfant) "
-            "ou Runningman (action game, mini-jeux physiques)."
-        )
-
-    anti_err = kb.get("anti_erreurs") if isinstance(kb, dict) else None
-    if isinstance(anti_err, list):
-        for item in anti_err:
-            if isinstance(item, str) and item.strip():
-                system_parts.append(item.strip())
-    elif isinstance(anti_err, str) and anti_err.strip():
-        system_parts.append(anti_err.strip())
-
-    # Fallback defaults: strict + brand-safe
-    if not kb or not system_parts:
-        if brand == "retroworld":
-            system_parts.append(
-                "Tu es l'assistant officiel de Retroworld France à Draguignan. "
-                "Tu réponds en français, vouvoiement uniquement. "
-                "Règle réservation: si le client veut réserver, tu réponds toujours 'Disponible.' puis tu demandes date/heure/nombre. "
-                "Tu ne mélanges jamais avec Runningman. "
-                "Si la question concerne un événement ponctuel (Noël, Saint-Sylvestre, Halloween, fêtes religieuses ou jours fériés), "
-                "tu dis que tu n'as pas d'informations précises et tu proposes d'appeler le 04 94 47 94 64."
-            )
-        elif brand == "runningman":
-            system_parts.append(
-                "Tu es l'assistant officiel de Runningman Game Zone à Draguignan. "
-                "Tu réponds en français, vouvoiement uniquement. "
-                "Tu ne confirmes jamais une disponibilité en direct: tu renvoies vers https://runningmangames.fr et le 04 98 09 30 59. "
-                "Pour les événements ponctuels (Noël, Saint-Sylvestre, Halloween, fêtes religieuses, jours fériés), "
-                "tu dis que tu n'as pas d'informations précises et tu renvoies vers https://runningmangames.fr/contact-us/ ou le 04 98 09 30 59. "
-                "Tu ne mélanges jamais avec Retroworld."
-            )
-
-    system_text = "\n\n".join([p for p in system_parts if p.strip()])
-    prompt_messages: List[Dict[str, str]] = []
-    if system_text:
-        prompt_messages.append({"role": "system", "content": system_text})
-
-    meta_context: List[str] = []
+    convo_id = str(metadata.get("conversation_id") or "").strip()
+    meta_lines: List[str] = []
     if metadata.get("source"):
-        meta_context.append(f"Source de la demande : {metadata['source']}.")
+        meta_lines.append(f"Source : {metadata['source']}.")
     if metadata.get("page_url"):
-        meta_context.append(f"URL de la page : {metadata['page_url']}.")
-    conv_id = metadata.get("conversation_id")
-    if conv_id:
-        meta_context.append(
-            "ID de conversation partagé entre sites : "
-            f"{conv_id}. "
-            "Si tu proposes un lien vers Runningman ou Retroworld, "
-            "tu peux ajouter le paramètre ?convo_id="
-            f"{conv_id} pour continuer la conversation sur l'autre site."
-        )
-    if meta_context:
-        prompt_messages.append({"role": "system", "content": " ".join(meta_context)})
+        meta_lines.append(f"Page : {metadata['page_url']}.")
+    if convo_id:
+        meta_lines.append(f"Conversation ID : {convo_id}.")
 
+    system_text = "\n".join([
+        "\n".join(system_rules),
+        "",
+        "FACTS (utilisez uniquement ces informations) :",
+        "\n".join(f"- {line}" for line in facts_block),
+        "",
+        "Si l’utilisateur demande Runningman depuis Retroworld (ou inversement), expliquez que c’est une activité distincte dans le même bâtiment et donnez le bon contact.",
+    ])
+
+    prompt_messages: List[Dict[str, str]] = [{"role": "system", "content": system_text}]
+    if meta_lines:
+        prompt_messages.append({"role": "system", "content": " ".join(meta_lines)})
+
+    # Conversation history
     for msg in messages:
+        if not isinstance(msg, dict):
+            continue
         role = msg.get("role")
         content = msg.get("content")
-        if role and content is not None and role in ("user", "assistant", "system"):
+        if role in ("user", "assistant", "system") and content is not None:
             prompt_messages.append({"role": role, "content": str(content)})
 
     return prompt_messages
 
+
+# ---------------------------------------------------------
+# GUARDRAILS FOR OPENAI OUTPUT
+# ---------------------------------------------------------
+
+_RETRO_BANNED = [
+    "goûter à volonté", "gouter à volonté", "crêpes", "crepes", "gaufres", "barbe à papa",
+    "granité", "granite", "meta quest 2", "quest 2",
+]
+_RETRO_SAFE_FALLBACK = (
+    "Pour ce point, je préfère éviter toute erreur. "
+    "Pouvez-vous contacter l’équipe Retroworld au 04 94 47 94 64 ou via https://www.retroworldfrance.com ?"
+)
+
+_RUNNING_BANNED = ["tournoi", "promotion", "promo", "réduction", "reduction", "événement confirmé", "evenement confirme"]
+
+
+def guard_openai_reply(brand: str, reply: str) -> Tuple[str, List[str]]:
+    """If the model output contains banned/known-wrong claims, replace with a safe fallback."""
+    brand = (brand or "").lower()
+    r = reply or ""
+    r_low = r.lower()
+    hits: List[str] = []
+
+    if brand == "retroworld":
+        for b in _RETRO_BANNED:
+            if b in r_low:
+                hits.append(b)
+        if hits:
+            return _RETRO_SAFE_FALLBACK, hits
+
+    if brand == "runningman":
+        for b in _RUNNING_BANNED:
+            if b in r_low:
+                hits.append(b)
+        # If it mentions availability as certain, block
+        if re.search(r"\b(dispo|disponible|il reste|places disponibles|c['’]est bon)\b", r_low) and "ne peux pas confirmer" not in r_low:
+            hits.append("availability_claim")
+        if hits:
+            return (
+                "Je ne peux pas confirmer la disponibilité ou des offres en direct. "
+                "Pour une réponse fiable, merci de réserver via https://runningmangames.fr "
+                "ou d’appeler le 04 98 09 30 59.",
+                hits,
+            )
+
+    return r, hits
+
+
+# ---------------------------------------------------------
+# LOGGING
+# ---------------------------------------------------------
 
 def append_conversation_log(
     conversation_id: Optional[str],
@@ -365,7 +755,6 @@ def append_conversation_log(
     if not conversation_id:
         conversation_id = f"conv_{int(time.time())}"
     path = os.path.join(CONVERSATIONS_LOG_DIR, f"{conversation_id}.jsonl")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
     record = {
         "timestamp": time.time(),
         "conversation_id": conversation_id,
@@ -391,10 +780,11 @@ def load_conversation_records(conversation_id: str) -> List[Dict[str, Any]]:
                 continue
             try:
                 rec = json.loads(line)
-                records.append(rec)
+                if isinstance(rec, dict):
+                    records.append(rec)
             except Exception:
                 continue
-    records.sort(key=lambda r: r.get("timestamp") or 0.0)
+    records.sort(key=lambda r: float(r.get("timestamp") or 0.0))
     return records
 
 
@@ -429,317 +819,110 @@ def classify_conversation_brands(records: List[Dict[str, Any]]) -> Dict[str, Any
     if not brands_seen:
         return {"brand_final": "unknown", "brands_seen": []}
     if len(brands_seen) == 1:
-        return {"brand_final": list(brands_seen)[0], "brands_seen": list(brands_seen)}
+        b = next(iter(brands_seen))
+        return {"brand_final": b, "brands_seen": [b]}
     brand_final = last_effective or "mixed"
     if brand_final not in ("runningman", "retroworld"):
         brand_final = "mixed"
     return {"brand_final": brand_final, "brands_seen": list(brands_seen)}
 
 
-def append_qweekle_event(event_type: str, payload: Dict[str, Any]) -> None:
-    fname = f"{event_type or 'unknown'}.jsonl"
-    path = os.path.join(QWEEKLE_LOG_DIR, fname)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    record = {
-        "timestamp": time.time(),
-        "event_type": event_type,
-        "payload": payload,
-        "source": QWEEKLE_SOURCE_NAME,
-    }
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-
 # ---------------------------------------------------------
-# FAST ANSWERS (NO OPENAI) - IMPORTANT
+# CORE CHAT PROCESSOR
 # ---------------------------------------------------------
 
-def fast_answer(
-    brand_effective: str,
-    user_text: str,
-) -> Optional[str]:
-    """
-    Deterministic answers for common questions.
-    If None => let OpenAI answer.
-    IMPORTANT: Never default to "address" unless it's really an address question.
-    """
-    t = _norm(user_text)
-    if not t:
-        return None
-
-    # Events: always "no precise info" + contact + phone (both brands)
-    if _contains_any(t, EVENT_TRIGGERS):
-        if brand_effective == "runningman":
-            return (
-                "Je n’ai pas d’informations précises concernant cet événement. "
-                f"Pour une réponse fiable et à jour, merci de contacter directement l’équipe Runningman via la page contact : {RUNNINGMAN['contact']} "
-                f"ou par téléphone au {RUNNINGMAN['phone']}."
-            )
-        return (
-            "Je n’ai pas d’informations précises concernant cet événement. "
-            f"Pour une réponse fiable et à jour, merci de contacter l’équipe Retroworld au {RETROWORLD['phone']} "
-            f"ou via le site : {RETROWORLD['site']}."
-        )
-
-    # Greetings: short
-    if _is_simple_greeting(t):
-        if brand_effective == "runningman":
-            return (
-                "Bonjour 👋 Je suis Harry, l’assistant de Runningman. "
-                "Posez-moi vos questions sur l’action game, les groupes ou la réservation."
-            )
-        return (
-            "Bonjour 👋 Je suis l’assistant Retroworld. "
-            "Posez-moi vos questions sur la VR, l’escape game VR, le quiz ou la salle enfant."
-        )
-
-    # Address / location
-    if _is_question_about_building(t):
-        # Must mention same building + full address
-        return (
-            f"Nous sommes dans le même bâtiment que {RUNNINGMAN['same_building_as']} : {RUNNINGMAN['address']}."
-        )
-
-    if "adresse" in t or "où êtes" in t or "ou êtes" in t or "où etes" in t or "ou etes" in t or "localisation" in t or "vous êtes où" in t or "vous etes ou" in t:
-        if brand_effective == "runningman":
-            return f"Adresse : {RUNNINGMAN['address']}."
-        return f"Adresse : {RETROWORLD['address']}."
-
-    # Availability: never confirm
-    if _contains_any(t, AVAIL_TRIGGERS):
-        if brand_effective == "runningman":
-            return (
-                "Je ne peux pas confirmer la disponibilité en direct. "
-                f"Pour réserver (et confirmer un créneau), utilisez : {RUNNINGMAN['site']}. "
-                f"Sinon, appelez le {RUNNINGMAN['phone']}."
-            )
-        # Retroworld: follow your rule (always available) only for reservation; here it's availability
-        return (
-            "Je ne peux pas confirmer la disponibilité en direct via le chat. "
-            f"Pour une confirmation rapide, vous pouvez appeler le {RETROWORLD['phone']} "
-            f"ou réserver via {RETROWORLD['site']}."
-        )
-
-    # Booking / link
-    if _contains_any(t, BOOKING_TRIGGERS):
-        if brand_effective == "runningman":
-            return (
-                f"Pour réserver, utilisez le site officiel : {RUNNINGMAN['site']}. "
-                f"En cas de besoin, vous pouvez aussi appeler le {RUNNINGMAN['phone']}."
-            )
-        # Retroworld: strict requirement
-        extra = ""
-        if "samedi" in t and ("2 semaine" in t or "deux semaine" in t or "15 jour" in t):
-            extra = " Si c’est un anniversaire un samedi dans 2 semaines ou plus, nous pouvons proposer l’option goûter (à confirmer avec vous)."
-        return (
-            f"Disponible. Pouvez-vous me préciser la date, l’heure souhaitée, le nombre de participants et l’âge des enfants (s’il y en a) ?"
-            f"{extra} Site : {RETROWORLD['site']} | Téléphone : {RETROWORLD['phone']}."
-        )
-
-    # Brand-specific FAQs
-    if brand_effective == "runningman":
-        # What is it / what do you do
-        if any(k in t for k in ["c’est quoi", "c'est quoi", "il y a quoi", "quoi chez vous", "action game", "runningman"]):
-            return (
-                f"{RUNNINGMAN['name']} propose un action game (mini-jeux physiques) en équipe : "
-                f"{RUNNINGMAN['session_minutes']} minutes, départ chaque heure, jusqu’à {RUNNINGMAN['max_per_hour']} personnes par heure. "
-                f"Accessible dès {RUNNINGMAN['age_min']} ans (accompagnateur requis pour les moins de 12 ans)."
-            )
-
-        # Laser game / escape room confusion
-        if "laser" in t:
-            return (
-                "Non, ici c’est un action game (mini-jeux physiques), pas un laser game. "
-                f"Pour réserver : {RUNNINGMAN['site']} | {RUNNINGMAN['phone']}."
-            )
-        if "escape" in t and ("salle" in t or "en salle" in t):
-            return (
-                "Runningman concerne l’action game. Pour un escape game en salle, c’est Enigmaniac (organisation séparée). "
-                f"Pour Runningman : {RUNNINGMAN['site']} | {RUNNINGMAN['phone']}."
-            )
-
-        # Duration / slots
-        if any(k in t for k in ["durée", "duree", "combien de temps", "minutes", "1h", "une heure"]):
-            return f"Une session dure {RUNNINGMAN['session_minutes']} minutes ({RUNNINGMAN['slots']})."
-        if "créneau" in t or "creneau" in t or "départ" in t or "depart" in t:
-            return (
-                f"{RUNNINGMAN['slots']} (session {RUNNINGMAN['session_minutes']} minutes). "
-                f"Pour réserver un créneau : {RUNNINGMAN['site']} | {RUNNINGMAN['phone']}."
-            )
-
-        # Capacity
-        if any(k in t for k in ["combien de personnes", "capacité", "capacite", "max", "maximum", "on est "]):
-            if re.search(r"\bon est\s+(\d+)\b", t):
-                m = re.search(r"\bon est\s+(\d+)\b", t)
-                n = int(m.group(1)) if m else 0
-                if n <= RUNNINGMAN["max_per_hour"]:
-                    return (
-                        f"Oui, jusqu’à {RUNNINGMAN['max_per_hour']} personnes par heure (selon réservation). "
-                        f"Pour réserver : {RUNNINGMAN['site']} | {RUNNINGMAN['phone']}."
-                    )
-                return (
-                    f"La capacité est de {RUNNINGMAN['max_per_hour']} personnes par heure. "
-                    f"Au-delà, c’est possible sur organisation (sur demande/devis). "
-                    f"Contact : {RUNNINGMAN['contact']} | {RUNNINGMAN['phone']}."
-                )
-            return f"Nous pouvons accueillir jusqu’à {RUNNINGMAN['max_per_hour']} personnes par heure (selon réservation)."
-
-        # Pricing
-        if any(k in t for k in ["tarif", "prix", "c’est combien", "c'est combien", "combien ça coûte", "combien ca coute", "€"]):
-            return f"Tarifs : {RUNNINGMAN['price_under_12']} et {RUNNINGMAN['price_12_plus']}."
-
-        # Age & accompaniment
-        if any(k in t for k in ["âge", "age", "dès quel", "a partir", "à partir", "à partir de", "a partir de"]):
-            return (
-                f"Âge minimum : {RUNNINGMAN['age_min']} ans. "
-                "Les moins de 12 ans doivent être accompagnés d’un adulte. "
-                "À partir de 12 ans, l’accompagnateur n’est plus nécessaire."
-            )
-        if "accompagn" in t or "adulte" in t:
-            return (
-                "Un adulte accompagnateur est obligatoire uniquement pour les enfants de moins de 12 ans. "
-                "À partir de 12 ans, ce n’est plus nécessaire."
-            )
-
-        # Birthday
-        if "anniversaire" in t:
-            if "offert" in t or "gratuit" in t:
-                return RUNNINGMAN["birthday_offer"]
-            if "gâteau" in t or "gateau" in t:
-                return f"{RUNNINGMAN['cake_ok']} {RUNNINGMAN['fridge']}."
-            if "boisson" in t:
-                return f"{RUNNINGMAN['cake_ok']} {RUNNINGMAN['fridge']}."
-            if "frigo" in t:
-                return RUNNINGMAN["fridge"]
-            # General birthday question
-            return (
-                "Oui, les anniversaires sont possibles sur demande (organisation / devis selon le groupe). "
-                f"{RUNNINGMAN['birthday_offer']} "
-                f"Vous pouvez apporter gâteau et boissons, et un frigo est dédié. "
-                f"Contact : {RUNNINGMAN['contact']} | {RUNNINGMAN['phone']}."
-            )
-
-        # Cake / drinks / fridge outside birthday keyword
-        if "frigo" in t:
-            return RUNNINGMAN["fridge"]
-        if "gâteau" in t or "gateau" in t or "boisson" in t:
-            return f"{RUNNINGMAN['cake_ok']} {RUNNINGMAN['fridge']}."
-
-        # Groups / quotes
-        if any(k in t for k in ["entreprise", "devis", "evg", "evjf", "team building", "team-building", "scolaire", "association", "groupe"]):
-            return (
-                f"{RUNNINGMAN['groups_quote']} "
-                f"Contact : {RUNNINGMAN['contact']} | {RUNNINGMAN['phone']}."
-            )
-
-        # If user asks "il y a quoi" but we missed above, don't fallback to address
-        if any(k in t for k in ["il y a quoi", "vous faites quoi", "activité", "activite"]):
-            return (
-                f"{RUNNINGMAN['name']} : action game (mini-jeux physiques) en équipe, "
-                f"{RUNNINGMAN['session_minutes']} minutes, départ chaque heure."
-            )
-
-        return None
-
-    # RETROWORLD fast answers
-    if brand_effective == "retroworld":
-        # VR
-        if "vr" in t or "réalité virtuelle" in t or "realite virtuelle" in t:
-            # If it sounds like booking
-            if _contains_any(t, BOOKING_TRIGGERS) or "je veux" in t or "on veut" in t:
-                return (
-                    "Disponible. "
-                    f"{RETROWORLD['vr_price']} ({RETROWORLD['vr_players']}). "
-                    f"{RETROWORLD['vr_note']} "
-                    f"Pouvez-vous me préciser la date, l’heure et le nombre de joueurs ? "
-                    f"Site : {RETROWORLD['site']} | Téléphone : {RETROWORLD['phone']}."
-                )
-            return (
-                f"{RETROWORLD['vr_price']} ({RETROWORLD['vr_players']}). "
-                f"{RETROWORLD['vr_note']}"
-            )
-
-        # Escape VR
-        if "escape" in t and "vr" in t:
-            if _contains_any(t, BOOKING_TRIGGERS) or "je veux" in t or "on veut" in t:
-                return (
-                    "Disponible. "
-                    f"{RETROWORLD['escape_vr_price']}. "
-                    "Pouvez-vous me préciser la date, l’heure et le nombre de joueurs ? "
-                    f"Site : {RETROWORLD['site']} | Téléphone : {RETROWORLD['phone']}."
-                )
-            return RETROWORLD["escape_vr_price"]
-
-        # Quiz
-        if "quiz" in t or "quizz" in t:
-            return f"{RETROWORLD['quiz_prices']}. {RETROWORLD['quiz_age']}."
-
-        # Kids room
-        if "salle enfant" in t or ("salle" in t and "enfant" in t) or "mur interactif" in t:
-            return RETROWORLD["kids_room"]
-
-        # Where is Retroworld (address handled above already, but keep safe)
-        if "retroworld" in t and ("où" in t or "ou" in t or "adresse" in t):
-            return f"Adresse : {RETROWORLD['address']}."
-
-        # Waiting room
-        if "salle d’attente" in t or "salle d'attente" in t or "attente" in t:
-            return RETROWORLD["waiting_room"]
-
-        return None
-
-    return None
-
-
-# ---------------------------------------------------------
-# CORE ANSWER (FAST OR OPENAI)
-# ---------------------------------------------------------
-
-def answer_one(
+def process_chat(
     brand_entry: str,
     messages: List[Dict[str, Any]],
     metadata: Dict[str, Any],
+    allow_server_history: bool = True,
+    do_log: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Unified answering logic used by /chat and /admin/api/test.
-    Returns:
-      { reply, brand_used, brand_entry, skipped_openai, openai_usage? }
-    """
     brand_entry = (brand_entry or "").lower()
     if brand_entry not in SUPPORTED_BRANDS:
-        return {"error": "unknown_brand"}
+        return {"error": "unknown_brand"}, 404  # type: ignore[return-value]
 
-    # Get last user text
+    # find last user message
     last_user_text = ""
     for msg in reversed(messages or []):
         if isinstance(msg, dict) and msg.get("role") == "user":
             last_user_text = str(msg.get("content") or "")
             break
 
-    effective_brand = brand_entry
-    if brand_entry == "runningman":
-        effective_brand = detect_brand_from_text(last_user_text, default="runningman")
+    effective_brand = detect_brand_from_text(last_user_text, default=brand_entry)
 
-    # Fast answer check (brand_effective)
-    fa = fast_answer(effective_brand, last_user_text)
-    if fa:
-        return {
-            "reply": fa,
-            "brand_used": effective_brand,
-            "brand_entry": brand_entry,
-            "skipped_openai": True,
-        }
+    conversation_id = str(metadata.get("conversation_id") or "").strip()
+    if not conversation_id:
+        conversation_id = f"{effective_brand}_{int(time.time() * 1000)}"
+        metadata["conversation_id"] = conversation_id
 
-    # Otherwise go OpenAI with KB/system prompt
+    metadata["brand_entry"] = brand_entry
+    metadata["brand_effective"] = effective_brand
+
+    # Optionally rebuild history if client sends only the latest message
+    messages_for_prompt: List[Dict[str, Any]] = list(messages or [])
+    try:
+        only_user_simple = (
+            len(messages_for_prompt) == 1
+            and isinstance(messages_for_prompt[0], dict)
+            and messages_for_prompt[0].get("role") == "user"
+        )
+        no_assistant_msgs = all(
+            (isinstance(m, dict) and m.get("role") != "assistant") for m in messages_for_prompt
+        )
+        use_server_history = allow_server_history and conversation_id and (only_user_simple or no_assistant_msgs)
+        if metadata.get("no_server_history") is True:
+            use_server_history = False
+        if use_server_history:
+            past = reconstruct_history_from_logs(conversation_id)
+            if past:
+                messages_for_prompt = past + messages_for_prompt
+                logger.info("Reconstructed history for %s (%d past + %d new)", conversation_id, len(past), len(messages))
+    except Exception as e:
+        logger.error("History reconstruct error: %s", e)
+
     kb = load_kb(effective_brand)
-    prompt_messages = build_prompt(effective_brand, kb, messages, metadata)
-    reply_text, usage = call_openai_chat(prompt_messages)
+
+    # FAST path first
+    fast_reply = answer_fast(effective_brand, kb, last_user_text, metadata=metadata)
+    if fast_reply:
+        reply_text = fast_reply
+        usage: Dict[str, Any] = {}
+        guard_hits: List[str] = []
+    else:
+        prompt_messages = build_prompt(effective_brand, kb, messages_for_prompt, metadata)
+        reply_text, usage = call_openai_chat(prompt_messages)
+        reply_text, guard_hits = guard_openai_reply(effective_brand, reply_text)
+
+    # log
+    if do_log:
+        try:
+            channel = metadata.get("source") or "web"
+            append_conversation_log(
+                conversation_id=conversation_id,
+                brand=effective_brand,
+                channel=channel,
+                user_messages=messages,
+                assistant_reply=reply_text,
+                extra={
+                    "brand_entry": brand_entry,
+                    "brand_effective": effective_brand,
+                    "metadata": metadata,
+                    "openai_usage": usage,
+                    "skipped_openai": bool(fast_reply),
+                    "guard_hits": guard_hits,
+                },
+            )
+        except Exception as e:
+            logger.error("Logging error: %s", e)
+
     return {
         "reply": reply_text,
         "brand_used": effective_brand,
         "brand_entry": brand_entry,
-        "skipped_openai": False,
-        "openai_usage": usage,
+        "conversation_id": conversation_id,
+        "skipped_openai": bool(fast_reply),
+        "guard_hits": guard_hits,
     }
 
 
@@ -748,13 +931,14 @@ def answer_one(
 # ---------------------------------------------------------
 
 @app.route("/", methods=["GET", "HEAD"])
-def root() -> Tuple[Dict[str, Any], int]:
+def root():
     return jsonify(
         {
             "service": "retroworld-ia",
             "status": "ok",
             "time": time.time(),
             "brands": list(SUPPORTED_BRANDS),
+            "model": OPENAI_MODEL,
         }
     ), 200
 
@@ -785,85 +969,29 @@ def chat_route(brand: str):  # type: ignore[override]
     if not isinstance(metadata, dict):
         metadata = {}
 
-    brand_entry = (brand or "").lower()
-    if brand_entry not in SUPPORTED_BRANDS:
-        return jsonify({"error": "unknown_brand"}), 404
-
-    conversation_id = metadata.get("conversation_id")
-    if not conversation_id:
-        # create stable-ish id
-        conversation_id = f"{brand_entry}_{int(time.time() * 1000)}"
-        metadata["conversation_id"] = conversation_id
-
-    # server-side history reconstruction (optional)
-    messages_for_prompt: List[Dict[str, Any]] = messages
     try:
-        only_user_simple = (
-            len(messages) == 1
-            and isinstance(messages[0], dict)
-            and messages[0].get("role") == "user"
-        )
-        no_assistant_msgs = all(
-            (isinstance(m, dict) and m.get("role") != "assistant") for m in messages
-        )
-        use_server_history = conversation_id and (only_user_simple or no_assistant_msgs)
-        if metadata.get("no_server_history") is True:
-            use_server_history = False
-        if use_server_history:
-            past_history = reconstruct_history_from_logs(conversation_id)
-            if past_history:
-                messages_for_prompt = past_history + messages
-                logger.info(
-                    "Reconstructed history for %s (%d past + %d new)",
-                    conversation_id,
-                    len(past_history),
-                    len(messages),
-                )
+        resp = process_chat(brand, messages, metadata, allow_server_history=True, do_log=True)
+        return jsonify(resp), 200
+    except RuntimeError as e:
+        logger.warning("Chat fallback due to runtime error: %s", e)
+        safe = "Je peux répondre aux questions courantes, mais je n’ai pas accès au moteur de réponse avancé pour le moment. Pouvez-vous reformuler votre demande ?"
+        return jsonify({"reply": safe, "brand_used": brand, "brand_entry": brand, "error": str(e)}), 200
     except Exception as e:
-        logger.error("Error reconstructing history for %s: %s", conversation_id, e)
-        messages_for_prompt = messages
+        logger.error("chat_route error: %s", e)
+        return jsonify({"error": "server_error", "details": str(e)}), 500
 
-    metadata["brand_entry"] = brand_entry  # for build_prompt routing note
-    # brand_effective is computed inside answer_one based on message text,
-    # but we still keep it in metadata when logging
 
-    try:
-        result = answer_one(brand_entry, messages_for_prompt, metadata)
-    except Exception as e:
-        logger.error("Answering failed: %s", e)
-        return jsonify({"error": "openai_error", "details": str(e)}), 502
-
-    # log
-    try:
-        channel = metadata.get("source") or "web"
-        append_conversation_log(
-            conversation_id=conversation_id,
-            brand=result.get("brand_used") or brand_entry,
-            channel=channel,
-            user_messages=messages,
-            assistant_reply=result.get("reply") or "",
-            extra={
-                "brand_entry": brand_entry,
-                "brand_effective": result.get("brand_used"),
-                "metadata": metadata,
-                "openai_usage": result.get("openai_usage") if not result.get("skipped_openai") else {},
-                "skipped_openai": bool(result.get("skipped_openai")),
-            },
-        )
-    except Exception as e:
-        logger.error("Error logging conversation: %s", e)
-
-    return jsonify(
-        {
-            "reply": result.get("reply", ""),
-            "brand_used": result.get("brand_used", brand_entry),
-            "brand_entry": brand_entry,
-        }
-    ), 200
+def _require_admin_token(req) -> bool:
+    tok = (req.args.get("token") or "").strip()
+    if not tok:
+        tok = (req.headers.get("X-Admin-Token") or "").strip()
+    return bool(tok) and tok == ADMIN_DASHBOARD_TOKEN
 
 
 @app.route("/kb/upsert/<brand>", methods=["POST"])
 def kb_upsert(brand: str):  # type: ignore[override]
+    if not _require_admin_token(request):
+        return jsonify({"error": "forbidden"}), 403
     try:
         body = request.get_json(force=True)
     except Exception:
@@ -891,18 +1019,19 @@ def qweekle_webhook():  # type: ignore[override]
         return jsonify({"error": "invalid_json"}), 400
     event_type = payload.get("event_type") or payload.get("type") or "unknown"
     logger.info("Webhook Qweekle received: %s", event_type)
-    append_qweekle_event(event_type, payload)
+    fname = f"{event_type or 'unknown'}.jsonl"
+    path = os.path.join(QWEEKLE_LOG_DIR, fname)
+    record = {"timestamp": time.time(), "event_type": event_type, "payload": payload, "source": QWEEKLE_SOURCE_NAME}
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
     return jsonify({"status": "ok", "event_type": event_type}), 200
 
 
-# ---------------------------------------------------------
-# ADMIN APIs
-# ---------------------------------------------------------
+# ---------------- ADMIN API ----------------
 
 @app.route("/admin/api/conversations", methods=["GET"])
 def admin_api_conversations():  # type: ignore[override]
-    token = request.args.get("token") or ""
-    if token != ADMIN_DASHBOARD_TOKEN:
+    if not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
 
     convs: List[Dict[str, Any]] = []
@@ -912,16 +1041,17 @@ def admin_api_conversations():  # type: ignore[override]
     for fname in os.listdir(CONVERSATIONS_LOG_DIR):
         if not fname.endswith(".jsonl"):
             continue
-        conversation_id = fname.replace(".jsonl", "")
+        conversation_id = fname[:-5]
         records = load_conversation_records(conversation_id)
         if not records:
             continue
         last = records[-1]
-        ts = last.get("timestamp") or 0.0
+        ts = float(last.get("timestamp") or 0.0)
         channel = last.get("channel") or "web"
         extra = last.get("extra") or {}
         meta = extra.get("metadata") or {}
         source = extra.get("source") or meta.get("source") or "unknown"
+
         brand_info = classify_conversation_brands(records)
         brand_final = brand_info.get("brand_final")
 
@@ -934,8 +1064,9 @@ def admin_api_conversations():  # type: ignore[override]
                     break
             if preview:
                 break
-        if len(preview) > 120:
-            preview = preview[:117] + "..."
+        preview = preview.strip()
+        if len(preview) > 140:
+            preview = preview[:137] + "..."
 
         convs.append(
             {
@@ -948,14 +1079,13 @@ def admin_api_conversations():  # type: ignore[override]
             }
         )
 
-    convs.sort(key=lambda c: c["timestamp"], reverse=True)
+    convs.sort(key=lambda c: float(c.get("timestamp") or 0.0), reverse=True)
     return jsonify(convs), 200
 
 
 @app.route("/admin/api/conversation/<conversation_id>", methods=["GET"])
 def admin_api_conversation_detail(conversation_id: str):  # type: ignore[override]
-    token = request.args.get("token") or ""
-    if token != ADMIN_DASHBOARD_TOKEN:
+    if not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
     records = load_conversation_records(conversation_id)
     if not records:
@@ -965,89 +1095,109 @@ def admin_api_conversation_detail(conversation_id: str):  # type: ignore[overrid
 
 @app.route("/admin/api/test", methods=["POST"])
 def admin_api_test():  # type: ignore[override]
-    """
-    Test bench.
-    Body:
-      {
-        "token": "...",
-        "mode": "text" | "json",
-        "brand_entry": "runningman" | "retroworld" (optional, default runningman),
-        "text": "Q1\\nQ2\\n..." (mode=text),
-        "payload": { ... } (mode=json)  # raw payload similar to /chat/<brand>
-      }
-    """
+    """Run a batch test: input can be JSON (with results/q) or plain text (one question per line)."""
+    if not _require_admin_token(request):
+        return jsonify({"error": "forbidden"}), 403
     try:
         body = request.get_json(force=True) or {}
     except Exception:
         return jsonify({"error": "invalid_json"}), 400
-    token = body.get("token") or ""
-    if token != ADMIN_DASHBOARD_TOKEN:
-        return jsonify({"error": "forbidden"}), 403
+    if not isinstance(body, dict):
+        return jsonify({"error": "invalid_payload"}), 400
 
-    mode = (body.get("mode") or "text").lower()
-    brand_entry = (body.get("brand_entry") or "runningman").lower()
-    if brand_entry not in SUPPORTED_BRANDS:
-        brand_entry = "runningman"
+    mode = str(body.get("mode") or "auto")
+    brand = str(body.get("brand") or "auto").lower()
+    payload = body.get("payload")
 
-    results: List[Dict[str, Any]] = []
+    # If payload is a JSON string, try to parse it once.
+    if isinstance(payload, str):
+        s = payload.strip()
+        if s and (s.startswith("{") or s.startswith("[")):
+            try:
+                payload = json.loads(s)
+            except Exception:
+                pass
 
-    if mode == "json":
-        payload = body.get("payload") or {}
-        if not isinstance(payload, dict):
-            return jsonify({"error": "invalid_payload"}), 400
-        messages = payload.get("messages") or []
-        metadata = payload.get("metadata") or {}
-        if not isinstance(messages, list):
-            return jsonify({"error": "invalid_messages"}), 400
-        if not isinstance(metadata, dict):
-            metadata = {}
-        try:
-            out = answer_one(brand_entry, messages, metadata)
-            return jsonify({"mode": "json", "result": out}), 200
-        except Exception as e:
-            return jsonify({"error": "test_failed", "details": str(e)}), 500
+    questions: List[str] = []
 
-    # mode=text (multi questions)
-    text = body.get("text") or ""
-    if not isinstance(text, str):
-        return jsonify({"error": "invalid_text"}), 400
+    # payload could be a dict (test file), list, or string
+    if isinstance(payload, dict):
+        res = payload.get("results")
+        if isinstance(res, list):
+            for item in res:
+                if isinstance(item, dict) and item.get("q"):
+                    questions.append(str(item["q"]))
+                elif isinstance(item, str):
+                    questions.append(item)
+        elif payload.get("q"):
+            questions.append(str(payload["q"]))
+    elif isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, str):
+                questions.append(item)
+            elif isinstance(item, dict) and item.get("q"):
+                questions.append(str(item["q"]))
+    elif isinstance(payload, str):
+        text = payload.strip()
+        if text:
+            for line in text.splitlines():
+                ln = line.strip()
+                if not ln:
+                    continue
+                if ln.upper() in ("FAST", "OPENAI"):
+                    continue
+                if ln.lower() in ("retroworld", "runningman"):
+                    continue
+                if ln.lower().startswith("réponse") or ln.lower().startswith("reponse"):
+                    continue
+                if ln.lower().startswith("brand") or ln.lower().startswith("mode"):
+                    continue
+                questions.append(ln)
 
-    questions = [q.strip() for q in text.splitlines() if q.strip()]
-    # small safety cap
-    questions = questions[:300]
-
+    # Deduplicate while keeping order
+    seen = set()
+    qs: List[str] = []
     for q in questions:
-        msg = [{"role": "user", "content": q}]
-        meta = {
-            "source": "admin_test",
-            "page_url": "admin://test",
-            "conversation_id": f"test_{int(time.time()*1000)}",
-        }
+        qn = q.strip()
+        if not qn:
+            continue
+        if qn in seen:
+            continue
+        seen.add(qn)
+        qs.append(qn)
+
+    # run
+    results: List[Dict[str, Any]] = []
+    convo_id = f"test_{int(time.time()*1000)}"
+
+    for q in qs[:300]:
+        messages = [{"role": "user", "content": q}]
+        md = {"source": "admin_test", "conversation_id": convo_id, "no_server_history": True}
+        use_brand = brand if brand in SUPPORTED_BRANDS else "retroworld"
+        if brand == "auto":
+            use_brand = detect_brand_from_text(q, default="retroworld")
         try:
-            out = answer_one(brand_entry, msg, meta)
-            entry = {
-                "q": q,
-                "a": out.get("reply", ""),
-                "brand_used": out.get("brand_used"),
-                "skipped_openai": bool(out.get("skipped_openai")),
-            }
-            if not out.get("skipped_openai") and out.get("openai_usage"):
-                entry["openai_usage"] = out.get("openai_usage")
-            results.append(entry)
+            resp = process_chat(use_brand, messages, md, allow_server_history=False, do_log=False)
+            results.append(
+                {
+                    "q": q,
+                    "brand_used": resp.get("brand_used"),
+                    "skipped_openai": resp.get("skipped_openai"),
+                    "guard_hits": resp.get("guard_hits") or [],
+                    "a": resp.get("reply"),
+                }
+            )
         except Exception as e:
-            results.append({"q": q, "a": "", "error": str(e), "brand_used": brand_entry})
+            results.append({"q": q, "brand_used": use_brand, "error": str(e), "a": ""})
 
-    return jsonify({"mode": "text", "count": len(results), "results": results}), 200
+    return jsonify({"count": len(results), "mode": mode, "results": results}), 200
 
 
-# ---------------------------------------------------------
-# ADMIN PAGE (CONVERSATIONS + TEST)
-# ---------------------------------------------------------
+# ---------------- ADMIN UI ----------------
 
 @app.route("/admin/conversations", methods=["GET"])
 def admin_conversations_page():  # type: ignore[override]
-    token = request.args.get("token") or ""
-    if token != ADMIN_DASHBOARD_TOKEN:
+    if not _require_admin_token(request):
         return "Forbidden", 403
 
     return """
@@ -1058,288 +1208,250 @@ def admin_conversations_page():  # type: ignore[override]
   <title>Admin IA – Retroworld / Runningman</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root{
-      --bg:#0f172a;
-      --bg2:#111c35;
-      --card:#1e293b;
-      --border:#334155;
-      --text:#f8fafc;
-      --muted:#94a3b8;
-      --accent:#0ea5e9;
-      --ok:#22c55e;
-      --warn:#f97316;
-      --bad:#ef4444;
-      --brand-retro:#6366f1;
-      --brand-run:#22c55e;
-      --brand-mix:#f97316;
-    }
-    *{box-sizing:border-box;}
-    body{
-      margin:0;
-      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-      background:linear-gradient(180deg,var(--bg),var(--bg2));
-      color:var(--text);
-    }
-    .container{max-width:1250px;margin:0 auto;padding:22px 18px 40px;}
-    header{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:14px;}
-    h1{margin:0;font-size:26px;font-weight:700;letter-spacing:.2px;}
-    .subtitle{margin-top:6px;font-size:13px;color:var(--muted);}
-    .tabs{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
-    .tab{
-      border:1px solid var(--border);
-      background:rgba(30,41,59,.7);
-      color:var(--muted);
-      padding:8px 12px;border-radius:999px;
-      cursor:pointer;
-      font-size:12px;
-      transition:.15s;
-      user-select:none;
-    }
-    .tab.active{background:var(--accent);border-color:var(--accent);color:#05121f;}
-    .panel{display:none;}
-    .panel.active{display:block;}
+    :root {
+      --bg: #0b1220;
+      --card: #111b2e;
+      --card2: #0f172a;
+      --border: #22314f;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
 
-    .filters{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 14px;}
-    .chip{
-      border-radius:999px;border:1px solid var(--border);
-      padding:6px 12px;font-size:12px;cursor:pointer;
-      background:rgba(30,41,59,.7);color:var(--muted);
-      transition:.15s;
-    }
-    .chip.active{background:var(--accent);border-color:var(--accent);color:#05121f;}
-    .chip[data-brand="runningman"].active{background:var(--brand-run);border-color:var(--brand-run);color:#05121f;}
-    .chip[data-brand="retroworld"].active{background:var(--brand-retro);border-color:var(--brand-retro);color:#05121f;}
-    .chip[data-brand="mixed"].active{background:var(--brand-mix);border-color:var(--brand-mix);color:#05121f;}
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
 
-    .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 16px;}
-    .search{flex:1;min-width:260px;}
-    input, select, textarea{
+      --brand-retro: #6366f1;
+      --brand-run: #22c55e;
+      --brand-mix: #f97316;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      background: radial-gradient(1000px 700px at 20% -10%, rgba(56,189,248,0.18), transparent 55%),
+                  radial-gradient(900px 600px at 110% 30%, rgba(99,102,241,0.18), transparent 50%),
+                  var(--bg);
+      color: var(--text);
+    }
+    .container { max-width: 1250px; margin: 0 auto; padding: 22px 18px 40px; }
+    header {
+      display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap;
+      margin-bottom: 18px;
+    }
+    h1 { margin:0; font-size: 26px; font-weight: 650; letter-spacing: 0.2px; }
+    .subtitle { margin-top:6px; font-size: 13px; color: var(--muted); }
+    .tabs { display:flex; gap:8px; flex-wrap:wrap; }
+    .tab {
+      border-radius: 999px; border: 1px solid var(--border);
+      background: rgba(17,27,46,0.7);
+      color: var(--muted);
+      padding: 8px 12px;
+      font-size: 12px; cursor:pointer;
+    }
+    .tab.active { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+    .grid { display:grid; grid-template-columns: 1fr 420px; gap: 14px; }
+    @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: rgba(17,27,46,0.86);
+      backdrop-filter: blur(8px);
+      overflow: hidden;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+    }
+    .panel-head {
+      display:flex; align-items:center; justify-content:space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15,23,42,0.55);
+    }
+    .panel-head h2 { margin:0; font-size: 13px; color: var(--muted); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+    .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; padding: 12px 14px; border-bottom:1px solid var(--border); }
+    .search { flex:1; min-width: 220px; }
+    input[type="text"], select, textarea {
       width:100%;
-      padding:10px 12px;
-      border-radius:14px;
-      border:1px solid var(--border);
-      background:rgba(30,41,59,.8);
-      color:var(--text);
-      font-size:14px;
-      outline:none;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(15,23,42,0.6);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 13px;
+      outline: none;
     }
-    textarea{min-height:160px;resize:vertical;line-height:1.35;}
-    .btn{
-      border-radius:14px;
-      border:1px solid var(--border);
-      background:rgba(30,41,59,.8);
-      color:var(--muted);
-      padding:10px 12px;
+    textarea { min-height: 190px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; line-height: 1.35; }
+    .btn {
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(15,23,42,0.6);
+      color: var(--muted);
+      padding: 10px 12px;
+      font-size: 12px;
       cursor:pointer;
-      font-size:12px;
-      transition:.15s;
+      transition: 120ms ease;
       user-select:none;
     }
-    .btn:hover{border-color:var(--accent);color:var(--accent);}
-    .btn.primary{background:var(--accent);border-color:var(--accent);color:#05121f;font-weight:700;}
-    .btn.primary:hover{filter:brightness(1.05);}
-
-    .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px;}
-    @media (max-width: 980px){.grid{grid-template-columns:1fr;}}
-    .card{
-      border:1px solid var(--border);
-      background:rgba(30,41,59,.75);
-      border-radius:18px;
-      overflow:hidden;
-      box-shadow:0 10px 30px rgba(0,0,0,.22);
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 650; }
+    .btn.primary:hover { filter: brightness(1.03); color: var(--bg); }
+    .chips { display:flex; gap:8px; flex-wrap:wrap; }
+    .chip {
+      border-radius: 999px; border: 1px solid var(--border);
+      padding: 7px 11px;
+      font-size: 12px;
+      cursor:pointer;
+      background: rgba(15,23,42,0.55);
+      color: var(--muted);
     }
-    .card .hd{
-      padding:12px 14px;
-      border-bottom:1px solid rgba(51,65,85,.8);
-      display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;
-    }
-    .card .hd h2{margin:0;font-size:14px;color:var(--muted);font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
-    .card .bd{padding:12px 14px;}
+    .chip.active { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+    .chip[data-brand="runningman"].active { background: var(--brand-run); border-color: var(--brand-run); }
+    .chip[data-brand="retroworld"].active { background: var(--brand-retro); border-color: var(--brand-retro); }
+    .chip[data-brand="mixed"].active { background: var(--brand-mix); border-color: var(--brand-mix); }
 
-    table{width:100%;border-collapse:collapse;font-size:13px;}
-    thead{background:rgba(15,23,42,.7);}
-    th,td{padding:10px 10px;border-bottom:1px solid rgba(51,65,85,.75);text-align:left;vertical-align:top;}
-    th{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
-    tr:hover td{background:rgba(17,28,53,.55);}
-    .muted{color:var(--muted);}
-    .preview{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:560px;}
+    table { width:100%; border-collapse: collapse; font-size: 13px; }
+    thead { background: rgba(15,23,42,0.7); }
+    th, td { padding: 10px 12px; border-bottom: 1px solid rgba(34,49,79,0.7); text-align: left; vertical-align: top; }
+    th { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+    tr:hover td { background: rgba(15,23,42,0.35); }
+    .badge { display:inline-flex; align-items:center; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .badge-run { background: rgba(34,197,94,0.18); color: #22c55e; }
+    .badge-retro { background: rgba(99,102,241,0.18); color: #a5b4fc; }
+    .badge-mix { background: rgba(249,115,22,0.18); color: #fdba74; }
+    .badge-unknown { background: rgba(148,163,184,0.18); color: var(--muted); }
+    .pill { display:inline-flex; align-items:center; border-radius: 999px; padding: 3px 9px; font-size: 11px; color: var(--muted); border: 1px solid rgba(148,163,184,0.35); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 
-    .badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;}
-    .badge-run{background:rgba(34,197,94,.18);color:var(--brand-run);}
-    .badge-retro{background:rgba(99,102,241,.18);color:var(--brand-retro);}
-    .badge-mix{background:rgba(249,115,22,.18);color:var(--brand-mix);}
-    .badge-unknown{background:rgba(148,163,184,.18);color:var(--muted);}
-    .pill{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;font-size:11px;color:var(--muted);border:1px solid rgba(148,163,184,.35);}
-    .pill.channel{text-transform:uppercase;letter-spacing:.08em;}
+    .detail { padding: 14px; max-height: 520px; overflow-y: auto; }
+    .bubble { max-width: 86%; margin: 10px 0; padding: 10px 12px; border-radius: 16px; white-space: pre-wrap; line-height: 1.35; }
+    .bubble-user { margin-left:auto; background: rgba(51,65,85,0.65); border-bottom-right-radius: 6px; }
+    .bubble-bot { margin-right:auto; background: rgba(15,23,42,0.75); border-bottom-left-radius: 6px; border: 1px solid rgba(34,49,79,0.65); }
+    .meta { font-size: 11px; color: var(--muted); margin-top: 6px; }
+    .muted { color: var(--muted); }
 
-    .detail{max-height:520px;overflow:auto;padding:12px 14px;}
-    .bubble{
-      max-width:84%;
-      margin:10px 0;
-      padding:10px 12px;
-      border-radius:16px;
-      font-size:14px;
-      line-height:1.4;
-      white-space:pre-wrap;
-      word-break:break-word;
-    }
-    .user{margin-left:auto;background:rgba(51,65,85,.85);border-bottom-right-radius:6px;}
-    .bot{margin-right:auto;background:rgba(30,41,59,.9);border-bottom-left-radius:6px;}
-    .ts{font-size:11px;color:var(--muted);margin:6px 0 10px 0;}
-
-    .twoCol{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-    @media (max-width:980px){.twoCol{grid-template-columns:1fr;}}
-    .resultRow{
-      border:1px solid rgba(51,65,85,.75);
-      border-radius:14px;
-      padding:10px 12px;
-      background:rgba(17,28,53,.35);
-      margin-bottom:10px;
-    }
-    .resultMeta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;}
-    .small{font-size:12px;}
-    .ok{color:var(--ok);font-weight:800;}
-    .warn{color:var(--warn);font-weight:800;}
+    .test-grid { display:grid; grid-template-columns: 1fr; gap: 12px; padding: 14px; }
+    .test-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .results { border-top: 1px solid var(--border); padding-top: 12px; }
+    .res-row { border: 1px solid rgba(34,49,79,0.7); border-radius: 16px; padding: 10px 12px; margin-bottom: 10px; background: rgba(15,23,42,0.45); }
+    .res-row .top { display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between; margin-bottom: 8px; }
+    .flag { font-size: 11px; border-radius: 999px; padding: 3px 9px; border: 1px solid rgba(148,163,184,0.35); color: var(--muted); }
+    .flag.ok { border-color: rgba(34,197,94,0.45); color: #86efac; }
+    .flag.warn { border-color: rgba(245,158,11,0.45); color: #fbbf24; }
+    .flag.bad { border-color: rgba(239,68,68,0.55); color: #fca5a5; }
+    .small { font-size: 12px; }
   </style>
 </head>
 <body>
-<div class="container">
-  <header>
-    <div>
-      <h1>Admin IA</h1>
-      <div class="subtitle">Retroworld / Runningman – Conversations + banc de test</div>
-    </div>
-    <div class="tabs">
-      <div class="tab active" data-tab="conv">Conversations</div>
-      <div class="tab" data-tab="test">Test</div>
-    </div>
-  </header>
-
-  <!-- PANEL: CONVERSATIONS -->
-  <div class="panel active" id="panel-conv">
-    <div class="filters">
-      <button class="chip active" data-filter="all">Tout</button>
-      <button class="chip" data-filter="runningman" data-brand="runningman">Runningman</button>
-      <button class="chip" data-filter="retroworld" data-brand="retroworld">Retroworld</button>
-      <button class="chip" data-filter="mixed" data-brand="mixed">Mix</button>
-    </div>
-
-    <div class="toolbar">
-      <div class="search"><input type="text" id="search" placeholder="Rechercher dans messages, sources, IDs…" /></div>
-      <button class="btn" id="btn-refresh">Rafraîchir</button>
-    </div>
-
-    <div class="grid">
-      <div class="card">
-        <div class="hd">
-          <h2>Liste des conversations</h2>
-          <span class="muted small" id="countLbl"></span>
-        </div>
-        <div class="bd" style="padding:0;">
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 170px;">Date</th>
-                <th style="width: 92px;">Canal</th>
-                <th style="width: 120px;">Marque</th>
-                <th style="width: 150px;">Source</th>
-                <th>Dernier message</th>
-              </tr>
-            </thead>
-            <tbody id="rows">
-              <tr><td colspan="5" class="muted">Chargement…</td></tr>
-            </tbody>
-          </table>
-        </div>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Admin IA</h1>
+        <div class="subtitle">Retroworld / Runningman • logs + console de test</div>
       </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="convs">Conversations</button>
+        <button class="tab" data-tab="test">Console de test</button>
+      </div>
+    </header>
 
-      <div class="card">
-        <div class="hd">
-          <h2>Détail</h2>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button class="btn" id="btn-copy">Copier l’ID</button>
+    <!-- CONVERSATIONS TAB -->
+    <section id="tab-convs">
+      <div class="panel" style="margin-bottom: 14px;">
+        <div class="panel-head">
+          <h2>Filtres</h2>
+          <button class="btn" id="btn-refresh">Rafraîchir</button>
+        </div>
+        <div class="toolbar">
+          <div class="search">
+            <input type="text" id="search" placeholder="Rechercher (question, source, conversation_id…)" />
+          </div>
+          <div class="chips">
+            <button class="chip active" data-filter="all">Tout</button>
+            <button class="chip" data-filter="runningman" data-brand="runningman">Runningman</button>
+            <button class="chip" data-filter="retroworld" data-brand="retroworld">Retroworld</button>
+            <button class="chip" data-filter="mixed" data-brand="mixed">Mix</button>
           </div>
         </div>
-        <div class="detail" id="convDetail">
-          <div class="muted">Sélectionnez une conversation dans la liste.</div>
+      </div>
+
+      <div class="grid">
+        <div class="panel">
+          <div class="panel-head"><h2>Dernières conversations</h2></div>
+          <div style="overflow:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 170px;">Date</th>
+                  <th style="width: 90px;">Canal</th>
+                  <th style="width: 120px;">Marque</th>
+                  <th style="width: 160px;">Source</th>
+                  <th>Dernier message</th>
+                </tr>
+              </thead>
+              <tbody id="rows">
+                <tr><td colspan="5" class="muted">Chargement…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Détail</h2></div>
+          <div class="detail" id="convDetail">
+            <div class="muted">Sélectionnez une conversation.</div>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
+    </section>
 
-  <!-- PANEL: TEST -->
-  <div class="panel" id="panel-test">
-    <div class="card">
-      <div class="hd">
-        <h2>Banc de test</h2>
-        <span class="muted small">Multi-questions ou JSON brut (debug rapide)</span>
-      </div>
-      <div class="bd">
-        <div class="twoCol">
-          <div>
-            <label class="muted small">Marque d’entrée</label>
-            <select id="testBrand">
-              <option value="runningman">runningman</option>
-              <option value="retroworld">retroworld</option>
-            </select>
-
-            <div style="height:10px;"></div>
-
-            <label class="muted small">Mode</label>
-            <select id="testMode">
-              <option value="text">Texte (1 question par ligne)</option>
-              <option value="json">JSON brut (payload /chat)</option>
-            </select>
-
-            <div style="height:10px;"></div>
-
-            <label class="muted small">Entrée</label>
-            <textarea id="testInput" placeholder="Mode texte :\\nAdresse ?\\nTarifs ?\\nIl reste des places ce soir ?\\n\\nMode JSON : { &quot;messages&quot;:[...], &quot;metadata&quot;:{...} }"></textarea>
-
-            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;">
-              <button class="btn primary" id="btn-run">Lancer</button>
-              <button class="btn" id="btn-sample">Exemple</button>
-              <span class="muted small" id="testStatus"></span>
+    <!-- TEST TAB -->
+    <section id="tab-test" style="display:none;">
+      <div class="panel">
+        <div class="panel-head"><h2>Console de test</h2></div>
+        <div class="test-grid">
+          <div class="small muted">
+            Collez un JSON (format “results/q”) ou un texte (1 question par ligne). La console renvoie les réponses en mode FAST/OpenAI, la marque détectée et les blocages (guard).
+          </div>
+          <div class="test-actions">
+            <div style="min-width:220px; flex:1;">
+              <select id="testBrand">
+                <option value="auto">Marque : auto</option>
+                <option value="retroworld">Marque : Retroworld</option>
+                <option value="runningman">Marque : Runningman</option>
+              </select>
             </div>
+            <button class="btn primary" id="btn-run">Lancer le test</button>
+            <button class="btn" id="btn-sample">Exemple</button>
+            <span class="muted small" id="testStatus"></span>
           </div>
+          <textarea id="testInput" placeholder="Exemples :
+- Adresse ?
+- Je veux réserver une salle enfant samedi dans 2 semaines
+OU collez votre JSON complet ici"></textarea>
 
-          <div>
-            <label class="muted small">Résultats</label>
-            <div id="testResults" class="muted small" style="margin-top:8px;">Aucun test lancé.</div>
-          </div>
+          <div class="results" id="testResults"></div>
         </div>
       </div>
-    </div>
-  </div>
+    </section>
 
-</div>
+  </div>
 
 <script>
-(function(){
+(function() {
   const params = new URLSearchParams(window.location.search);
   const token = params.get("token") || "";
 
   // Tabs
   const tabs = Array.from(document.querySelectorAll(".tab"));
-  const panelConv = document.getElementById("panel-conv");
-  const panelTest = document.getElementById("panel-test");
+  const tabConvs = document.getElementById("tab-convs");
+  const tabTest = document.getElementById("tab-test");
   tabs.forEach(t => t.addEventListener("click", () => {
     tabs.forEach(x => x.classList.remove("active"));
     t.classList.add("active");
     const which = t.getAttribute("data-tab");
-    panelConv.classList.toggle("active", which === "conv");
-    panelTest.classList.toggle("active", which === "test");
+    tabConvs.style.display = which === "convs" ? "" : "none";
+    tabTest.style.display  = which === "test"  ? "" : "none";
   }));
-
-  // Simple HTML escape to avoid XSS from logs
-  function esc(s){
-    return String(s || "")
-      .replaceAll("&","&amp;")
-      .replaceAll("<","&lt;")
-      .replaceAll(">","&gt;")
-      .replaceAll('"',"&quot;")
-      .replaceAll("'","&#039;");
-  }
 
   // Conversations
   const rowsEl = document.getElementById("rows");
@@ -1347,248 +1459,205 @@ def admin_conversations_page():  # type: ignore[override]
   const btnRefresh = document.getElementById("btn-refresh");
   const chips = Array.from(document.querySelectorAll(".chip"));
   const convDetail = document.getElementById("convDetail");
-  const btnCopy = document.getElementById("btn-copy");
-  const countLbl = document.getElementById("countLbl");
-
   let allData = [];
   let currentFilter = "all";
   let searchTerm = "";
-  let selectedConvId = "";
 
-  function formatDate(ts){
-    if(!ts) return "";
-    try{
-      const d = new Date(ts*1000);
-      return d.toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
-    }catch(e){return "";}
+  function formatDate(ts) {
+    if (!ts) return "";
+    try {
+      return new Date(ts * 1000).toLocaleString("fr-FR", { hour12: false });
+    } catch(e) { return ""; }
   }
-
-  function brandBadge(b){
-    if(b==="runningman") return '<span class="badge badge-run">Runningman</span>';
-    if(b==="retroworld") return '<span class="badge badge-retro">Retroworld</span>';
-    if(b==="mixed") return '<span class="badge badge-mix">Mix</span>';
+  function brandBadge(b) {
+    if (b === "runningman") return '<span class="badge badge-run">Runningman</span>';
+    if (b === "retroworld") return '<span class="badge badge-retro">Retroworld</span>';
+    if (b === "mixed") return '<span class="badge badge-mix">Mix</span>';
     return '<span class="badge badge-unknown">Inconnu</span>';
   }
-  function channelPill(ch){
-    const v=(ch||"web").toUpperCase();
-    return '<span class="pill channel">'+esc(v)+'</span>';
+  function channelPill(ch) {
+    const txt = (ch || "web").toUpperCase();
+    return '<span class="pill">' + txt + '</span>';
   }
-  function sourcePill(s){
-    return '<span class="pill">'+esc(s||"n/a")+'</span>';
+  function sourcePill(s) {
+    return '<span class="pill">' + (s || "n/a") + '</span>';
   }
 
-  function render(){
+  function renderConvs() {
     const term = searchTerm.trim().toLowerCase();
     let filtered = allData.slice();
-
-    if(currentFilter!=="all"){
+    if (currentFilter !== "all") {
       filtered = filtered.filter(c => {
-        if(currentFilter==="mixed") return c.brand_final==="mixed";
-        return c.brand_final===currentFilter;
+        if (currentFilter === "mixed") return c.brand_final === "mixed";
+        return c.brand_final === currentFilter;
       });
     }
-    if(term){
+    if (term) {
       filtered = filtered.filter(c =>
         (c.preview && c.preview.toLowerCase().includes(term)) ||
         (c.source && c.source.toLowerCase().includes(term)) ||
         (c.conversation_id && c.conversation_id.toLowerCase().includes(term))
       );
     }
-
-    countLbl.textContent = filtered.length ? (filtered.length + " conversation(s)") : "";
-
-    if(!filtered.length){
+    if (!filtered.length) {
       rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Aucune conversation trouvée.</td></tr>';
       return;
     }
-
     rowsEl.innerHTML = filtered.map(c => `
-      <tr onclick="viewConversation('${esc(c.conversation_id)}')">
+      <tr onclick="viewConversation('${c.conversation_id}')">
         <td>
-          <div>${esc(formatDate(c.timestamp))}</div>
-          <div class="muted" style="font-size:11px;">${esc(c.conversation_id)}</div>
+          <div>${formatDate(c.timestamp)}</div>
+          <div class="muted mono" style="font-size:11px;">${c.conversation_id}</div>
         </td>
         <td>${channelPill(c.channel)}</td>
         <td>${brandBadge(c.brand_final)}</td>
         <td>${sourcePill(c.source)}</td>
-        <td><div class="preview">${esc(c.preview||"(pas de message)")}</div></td>
+        <td><div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:560px;">${c.preview || '<span class="muted">(vide)</span>'}</div></td>
       </tr>
     `).join("");
   }
 
-  async function loadData(){
+  async function loadConvs() {
     rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Chargement…</td></tr>';
-    try{
+    try {
       const res = await fetch(`/admin/api/conversations?token=${encodeURIComponent(token)}`);
-      if(!res.ok){
-        rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Erreur ('+res.status+')</td></tr>';
+      if (!res.ok) {
+        rowsEl.innerHTML = `<tr><td colspan="5" class="muted">Erreur ${res.status}</td></tr>`;
         return;
       }
       allData = await res.json();
-      render();
-    }catch(e){
+      renderConvs();
+    } catch (e) {
       console.error(e);
       rowsEl.innerHTML = '<tr><td colspan="5" class="muted">Erreur réseau.</td></tr>';
     }
   }
 
-  window.viewConversation = async function(id){
-    selectedConvId = id;
-    convDetail.innerHTML = '<div class="muted">Chargement…</div>';
-    try{
+  window.viewConversation = async function(id) {
+    convDetail.innerHTML = `<div class="muted">Chargement ${id}…</div>`;
+    try {
       const res = await fetch(`/admin/api/conversation/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`);
-      if(!res.ok){
-        convDetail.innerHTML = '<div class="muted">Erreur ('+res.status+')</div>';
+      if (!res.ok) {
+        convDetail.innerHTML = `<div class="muted">Erreur ${res.status}</div>`;
         return;
       }
       const data = await res.json();
       const records = data.records || [];
-      if(!records.length){
-        convDetail.innerHTML = '<div class="muted">Aucun enregistrement.</div>';
+      if (!records.length) {
+        convDetail.innerHTML = `<div class="muted">Aucun enregistrement.</div>`;
         return;
       }
-      let html = `<div class="muted small">Conversation <b>${esc(id)}</b></div>`;
+      let html = `<div class="mono muted" style="margin-bottom:10px;">${id}</div>`;
       records.forEach(rec => {
         const userMsgs = rec.user_messages || [];
         const reply = rec.assistant_reply || "";
-        userMsgs.filter(m => m.role==="user").forEach(m => {
-          html += '<div class="bubble user">'+esc(m.content||"")+'</div>';
+        const extra = rec.extra || {};
+        const guard = (extra.guard_hits || []).join(", ");
+        const skipped = extra.skipped_openai ? "FAST" : "OPENAI";
+        userMsgs.filter(m => m.role === "user").forEach(m => {
+          html += `<div class="bubble bubble-user">${(m.content || "")}</div>`;
         });
-        if(reply){
-          html += '<div class="bubble bot">'+esc(reply)+'</div>';
+        if (reply) {
+          html += `<div class="bubble bubble-bot">${reply}</div>`;
+          html += `<div class="meta">${skipped}${guard ? " • guard: " + guard : ""}</div>`;
         }
-        if(rec.timestamp){
-          const d = new Date(rec.timestamp*1000).toLocaleString("fr-FR");
-          html += '<div class="ts">'+esc(d)+'</div>';
+        if (rec.timestamp) {
+          html += `<div class="meta">${new Date(rec.timestamp*1000).toLocaleString("fr-FR", {hour12:false})}</div>`;
         }
       });
       convDetail.innerHTML = html;
       convDetail.scrollTop = convDetail.scrollHeight;
-    }catch(e){
+    } catch (e) {
       console.error(e);
-      convDetail.innerHTML = '<div class="muted">Erreur réseau.</div>';
+      convDetail.innerHTML = `<div class="muted">Erreur réseau.</div>`;
     }
-  }
+  };
 
-  btnCopy.addEventListener("click", async () => {
-    if(!selectedConvId) return;
-    try{
-      await navigator.clipboard.writeText(selectedConvId);
-      btnCopy.textContent = "Copié ✅";
-      setTimeout(()=>btnCopy.textContent="Copier l’ID", 900);
-    }catch(e){
-      btnCopy.textContent = "Impossible";
-      setTimeout(()=>btnCopy.textContent="Copier l’ID", 900);
-    }
-  });
-
-  searchInput.addEventListener("input", function(){
-    searchTerm = this.value;
-    render();
-  });
-  btnRefresh.addEventListener("click", loadData);
+  searchInput.addEventListener("input", function() { searchTerm = this.value; renderConvs(); });
+  btnRefresh.addEventListener("click", loadConvs);
   chips.forEach(chip => chip.addEventListener("click", () => {
     chips.forEach(c => c.classList.remove("active"));
     chip.classList.add("active");
     currentFilter = chip.getAttribute("data-filter") || "all";
-    render();
+    renderConvs();
   }));
 
-  loadData();
+  loadConvs();
 
-  // TEST BENCH
-  const testBrand = document.getElementById("testBrand");
-  const testMode = document.getElementById("testMode");
+  // Test console
   const testInput = document.getElementById("testInput");
+  const testBrand = document.getElementById("testBrand");
   const btnRun = document.getElementById("btn-run");
   const btnSample = document.getElementById("btn-sample");
-  const testStatus = document.getElementById("testStatus");
   const testResults = document.getElementById("testResults");
-
-  function sampleText(){
-    return [
-      "Adresse ?",
-      "C’est dans quel bâtiment ?",
-      "Il y a quoi chez vous ?",
-      "Combien de temps dure une session ?",
-      "On est 30, c’est possible ?",
-      "L’enfant qui fête son anniversaire est offert ?",
-      "Il reste des places pour la Saint-Sylvestre ?",
-      "Je veux réserver pour ce samedi"
-    ].join("\\n");
-  }
-  function sampleJson(){
-    return JSON.stringify({
-      messages: [{role:"user",content:"Il y a une soirée Halloween chez vous ?"}],
-      metadata: {source:"admin_test",page_url:"admin://test",conversation_id:"debug_1"}
-    }, null, 2);
-  }
+  const testStatus = document.getElementById("testStatus");
 
   btnSample.addEventListener("click", () => {
-    if(testMode.value==="json") testInput.value = sampleJson();
-    else testInput.value = sampleText();
+    testInput.value = `{
+  "results": [
+    {"q": "Adresse ?"},
+    {"q": "Je veux réserver une salle enfant samedi dans 2 semaines"},
+    {"q": "Vous nettoyez les casques ?"},
+    {"q": "Vous faites quelque chose pour Halloween ?"}
+  ]
+}`;
   });
 
-  function renderTestText(data){
-    const arr = data.results || [];
-    if(!arr.length){
-      testResults.innerHTML = "<div class='muted small'>Aucun résultat.</div>";
-      return;
-    }
-    testResults.innerHTML = arr.map(r => {
-      const ok = r.skipped_openai ? "<span class='ok'>FAST</span>" : "<span class='warn'>OPENAI</span>";
-      return `
-        <div class="resultRow">
-          <div class="resultMeta">
-            ${ok}
-            <span class="pill">${esc(r.brand_used||"")}</span>
-            <span class="pill">${esc(r.q||"")}</span>
-          </div>
-          <div class="small"><b>Réponse :</b> ${esc(r.a||"")}</div>
-        </div>
-      `;
-    }).join("");
+  function flag(skipped, guardHits) {
+    if (guardHits && guardHits.length) return `<span class="flag bad">GUARD</span>`;
+    return skipped ? `<span class="flag ok">FAST</span>` : `<span class="flag warn">OPENAI</span>`;
+  }
+
+  function escapeHtml(s) {
+    return (s || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   }
 
   btnRun.addEventListener("click", async () => {
-    testStatus.textContent = "En cours…";
-    testResults.textContent = "";
-    try{
-      const mode = testMode.value;
-      const payload = {
-        token,
-        mode,
-        brand_entry: testBrand.value,
-      };
-      if(mode==="json"){
-        let raw = testInput.value.trim();
-        if(!raw) throw new Error("JSON vide");
-        payload.payload = JSON.parse(raw);
-      }else{
-        payload.text = testInput.value || "";
-      }
-
-      const res = await fetch("/admin/api/test", {
-        method:"POST",
+    testResults.innerHTML = "";
+    testStatus.textContent = "Test en cours…";
+    const payloadText = testInput.value || "";
+    let payload = payloadText;
+    // Try JSON parse to send as object when possible
+    try { payload = JSON.parse(payloadText); } catch(e) {}
+    try {
+      const res = await fetch(`/admin/api/test?token=${encodeURIComponent(token)}`, {
+        method: "POST",
         headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ brand: testBrand.value, mode: "auto", payload })
       });
-      const data = await res.json();
-      if(!res.ok){
-        testStatus.textContent = "Erreur.";
-        testResults.innerHTML = "<div class='muted small'>"+esc(JSON.stringify(data))+"</div>";
+      if (!res.ok) {
+        testStatus.textContent = `Erreur ${res.status}`;
         return;
       }
-      testStatus.textContent = "OK ✅";
-      if(mode==="json"){
-        testResults.innerHTML = "<pre style='white-space:pre-wrap;'>"+esc(JSON.stringify(data, null, 2))+"</pre>";
-      }else{
-        renderTestText(data);
+      const data = await res.json();
+      const results = data.results || [];
+      testStatus.textContent = `${results.length} réponses`;
+      if (!results.length) {
+        testResults.innerHTML = `<div class="muted">Aucun résultat.</div>`;
+        return;
       }
-    }catch(e){
+      testResults.innerHTML = results.map(r => {
+        const b = r.brand_used || "auto";
+        const skipped = !!r.skipped_openai;
+        const guardHits = r.guard_hits || [];
+        return `
+          <div class="res-row">
+            <div class="top">
+              <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                ${flag(skipped, guardHits)}
+                <span class="pill">${b}</span>
+                ${guardHits.length ? `<span class="flag bad">hits: ${escapeHtml(guardHits.join(", "))}</span>` : ""}
+              </div>
+              <div class="muted mono small">${escapeHtml((r.q || "").slice(0, 90))}${(r.q||"").length>90?"…":""}</div>
+            </div>
+            <div class="small"><b>Q:</b> ${escapeHtml(r.q || "")}</div>
+            <div class="small" style="margin-top:6px;"><b>R:</b> ${escapeHtml(r.a || "")}</div>
+          </div>
+        `;
+      }).join("");
+    } catch(e) {
       console.error(e);
-      testStatus.textContent = "Erreur.";
-      testResults.innerHTML = "<div class='muted small'>"+esc(String(e))+"</div>";
+      testStatus.textContent = "Erreur réseau";
     }
   });
 
@@ -1598,6 +1667,10 @@ def admin_conversations_page():  # type: ignore[override]
 </html>
 """
 
+
+# ---------------------------------------------------------
+# MAIN
+# ---------------------------------------------------------
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
