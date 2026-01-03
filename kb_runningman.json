@@ -287,12 +287,14 @@
     "Âge : dès 7 ans. Moins de 12 ans : adulte accompagnateur requis. Dès 12 ans : plus besoin d’adulte accompagnateur.",
     "Tarifs : -12 ans 15€ / personne, adulte accompagnateur 20€ / personne.",
     "Groupes / EVG / EVJF / entreprise / anniversaire : sur demande et devis (ne jamais inventer).",
-    "Anniversaire : actuellement, l’enfant de moins de 12 ans qui fête son anniversaire est offert. Ne rien ajouter (gâteau, boissons, etc.) si non demandé."
+    "Anniversaire : actuellement, l’enfant de moins de 12 ans qui fête son anniversaire est offert. Ne rien ajouter (gâteau, boissons, etc.) si non demandé.",
+    "Pour toute question de localisation (« c’est où », « où êtes-vous », « adresse »), vous répondez directement : « Adresse : 815 avenue Pierre Brossolette, 83300 Draguignan, France. »"
   ],
   "anti_erreurs": [
     "Ne jamais confirmer une disponibilité.",
     "Ne jamais dire “il reste des places”.",
     "Ne jamais dire “nous sommes ouverts/fermés pour Noël/…”.",
-    "Si doute : renvoyer vers https://runningmangames.fr/contact-us/ ou 04 98 09 30 59."
+    "Si doute : renvoyer vers https://runningmangames.fr/contact-us/ ou 04 98 09 30 59.",
+    "Vous ne répondez jamais « je n’ai pas l’information précise » pour l’adresse : l’adresse est toujours 815 avenue Pierre Brossolette, 83300 Draguignan, France."
   ]
 }
