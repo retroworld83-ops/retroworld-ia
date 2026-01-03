@@ -258,100 +258,96 @@ def _runningman_defaults() -> Dict[str, Any]:
 
 
 def _merge_defaults(brand: str, kb: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Normalise les KB (Retroworld / Runningman) en un dictionnaire "facts" simple,
-    utilisé par les réponses rapides (FAST) et par le prompt OpenAI.
+    base = _retroworld_defaults() if brand == "retroworld" else _runningman_defaults()
+    if not isinstance(kb, dict):
+        return base
 
-    Objectif: éviter les écarts de schéma JSON + garantir des réponses cohérentes.
-    """
-    def g(d: Any, path: str, default: Any = "") -> Any:
-        cur = d
-        for part in path.split("."):
-            if isinstance(cur, dict) and part in cur:
-                cur = cur[part]
-            else:
-                return default
-        return cur
-
-    brand = (brand or "").strip().lower()
-
+    # overlay a few known KB fields if present (non-breaking)
     if brand == "runningman":
-        # Schéma KB Runningman (kb_runningman.json)
-        name = g(kb, "identite.nom", "Runningman Game Zone")
-        address = g(kb, "identite.localisation", "815 avenue Pierre Brossolette, 83300 Draguignan, France")
-        phone = g(kb, "identite.contact.telephone", "04 98 09 30 59")
-        website = g(kb, "identite.contact.site_web", "https://www.runningmangames.fr")
+        adresse = _get_nested(kb, "identite.localisation.adresse_complete")
+        if isinstance(adresse, str) and adresse.strip():
+            base["adresse"] = adresse.strip()
+        tel = _get_nested(kb, "identite.contact.telephone")
+        if isinstance(tel, str) and tel.strip():
+            base["tel"] = tel.strip()
+        site = _get_nested(kb, "identite.contact.site_web")
+        if isinstance(site, str) and site.strip():
+            base["site"] = site.strip()
+        contact = _get_nested(kb, "reservation.canaux.contact_page")
+        if isinstance(contact, str) and contact.strip():
+            base["contact"] = contact.strip()
 
-        tarifs = g(kb, "tarification.tarifs", {})
-        prix_moins_12 = tarifs.get("moins_de_12_ans", 15)
-        prix_12_plus = tarifs.get("12_ans_et_plus", 20)
+        # tariffs
+        prix_enfant = _get_nested(kb, "tarification.action_game.enfant.prix")
+        prix_adulte = _get_nested(kb, "tarification.action_game.adulte_accompagnateur.prix")
+        if isinstance(prix_enfant, (int, float)) and isinstance(prix_adulte, (int, float)):
+            base["tarifs"] = f"{int(prix_enfant)}€ / personne (moins de 12 ans) et {int(prix_adulte)}€ / personne (12 ans et + / adulte)."
 
-        duree = g(kb, "experience.duree", "60 minutes")
-        capacite = g(kb, "experience.capacite", "Jusqu’à 25 personnes (sur réservation)")
+        # session duration
+        duree = _get_nested(kb, "horaires_et_creneaux.duree_session")
+        if isinstance(duree, str) and duree.strip():
+            base["session"] = duree.strip()
 
-        return {
-            "name": name,
-            "address": address,
-            "phone": phone,
-            "website": website,
-            "runningman": {
-                "prix_moins_12": prix_moins_12,
-                "prix_12_plus": prix_12_plus,
-                "duree": duree,
-                "capacite": capacite,
-            },
-            # Rappel utile (goûter géré par Retroworld)
-            "gouter_cross": g(kb, "anniversaire.gouter_cross", "Goûter sur devis, géré par Retroworld (préparé par Runningman)."),
-        }
+        cap = _get_nested(kb, "horaires_et_creneaux.capacite.maximum_par_heure")
+        if isinstance(cap, (int, float)):
+            base["capacite"] = f"Jusqu’à {int(cap)} personnes par heure (organisation selon réservation)."
 
-    # Schéma KB Retroworld (kb_retroworld.json)
-    name = g(kb, "identite.nom", "Retroworld France")
-    address = g(kb, "infos_pratiques.coordonnees.adresse", "815 avenue Pierre Brossolette, 83300 Draguignan, France")
-    phone = g(kb, "infos_pratiques.coordonnees.telephone", "04 94 47 94 64")
-    website = g(kb, "infos_pratiques.coordonnees.site_web", "https://www.retroworldfrance.com")
+    else:
+        # Retroworld: use memory/confirmed facts; if KB provides more, we can overlay carefully.
+        site = _get_nested(kb, "liens_officiels.site")
+        if isinstance(site, str) and site.strip():
+            base["site"] = site.strip()
+        tel = _get_nested(kb, "contact.telephone")
+        if isinstance(tel, str) and tel.strip():
+            base["tel"] = tel.strip()
 
-    vr = g(kb, "tarifs.jeux_vr", {})
-    escape = g(kb, "tarifs.escape_vr", {})
-    quiz = g(kb, "tarifs.quiz", {})
-    salle = g(kb, "tarifs.salle_enfant", {})
+        # counts
+        n_vr = kb.get("nombre_jeux_vr")
+        n_escape = kb.get("nombre_escape_vr")
+        if isinstance(n_vr, int):
+            base["jeux_counts"]["jeux_vr"] = n_vr
+        if isinstance(n_escape, int):
+            base["jeux_counts"]["escape_vr"] = n_escape
 
-    horaires_hint = (
-        "Horaires (tarifs) : 11h–20h en tarif standard. "
-        "Avant 11h (9h–11h) et après 20h (20h–23h) : tarif majoré."
-    )
+        # pricing blocks if available
+        tarifs = kb.get("tarifs")
+        if isinstance(tarifs, dict):
+            vr = tarifs.get("vr") if isinstance(tarifs.get("vr"), dict) else {}
+            if isinstance(vr, dict):
+                pn = vr.get("horaire_normal")
+                pm = vr.get("horaire_supplement")
+                if isinstance(pn, (int, float)):
+                    base["vr"]["prix_normal"] = int(pn)
+                if isinstance(pm, (int, float)):
+                    base["vr"]["prix_majoré"] = int(pm)
 
-    return {
-        "name": name,
-        "address": address,
-        "phone": phone,
-        "website": website,
-        "horaires_prix": horaires_hint,
-        "vr": {
-            "prix_normal": vr.get("standard", 15),
-            "prix_avant": vr.get("avant_11h", 20),
-            "prix_apres": vr.get("apres_20h", 17),
-        },
-        "escape_vr": {
-            "prix_normal": escape.get("standard", 30),
-            "prix_avant": escape.get("avant_11h", 35),
-            "prix_apres": escape.get("apres_20h", 35),
-        },
-        "quiz": {
-            "prix_30": quiz.get("30min", 8),
-            "prix_60": quiz.get("60min", 15),
-            "prix_90": quiz.get("90min", 20),
-            "suppl_hors": quiz.get("suppl_hors_11_20", 5),
-            "max_joueurs": g(kb, "activites.quiz.capacite.joueurs_max", 12),
-        },
-        "salle_enfant": {
-            "prix_h": salle.get("heure", 50),
-            "prix_30": salle.get("demi_heure", 20),
-        },
-        "counts": {
-            "jeux_vr": g(kb, "nombre_jeux_vr", 31),
-            "escape_vr": g(kb, "nombre_escape_vr", 28),
-        },
-    }
+            escape = tarifs.get("escape_vr") if isinstance(tarifs.get("escape_vr"), dict) else {}
+            if isinstance(escape, dict):
+                pn = escape.get("horaire_normal")
+                pm = escape.get("horaire_supplement")
+                if isinstance(pn, (int, float)):
+                    base["escape_vr"]["prix_normal"] = int(pn)
+                if isinstance(pm, (int, float)):
+                    base["escape_vr"]["prix_majoré"] = int(pm)
+
+            quiz = tarifs.get("quiz") if isinstance(tarifs.get("quiz"), dict) else {}
+            if isinstance(quiz, dict):
+                if isinstance(quiz.get("30min"), (int, float)):
+                    base["quiz"]["prix_30"] = int(quiz["30min"])
+                if isinstance(quiz.get("60min"), (int, float)):
+                    base["quiz"]["prix_60"] = int(quiz["60min"])
+                if isinstance(quiz.get("90min"), (int, float)):
+                    base["quiz"]["prix_90"] = int(quiz["90min"])
+
+            salle = tarifs.get("salle_enfant") if isinstance(tarifs.get("salle_enfant"), dict) else {}
+            if isinstance(salle, dict):
+                if isinstance(salle.get("heure"), (int, float)):
+                    base["salle_enfant"]["prix_h"] = int(salle["heure"])
+                if isinstance(salle.get("demi_heure_supplement"), (int, float)):
+                    base["salle_enfant"]["prix_demi_h_sup"] = int(salle["demi_heure_supplement"])
+
+    return base
+
 
 def _is_reservation_intent(t: str) -> bool:
     t = _norm(t)
@@ -371,146 +367,58 @@ def _is_event_intent(t: str) -> bool:
     ])
 
 
-def answer_fast(brand: str, kb: Dict[str, Any], text: str, metadata: Optional[Dict[str, Any]] = None) -> Optional[str]:
+def answer_fast(brand: str, user_text: str) -> str | None:
+    """Heuristic answers (no OpenAI call) for common questions.
+
+    IMPORTANT:
+    - For booking intent, always start with "Disponible." (Retroworld rules).
+    - Never claim a slot is confirmed.
+    - Never exceed 5 players simultaneously for VR / Escape VR.
     """
-    Réponses rapides (déterministes) pour les questions ultra fréquentes:
-    adresse, horaires, tarifs, lien de réservation, fidélité, capacité, etc.
+    b = (brand or "").lower().strip()
+    t = _norm(user_text or "")
 
-    Retourne None si on laisse OpenAI répondre.
-    """
-    if not text:
-        return None
+    # KB / defaults
+    if b == "runningman":
+        base = _merge_defaults(KB_RUNNINGMAN, _DEFAULTS_RUNNINGMAN)
+    else:
+        b = "retroworld"
+        base = _merge_defaults(KB_RETROWORLD, _DEFAULTS)
 
-    facts = _merge_defaults(brand, kb)
-    t = (text or "").strip().lower()
-    # mini normalisation accents (sans dépendance)
-    tr = str.maketrans({'é':'e','è':'e','ê':'e','ë':'e','à':'a','â':'a','ä':'a','î':'i','ï':'i','ô':'o','ö':'o','ù':'u','û':'u','ü':'u','ç':'c'})
-    t_no_acc = t.translate(tr)
+    # ----------------------------
+    # 0) Direct booking links (Retroworld only)
+    # ----------------------------
+    if b == "retroworld":
+        if re.search(r"\b(lien|link)\b", t) and re.search(r"\b(resa|réserv|reservation|réservation|book)\b", t):
+            # Activity already specified?
+            if "escape" in t:
+                return "Parfait, je vous laisse réserver via notre lien.\nhttps://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr"
+            if "quiz" in t or "quizz" in t:
+                return "Parfait, je vous laisse réserver via notre lien.\nhttps://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr"
+            if "vr" in t:
+                return "Parfait, je vous laisse réserver via notre lien.\nhttps://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr"
+            return "Pour quelle activité souhaitez-vous le lien : jeux VR, escape game VR, quiz interactif ou salle enfant ?"
 
-    def has(*words: str) -> bool:
-        return any(w in t_no_acc for w in words)
+    # ----------------------------
+    # 1) Adresse / localisation
+    # ----------------------------
+    if re.search(r"\b(adresse|où|ou\s+etes\s+vous|vous\s+etes\s+ou|c\s*est\s+ou|localisation)\b", t):
+        # Both are in the same building (address always identical)
+        return f"Adresse : {base['adresse']}"
 
-    # ---------- RUNNINGMAN ----------
-    if (brand or "").strip().lower() == "runningman":
-        # Adresse / localisation
-        if has("adresse", "ou exactement", "vous etes ou", "où", "ou " ) and not has("tarif", "prix", "combien"):
-            # "où ?" est ambigu, mais la plupart du temps c'est l'adresse
-            return f"Adresse : {facts['address']}"
+    # ----------------------------
+    # 2) Horaires (and price bands)
+    # ----------------------------
+    if re.search(r"(horaire|horaires|ouvert|ouverture|ferme|fermé|fermee|dimanche)", t):
+        if b == "retroworld":
+            return f"{base.get('horaires_prix','Horaires : 11h–20h en tarif standard. Avant 11h et après 20h : tarif majoré.')}\nAdresse : {base['adresse']}"
+        # Runningman: we avoid inventing exact daily schedules
+        return f"Runningman Game Zone est au {base['adresse']}. Pour les horaires exacts et les disponibilités, merci de consulter {base.get('site_web','https://www.runningmangames.fr')} ou d’appeler le {base.get('telephone','04 98 09 30 59')}."
 
-        if has("adresse", "localisation", "vous etes ou", "où", "ou "):
-            return f"Adresse : {facts['address']}"
-
-        # Tarifs
-        if has("tarif", "tarifs", "prix", "combien", "coute", "coûte"):
-            rm = facts.get("runningman", {})
-            return f"Tarifs : {rm.get('prix_moins_12', 15)}€ / personne (moins de 12 ans) et {rm.get('prix_12_plus', 20)}€ / personne (12 ans et +)."
-
-        # Durée / capacité
-        if has("duree", "durée", "1h", "une heure", "60", "minute"):
-            return f"Une session dure {facts.get('runningman', {}).get('duree', '60 minutes')}."
-        if has("combien", "capacit", "personne", "on est", "groupe") and has("possible", "jouable"):
-            return f"Capacité : {facts.get('runningman', {}).get('capacite', 'Jusqu’à 25 personnes (sur réservation).')}"
-
-        # Lien / réservation
-        if has("lien", "resa", "réservation", "reservation", "reserver", "réserver"):
-            # Runningman: renvoyer vers le site (pas de Qweekle ici)
-            return f"Pour réserver, vous pouvez passer par le site : {facts['website']} ou contacter le {facts['phone']}."
-
-        # Goûter / anniversaire (cross Retroworld)
-        if has("gouter", "goûter", "gateau", "gâteau", "anniversaire"):
-            cross = facts.get("gouter_cross", "Goûter sur devis, géré par Retroworld (préparé par Runningman).")
-            return (
-                f"{cross}\n"
-                f"Pour organiser (date/heure/nombre de participants), je vous invite à contacter Retroworld au 04 94 47 94 64."
-            )
-
-        return None
-
-    # ---------- RETROWORLD ----------
-    # Adresse
-    if has("adresse", "où", "ou ", "vous etes ou", "vous êtes où", "localisation"):
-        return f"Adresse : {facts['address']}"
-
-    # Horaires
-    if has("horaire", "horaires", "ouvert", "ouvre", "ferme") or (
-        has("dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi")
-        and has("ouvert", "ouvre", "ferme", "horaire", "horaires")
-    ):
-        # On reste prudent sur les jours exacts si non mentionnés: on donne le repère tarifaire
-        return facts.get("horaires_prix", "Horaires : 11h–20h (tarif standard). Avant 11h et après 20h : tarif majoré.")
-
-    # Lien de réservation Qweekle (seulement si la personne est décidée: "lien", "juste le lien", etc.)
-    if has("lien") and has("resa", "réservation", "reservation", "réserver", "reserver"):
-        # Déterminer activité
-        if has("escape"):
-            return (
-                "Parfait, je vous laisse réserver via notre lien.\n"
-                "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr"
-            )
-        if has("quiz", "quizz"):
-            return (
-                "Parfait, je vous laisse réserver via notre lien.\n"
-                "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr"
-            )
-        if has("vr", "realite virtuelle", "réalité virtuelle"):
-            return (
-                "Parfait, je vous laisse réserver via notre lien.\n"
-                "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr"
-            )
-        if has("salle enfant", "salle"):
-            # Pas de lien Qweekle déclaré pour la salle enfant dans la base -> on demande précision
-            return "Pour quelle activité souhaitez-vous le lien : jeux VR, escape game VR ou quiz interactif ?"
-        return "Pour quelle activité souhaitez-vous le lien : jeux VR, escape game VR, quiz interactif ou salle enfant ?"
-
-    # Réservation / disponibilité (sans demande explicite de lien)
-    if has("réserver", "reserver", "reservation", "réservation", "dispo", "disponible", "créneau", "creneau"):
-        # On suit la règle: toujours répondre "Disponible" + collecter infos
-        return (
-            "Disponible. Pouvez-vous me préciser l’activité (jeux VR, escape game VR, quiz ou salle enfant), "
-            "la date, l’heure de début souhaitée et le nombre de participants ?"
-        )
-
-    # Stockage / goûter
-    if has("stocker", "stockage", "frigo", "gouter", "goûter", "gateau", "gâteau"):
-        return (
-            "Oui, vous pouvez stocker un gâteau/goûter sur place.\n"
-            "Et si vous le souhaitez, un goûter peut être proposé sur devis (préparé par Runningman et géré par Retroworld)."
-        )
-
-    # Tarifs Escape VR (prioritaire sur VR)
-    if has("escape", "escape game") or (has("scenario", "scénario") and has("vr")):
-        if has("prix", "tarif", "combien", "coute", "coûte"):
-            evr = facts["escape_vr"]
-            return (
-                f"Escape game VR : {evr['prix_normal']}€ / joueur (tarif standard).\n"
-                f"Avant 11h ou après 20h : {evr['prix_avant']}€ / joueur."
-            )
-
-    # Tarifs Quiz
-    if has("quiz", "quizz"):
-        if has("prix", "tarif", "combien", "coute", "coûte") or has("30", "60", "90"):
-            q = facts["quiz"]
-            return (
-                f"Quiz interactif : {q['prix_30']}€ (30 min), {q['prix_60']}€ (60 min), {q['prix_90']}€ (90 min) par joueur.\n"
-                f"Avant 11h ou après 20h : +{q['suppl_hors']}€ / joueur."
-            )
-        if has("on est", "nous sommes") and any(n in t_no_acc for n in ["13", "14", "15", "16", "17", "18", "19", "20"]):
-            return f"Le quiz est prévu jusqu’à {facts['quiz']['max_joueurs']} joueurs. Au-delà, il faut organiser en plusieurs sessions."
-
-    # Salle enfant
-    if has("salle enfant", "anniversaire", "enfant"):
-        if has("prix", "tarif", "combien", "coute", "coûte"):
-            se = facts["salle_enfant"]
-            return f"Salle enfant : {se['prix_h']}€ / heure, puis {se['prix_30']}€ la demi-heure supplémentaire."
-        # si "anniversaire" sans tarif: demander infos
-        if has("anniversaire"):
-            return (
-                "Pour un anniversaire, pouvez-vous me préciser la date, l’heure de début, le nombre d’enfants et l’âge moyen ? "
-                "Je vous indiquerai les options (VR, quiz, salle enfant, goûter sur devis)."
-            )
-
-    # Fidélité
-    if has("fideli", "fidél", "point", "points", "qr"):
+    # ----------------------------
+    # 3) Fidélité (must be checked BEFORE "VR" keywords)
+    # ----------------------------
+    if b == "retroworld" and re.search(r"\b(fid[eé]lit[eé]|points?)\b", t):
         return (
             "Programme fidélité :\n"
             "• 1 partie de jeux VR = 1 point\n"
@@ -519,41 +427,128 @@ def answer_fast(brand: str, kb: Dict[str, Any], text: str, metadata: Optional[Di
             "Récompenses : 5 points = 1 quiz 30 min offert, 10 points = 1 partie VR offerte, 20 points = 1 escape game VR offert."
         )
 
-    # Paiement
-    if has("ticket resto", "tickets resto", "restaurant", "ticket restaurant", "chèques vacances", "cheque vacance", "cheques vacances"):
-        want_ticket = has("ticket")
-        want_cheque = has("cheque", "chèque", "vacance")
-        if want_ticket and want_cheque:
-            return "Tickets resto : non. Chèques vacances : oui."
-        if want_ticket:
-            return "Non, nous n’acceptons pas les tickets restaurant."
-        if want_cheque:
-            return "Oui, nous acceptons les chèques vacances."
-        return None
+    # ----------------------------
+    # 4) Goûter / stockage / anniversaire (info)
+    # ----------------------------
+    if re.search(r"(gouter|goûter|gateau|gâteau|frigo|stock|stocker)", t):
+        if b == "retroworld":
+            # Never mention an unlimited formula as available
+            if "a volonte" in t or "à volonté" in user_text.lower():
+                return (
+                    "La formule de goûter illimité n’est plus proposée.\n"
+                    "En revanche, vous pouvez stocker un gâteau/goûter sur place, et un goûter peut être proposé sur devis (préparé par Runningman et géré/commercialisé par Retroworld)."
+                )
+            return "Oui, vous pouvez stocker un gâteau/goûter sur place. Et si vous le souhaitez, un goûter peut être proposé sur devis (préparé par Runningman et géré/commercialisé par Retroworld)."
+        # Runningman: goûter managed by Retroworld
+        return "Oui, vous pouvez stocker un gâteau/goûter sur place. Pour un goûter sur devis (préparé par Runningman), c’est géré par Retroworld : 04 94 47 94 64."
 
-# Jeux VR
-    if has("vr", "realite virtuelle", "réalité virtuelle", "casque"):
-        if has("combien", "prix", "tarif", "coute", "coûte"):
-            vr = facts["vr"]
-            return (
-                f"Jeux VR : {vr['prix_normal']}€ / joueur (tarif standard 11h–20h).\n"
-                f"Avant 11h : {vr['prix_avant']}€ / joueur. Après 20h : {vr['prix_apres']}€ / joueur."
-            )
-        # Capacité VR: max 5
-        if has("on est 6", "nous sommes 6") or re.search(r"\b6\b", t_no_acc):
-            return "En jeux VR, c’est jusqu’à 5 joueurs simultanés. À 6, il faudra vous répartir en 2 sessions."
-        return None
+    # ----------------------------
+    # 5) Paiement
+    # ----------------------------
+    if re.search(r"(ticket\s*resto|tickets\s*resto|restaurant|cheque\s*vac|ch[eè]ques\s*vac|ancv|especes|esp[eè]ces|carte\b)", t):
+        # We only answer what we know for sure from KB defaults
+        if "ticket" in t:
+            return "Tickets resto : non."
+        if re.search(r"(cheque\s*vac|ch[eè]ques\s*vac|ancv)", t):
+            return "Chèques vacances : oui."
+        if re.search(r"(especes|esp[eè]ces)", t):
+            return "Oui, vous pouvez payer en espèces sur place."
+        if "carte" in t:
+            return "Oui, vous pouvez payer par carte bancaire sur place."
 
-    # Salle d’attente / écrans
-    if has("regarder", "ecran", "écran", "salle d'attente", "salle d’attente", "diffusion"):
+    # ----------------------------
+    # 6) Écrans / salle d’attente
+    # ----------------------------
+    if re.search(r"(salle\s*d\s*attente|attente|ecran|écran|regarder|diffus)", t):
+        if b == "retroworld":
+            return "Oui, vous pouvez patienter dans la salle d’attente (canapés, snacks/boissons, baby-foot, air hockey, borne de basketball, billard). Les écrans diffusent la vue du jeu (pas le joueur)."
+        return "Oui, vous pouvez patienter sur place. Pour les détails sur l’accueil/salle d’attente, merci de contacter Runningman : 04 98 09 30 59."
+
+    # ----------------------------
+    # 7) Casques / hygiène
+    # ----------------------------
+    if b == "retroworld" and re.search(r"(casque|headset|vive|quest|meta|netto|d[eé]sinfect|lunettes)", t):
         return (
-            "Oui, vous pouvez patienter dans la salle d’attente (canapés, snacks/boissons, baby-foot, air hockey, borne de basketball, billard).\n"
-            "Les écrans diffusent la vue du jeu (pas le joueur)."
+            "Casques VR : Vive Pro 2 et Meta Quest 3 (ou équivalent selon l’expérience).\n"
+            "Hygiène : les casques et équipements sont nettoyés entre chaque session.\n"
+            "Lunettes : oui, c’est possible (on vous aide à ajuster le casque)."
         )
 
-    # Billard
-    if has("billard"):
-        return "Oui, billard : 10€ / heure (facturé au temps réel)."
+    # ----------------------------
+    # 8) Questions capacité / joueurs (generic)
+    # ----------------------------
+    if re.search(r"(combien\s+de\s+joueurs|max|on\s+peut\s+[eê]tre|a\s+\d+|on\s+est\s+\d+|solo|duo|trio)", t):
+        if b == "retroworld":
+            return (
+                "Selon l’activité :\n"
+                "• Jeux VR : 1 à 5 joueurs simultanés\n"
+                "• Escape game VR : jusqu’à 5 joueurs (souvent 2 à 5 selon le scénario)\n"
+                "• Quiz interactif : jusqu’à 12 joueurs\n"
+                "• Salle enfant : capacité adaptable avec l’équipe\n"
+                "Dites-moi l’activité et le nombre de participants, je vous oriente."
+            )
+        return "Runningman Game Zone : jusqu’à 25 personnes par session (60 minutes). Au-delà, c’est sur demande/devis."
+
+    # ----------------------------
+    # 9) Booking / devis / créneau (Retroworld rules)
+    # ----------------------------
+    if b == "retroworld" and (_is_reservation_intent(t) or _is_event_intent(t)):
+        # Try to detect the activity to avoid re-asking it
+        act = None
+        if "quiz" in t or "quizz" in t:
+            act = "quiz interactif"
+        elif "salle" in t and ("enfant" in t or "anniversaire" in t):
+            act = "salle enfant"
+        elif "escape" in t:
+            act = "escape game VR"
+        elif "vr" in t:
+            act = "jeux VR"
+
+        if _is_event_intent(t):
+            return (
+                "Disponible. Pour organiser un anniversaire/événement, pouvez-vous me préciser :\n"
+                "- Activité(s) (jeux VR, escape VR, quiz, salle enfant ou combinaison)\n"
+                "- Date\n"
+                "- Heure de début (ou une fourchette)\n"
+                "- Nombre de participants\n"
+                "- Âge moyen\n"
+                "- Prénom + nom, email, téléphone\n\n"
+                "Info goûter : vous pouvez stocker un gâteau/goûter sur place, et un goûter peut être proposé sur devis (préparé par Runningman et géré/commercialisé par Retroworld).\n"
+                "Site : https://www.retroworldfrance.com | Téléphone : 04 94 47 94 64"
+            )
+
+        # Simple reservation (no event)
+        if act:
+            return (
+                f"Disponible. Pour réserver {act}, pouvez-vous me préciser la date, l’heure de début souhaitée, le nombre de participants et l’âge des enfants (s’il y en a) ?\n"
+                "Site : https://www.retroworldfrance.com | Téléphone : 04 94 47 94 64."
+            )
+        return "Disponible. Pouvez-vous me préciser l’activité (jeux VR, escape game VR, quiz ou salle enfant), la date, l’heure de début souhaitée et le nombre de participants ?\nSite : https://www.retroworldfrance.com | Téléphone : 04 94 47 94 64."
+
+    if b == "runningman" and (_is_reservation_intent(t) or _is_event_intent(t)):
+        return f"Pour réserver Runningman : {base.get('site_web','https://www.runningmangames.fr')} | {base.get('telephone','04 98 09 30 59')}.\nPour le goûter sur devis (préparé par Runningman), c’est géré par Retroworld : 04 94 47 94 64."
+
+    # ----------------------------
+    # 10) Activity details (non-booking)
+    # ----------------------------
+    if b == "retroworld":
+        # Escape VR must be checked BEFORE generic VR
+        if re.search(r"\bescape\b", t) and "vr" in t:
+            return "Escape game VR : 30€ / joueur (tarif standard 11h–20h). Avant 11h (9h–11h) et après 20h (20h–23h) : 35€ / joueur. Jusqu’à 5 joueurs."
+        if "quiz" in t or "quizz" in t:
+            return "Quiz interactif : 8€ (30 min), 15€ (60 min), 20€ (90 min). Hors 11h–20h (9h–11h et 20h–23h) : +5€ / joueur. Jusqu’à 12 joueurs."
+        if "salle" in t and ("enfant" in t or "anniversaire" in t):
+            return "Salle enfant : 50€ / heure (+20€ / demi-heure supplémentaire). Inclus : jeux en bois, mur interactif, balayeuse, espace goûter."
+        if "vr" in t:
+            return "Jeux VR : 15€ / joueur (tarif standard 11h–20h). Avant 11h (9h–11h) : 20€ / joueur. Après 20h (20h–23h) : 17€ / joueur. Jusqu’à 5 joueurs. Une session = 1 jeu (au choix dans le catalogue)."
+
+
+    # Runningman basics
+    if b == "runningman":
+        if re.search(r"(tarif|prix|combien)", t):
+            return "Tarifs : 15€ / personne (moins de 12 ans) et 20€ / personne (12 ans et +)."
+        if re.search(r"(duree|durée|1h|60)", t):
+            return "Une session dure 60 minutes de jeu."
 
     return None
 
@@ -580,69 +575,52 @@ def build_prompt(
     metadata: Dict[str, Any],
 ) -> List[Dict[str, str]]:
     """
-    Construit un system prompt strict et cohérent avec la KB.
-
-    Principes:
-    - Utiliser UNIQUEMENT les FACTS.
-    - Vouvoiement.
-    - Ne pas inventer.
-    - Si réservation demandée: répondre "Disponible" (sans promettre) + collecter date/heure/joueurs + préciser que ce n’est pas confirmé.
-    - Ne pas mélanger Retroworld / Runningman.
+    Build a strict system prompt:
+    - Use ONLY the facts below. If a fact isn't present, say you don't know and redirect to official contact.
+    - Never confirm availability in chat.
+    - Avoid mixing brands.
     """
-    brand = (brand or "").lower().strip()
+    brand = (brand or "").lower()
     facts = _merge_defaults(brand, kb)
 
     system_rules = [
         _kb_identity_line(brand, kb),
         "Vous répondez en français. Vouvoiement obligatoire.",
-        "Règle d’or : n’inventez jamais un chiffre, une règle, une promo, un horaire ou une offre.",
-        "Si une info n’est pas dans les FACTS ci-dessous, dites-le clairement et redirigez vers le contact officiel.",
-        "Capacité : ne jamais annoncer plus de 5 joueurs simultanés en VR ou escape VR (Retroworld).",
-        "Réservation : vous pouvez répondre 'Disponible' mais vous devez préciser que ce n’est pas confirmé tant qu’un agent n’a pas validé.",
+        "Règle d’or : N’inventez jamais un chiffre, une règle, une promo, un événement ou un horaire non confirmé.",
+        "Si une info n’est pas dans les FACTS ci-dessous, dites clairement que vous n’avez pas l’information et redirigez vers le contact officiel.",
+        "Disponibilités : ne jamais confirmer un créneau ou dire 'il reste de la place'. Orientez vers réservation / téléphone.",
         "Marques : Retroworld (VR, escape VR, quiz, salle enfant). Runningman (action game, mini-jeux physiques). Ne mélangez pas tarifs/règles.",
-        "Liens : ne donner un lien de réservation QUE si l’utilisateur le demande explicitement ('lien', 'lien de réservation', 'lien de resa', etc.).",
-        "Style : réponse courte, claire, utile. Liste à puces pour les tarifs quand c’est pertinent.",
+        "Format : 1) réponse directe. 2) si réservation demandée -> lien officiel. 3) téléphone en secours.",
+        "Ne pas ajouter d’informations non demandées (sauf le téléphone quand on parle réservation).",
     ]
 
+    # Brand-specific contacts + key facts
     if brand == "runningman":
-        rm = facts.get("runningman", {})
         facts_block = [
-            f"Nom : {facts['name']}",
-            f"Adresse : {facts['address']}",
-            f"Téléphone : {facts['phone']}",
-            f"Site : {facts['website']}",
-            f"Tarifs : {rm.get('prix_moins_12', 15)}€ (-12 ans) / {rm.get('prix_12_plus', 20)}€ (12 ans et +)",
-            f"Durée : {rm.get('duree', '60 minutes')}",
-            f"Capacité : {rm.get('capacite', 'Jusqu’à 25 personnes (sur réservation)')}",
-            f"Goûter/anniversaire : {facts.get('gouter_cross', 'Goûter sur devis, géré par Retroworld (préparé par Runningman).')}",
+            f"Adresse : {facts['adresse']}",
+            f"Réservation : {facts['site']} (contact : {facts['contact']}) | {facts['tel']}",
+            f"Session : {facts['session']}",
+            f"Capacité : {facts['capacite']}",
+            f"Âge : {facts['age']}",
+            f"Tarifs : {facts['tarifs']}",
+            "Événements/horaires fériés : si demandé, répondre que vous n’avez pas l’info précise et rediriger vers la page contact ou téléphone.",
         ]
     else:
-        c = facts["counts"]
-        vr = facts["vr"]
-        evr = facts["escape_vr"]
-        q = facts["quiz"]
-        se = facts["salle_enfant"]
-
+        jc = facts["jeux_counts"]
         facts_block = [
-            f"Nom : {facts['name']}",
-            f"Adresse : {facts['address']}",
-            f"Téléphone : {facts['phone']}",
-            f"Site : {facts['website']}",
-            f"Catalogue : {c['jeux_vr']} jeux VR à la partie et {c['escape_vr']} scénarios d’escape game VR",
-            f"{facts.get('horaires_prix')}",
-            f"Jeux VR : {vr['prix_normal']}€ / joueur (11h–20h). Avant 11h : {vr['prix_avant']}€ / joueur. Après 20h : {vr['prix_apres']}€ / joueur. Max 5 joueurs.",
-            f"Escape game VR : {evr['prix_normal']}€ / joueur (standard). Avant 11h ou après 20h : {evr['prix_avant']}€ / joueur. Max 5 joueurs.",
-            f"Quiz : {q['prix_30']}€ (30 min), {q['prix_60']}€ (60 min), {q['prix_90']}€ (90 min) par joueur. Avant 11h ou après 20h : +{q['suppl_hors']}€ / joueur. Jusqu’à {q['max_joueurs']} joueurs.",
-            f"Salle enfant : {se['prix_h']}€ / heure, puis {se['prix_30']}€ la demi-heure supplémentaire. Stockage goûter possible. Goûter sur devis.",
-            "Billard : 10€ / heure (facturé au temps réel).",
-            "Salle d’attente : canapés, snacks/boissons, baby-foot, air hockey, borne de basketball, écrans (vue du jeu, pas du joueur).",
-            "Fidélité : 1 VR = 1 point ; 1 escape VR = 2 points ; pas de points sur anniversaires. Récompenses : 5 points = quiz 30 min ; 10 points = 1 VR ; 20 points = 1 escape VR.",
-            "Paiement : tickets resto non. Chèques vacances oui.",
-            "Liens de réservation Qweekle :\n"
-            "Jeux VR : https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr\n"
-            "Quiz : https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr\n"
-            "Escape VR : https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr",
-            "IMPORTANT : ne jamais proposer une formule 'goûter à volonté'. Goûter uniquement sur devis.",
+            f"Adresse : {facts['adresse']}",
+            f"Contact : {facts['site']} | {facts['tel']}",
+            f"Catalogue : {jc['jeux_vr']} jeux VR et {jc['escape_vr']} scénarios d’escape VR",
+            f"Plages tarifaires : {facts['horaires_prix']}",
+            f"Jeux VR : {facts['vr']['prix_normal']}€ (standard) / {facts['vr']['prix_majoré']}€ (majoré) par joueur, jusqu’à {facts['vr']['max_joueurs']} joueurs. {facts['vr']['session']}",
+            f"Escape VR : {facts['escape_vr']['prix_normal']}€ (standard) / {facts['escape_vr']['prix_majoré']}€ (majoré) par joueur, jusqu’à {facts['escape_vr']['max_joueurs']} joueurs.",
+            f"Quiz : {facts['quiz']['prix_30']}€ (30min), {facts['quiz']['prix_60']}€ (60min), {facts['quiz']['prix_90']}€ (90min), jusqu’à {facts['quiz']['max_joueurs']} joueurs. {facts['quiz']['age']}",
+            f"Salle enfant : {facts['salle_enfant']['prix_h']}€ /h (+{facts['salle_enfant']['prix_demi_h_sup']}€ / 30 min), {facts['salle_enfant']['details']} (goûter possible sur devis).",
+            f"Salle d’attente : {facts['attente']['details']}",
+            f"Hygiène/matériel : {facts['equipement']}",
+            f"Fidélité : {facts['fidelite']['gains']} Récompenses : {facts['fidelite']['recompenses']} {facts['fidelite']['utilisation']} {facts['fidelite']['consultation']}",
+            "Événements/horaires fériés : si demandé, répondre que vous n’avez pas l’info précise et rediriger vers Retroworld (site/téléphone).",
+            "IMPORTANT : la formule 'goûter illimité' est périmée -> ne jamais la proposer. Goûter uniquement sur devis.",
         ]
 
     convo_id = str(metadata.get("conversation_id") or "").strip()
@@ -667,6 +645,7 @@ def build_prompt(
     if meta_lines:
         prompt_messages.append({"role": "system", "content": " ".join(meta_lines)})
 
+    # Conversation history
     for msg in messages:
         if not isinstance(msg, dict):
             continue
@@ -676,6 +655,22 @@ def build_prompt(
             prompt_messages.append({"role": role, "content": str(content)})
 
     return prompt_messages
+
+
+# ---------------------------------------------------------
+# GUARDRAILS FOR OPENAI OUTPUT
+# ---------------------------------------------------------
+
+_RETRO_BANNED = [
+    "meta quest 2", "quest 2",
+]
+_RETRO_SAFE_FALLBACK = (
+    "Pour ce point, je préfère éviter toute erreur. "
+    "Pouvez-vous contacter l’équipe Retroworld au 04 94 47 94 64 ou via https://www.retroworldfrance.com ?"
+)
+
+_RUNNING_BANNED = ["tournoi", "promotion", "promo", "réduction", "reduction", "événement confirmé", "evenement confirme"]
+
 
 def guard_openai_reply(brand: str, reply: str) -> Tuple[str, List[str]]:
     """If the model output contains banned/known-wrong claims, replace with a safe fallback."""
