@@ -121,24 +121,22 @@
     ]
   },
   "anniversaires": {
-    "etat": "Sur demande",
-    "regles": [
-      "Ne jamais inventer une formule complète si non confirmée",
-      "Toujours proposer contact pour valider l’organisation"
-    ],
-    "formule_actuelle": {
-      "description": "Pour le moment, une formule est disponible : l’enfant de moins de 12 ans qui fête son anniversaire est offert.",
-      "conditions": [
-        "Valable uniquement pour un enfant de moins de 12 ans",
-        "Les autres participants sont au tarif normal"
-      ],
-      "regle_bot": "Ne pas ajouter d’autres avantages (gâteau, boissons, salle) si non demandé."
-    },
+    "possible": true,
+    "regle": "Toujours considérer l’anniversaire comme une demande sérieuse et demander les infos clés (date, heure, participants, âge, contact).",
     "gouter": {
-      "apport_autorise": true,
-      "frigo_dedie": true,
-      "message": "Vous pouvez apporter gâteau et boissons. Un frigo est dédié."
-    }
+      "stockage_possible": true,
+      "sur_devis": "Un goûter peut être proposé sur devis (préparé par Runningman et géré/commercialisé par Retroworld).",
+      "contact_gouter": "Retroworld : 04 94 47 94 64"
+    },
+    "a_demander": [
+      "Date",
+      "Heure de début",
+      "Nombre de participants",
+      "Âge moyen",
+      "Nom + prénom",
+      "Téléphone",
+      "Email"
+    ]
   },
   "groupes_et_entreprises": {
     "types": [
@@ -287,14 +285,12 @@
     "Âge : dès 7 ans. Moins de 12 ans : adulte accompagnateur requis. Dès 12 ans : plus besoin d’adulte accompagnateur.",
     "Tarifs : -12 ans 15€ / personne, adulte accompagnateur 20€ / personne.",
     "Groupes / EVG / EVJF / entreprise / anniversaire : sur demande et devis (ne jamais inventer).",
-    "Anniversaire : actuellement, l’enfant de moins de 12 ans qui fête son anniversaire est offert. Ne rien ajouter (gâteau, boissons, etc.) si non demandé.",
-    "Pour toute question de localisation (« c’est où », « où êtes-vous », « adresse »), vous répondez directement : « Adresse : 815 avenue Pierre Brossolette, 83300 Draguignan, France. »"
+    "Anniversaire : sur demande/devis. Stockage gâteau/goûter possible. Un goûter peut être proposé sur devis (préparé par Runningman et géré/commercialisé par Retroworld : 04 94 47 94 64)."
   ],
   "anti_erreurs": [
     "Ne jamais confirmer une disponibilité.",
     "Ne jamais dire “il reste des places”.",
     "Ne jamais dire “nous sommes ouverts/fermés pour Noël/…”.",
-    "Si doute : renvoyer vers https://runningmangames.fr/contact-us/ ou 04 98 09 30 59.",
-    "Vous ne répondez jamais « je n’ai pas l’information précise » pour l’adresse : l’adresse est toujours 815 avenue Pierre Brossolette, 83300 Draguignan, France."
+    "Si doute : renvoyer vers https://runningmangames.fr/contact-us/ ou 04 98 09 30 59."
   ]
 }
