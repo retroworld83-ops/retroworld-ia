@@ -6,7 +6,7 @@ Goals (hard requirements):
 - Never confirm availability in-chat.
 - Avoid brand mixing: detect intent (Retroworld vs Runningman) and answer with the correct rules.
 - Provide fast, deterministic answers for the common questions (address, prices, duration, capacity, booking, events…).
-- Offer a professional admin dashboard + an integrated test console to debug multi-question payloads quickly.
+- Offer a professional admin dashboard + an integrated test console to debug multi‑question payloads quickly.
 
 Runtime notes:
 - KB JSON files are loaded from /mnt/data/kb_<brand>.json (overrides) or /app/kb_<brand>.json (embedded).
@@ -23,6 +23,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, jsonify, request
@@ -262,7 +263,7 @@ def _merge_defaults(brand: str, kb: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(kb, dict):
         return base
 
-    # overlay a few known KB fields if present (non-breaking)
+    # overlay a few known KB fields if present (non‑breaking)
     if brand == "runningman":
         adresse = _get_nested(kb, "identite.localisation.adresse_complete")
         if isinstance(adresse, str) and adresse.strip():
@@ -421,7 +422,7 @@ def answer_fast(brand: str, kb: Dict[str, Any], text: str, metadata: Optional[Di
                 if n <= 25:
                     return f"Oui, jusqu’à 25 personnes par heure (selon réservation). Pour réserver : {facts['site']} | {facts['tel']}."
                 return (
-                    "La capacité est de 25 personnes par heure. Au-delà, c’est possible uniquement sur organisation (sur demande/devis). "
+                    "La capacité est de 25 personnes par heure. Au‑delà, c’est possible uniquement sur organisation (sur demande/devis). "
                     f"Contact : {facts['contact']} | {facts['tel']}."
                 )
 
@@ -447,6 +448,7 @@ def answer_fast(brand: str, kb: Dict[str, Any], text: str, metadata: Optional[Di
 
         # Birthday basics from KB if present
         if "anniversaire" in t:
+            # runningman KB contains the rule "birthday child <12 is free", cake allowed + fridge
             return (
                 "Oui, les anniversaires sont possibles sur demande. "
                 "Pour le moment : l’enfant de moins de 12 ans qui fête son anniversaire est offert (les autres participants au tarif normal). "
@@ -465,13 +467,15 @@ def answer_fast(brand: str, kb: Dict[str, Any], text: str, metadata: Optional[Di
     # Address / location
     if re.search(r"\b(adresse|où|ou|localisation|vous êtes où|vous etes ou)\b", t):
         if "bâtiment" in t or "batiment" in t:
+            # both brands are in the same building
             return f"Nous sommes dans le même bâtiment que Runningman : {facts['adresse']}."
         return f"Adresse : {facts['adresse']}."
 
     # Brand confusion
     if any(k in t for k in ["runningman", "action game", "mini-jeux", "mini jeux", "physique"]) and not any(k in t for k in ["vr", "quiz", "salle enfant", "escape vr", "retroworld"]):
+        # user is likely asking for Runningman from the Retroworld endpoint
         return (
-            "Pour l’action game / mini-jeux physiques, c’est Runningman Game Zone (même bâtiment). "
+            "Pour l’action game / mini‑jeux physiques, c’est Runningman Game Zone (même bâtiment). "
             f"Contact Runningman : {with_convo(_runningman_defaults()['site'])} | 04 98 09 30 59."
         )
 
@@ -507,7 +511,7 @@ def answer_fast(brand: str, kb: Dict[str, Any], text: str, metadata: Optional[Di
 
     # Escape in room (not VR) -> redirect Enigmaniac
     if ("escape" in t and "vr" not in t) or "escape game en salle" in t:
-        return "Nous proposons des escape games en VR. Pour un escape game en salle (non-VR), c’est Enigmaniac (organisation séparée)."
+        return "Nous proposons des escape games en VR. Pour un escape game en salle (non‑VR), c’est Enigmaniac (organisation séparée)."
 
     # Quiz
     if "quiz" in t or "quizz" in t:
@@ -570,8 +574,11 @@ def answer_fast(brand: str, kb: Dict[str, Any], text: str, metadata: Optional[Di
     if any(k in t for k in ["place", "places", "dispo", "disponible", "complet", "complets"]) and any(k in t for k in ["18h", "19h", "20h", "ce soir", "demain"]):
         return f"Je ne peux pas confirmer la disponibilité en direct via le chat. Pour une confirmation rapide, vous pouvez appeler le {facts['tel']} ou réserver via {facts['site']}."
     if _is_reservation_intent(t):
+        # If the user explicitly asks for a link, provide it.
         if "lien" in t or "où réserver" in t or "ou reserver" in t:
             return f"Pour réserver : {facts['site']} (ou par téléphone au {facts['tel']})."
+        # Generic reservation ask: always "Disponible"
+        # Goûter hint: only if Saturday + 2 weeks mentioned
         gouter_hint = ""
         if "samedi" in t and ("2 semaines" in t or "deux semaines" in t):
             gouter_hint = " Si c’est un anniversaire un samedi dans 2 semaines ou plus, nous pouvons proposer l’option goûter (sur devis)."
@@ -622,14 +629,14 @@ def build_prompt(
         _kb_identity_line(brand, kb),
         "Vous répondez en français. Vouvoiement obligatoire.",
         "Règle d’or : N’inventez jamais un chiffre, une règle, une promo, un événement ou un horaire non confirmé.",
-        "Si une info n’est pas dans les FACTS ci-dessous, dites clairement que vous n’avez pas l’information et redirigez vers le contact officiel.",
+        "Si une info n’est pas dans les FACTS ci‑dessous, dites clairement que vous n’avez pas l’information et redirigez vers le contact officiel.",
         "Disponibilités : ne jamais confirmer un créneau ou dire 'il reste de la place'. Orientez vers réservation / téléphone.",
-        "Marques : Retroworld (VR, escape VR, quiz, salle enfant). Runningman (action game, mini-jeux physiques). Ne mélangez pas tarifs/règles.",
+        "Marques : Retroworld (VR, escape VR, quiz, salle enfant). Runningman (action game, mini‑jeux physiques). Ne mélangez pas tarifs/règles.",
         "Format : 1) réponse directe. 2) si réservation demandée -> lien officiel. 3) téléphone en secours.",
         "Ne pas ajouter d’informations non demandées (sauf le téléphone quand on parle réservation).",
     ]
 
-    # Brand-specific contacts + key facts
+    # Brand‑specific contacts + key facts
     if brand == "runningman":
         facts_block = [
             f"Adresse : {facts['adresse']}",
@@ -888,11 +895,13 @@ def process_chat(
     if fast_reply:
         reply_text = fast_reply
         usage: Dict[str, Any] = {}
+        skipped_openai = True
         guard_hits: List[str] = []
     else:
         prompt_messages = build_prompt(effective_brand, kb, messages_for_prompt, metadata)
         reply_text, usage = call_openai_chat(prompt_messages)
         reply_text, guard_hits = guard_openai_reply(effective_brand, reply_text)
+        skipped_openai = False if OPENAI_API_KEY else True
 
     # log
     if do_log:
@@ -973,6 +982,7 @@ def chat_route(brand: str):  # type: ignore[override]
         resp = process_chat(brand, messages, metadata, allow_server_history=True, do_log=True)
         return jsonify(resp), 200
     except RuntimeError as e:
+        # Missing OpenAI key: still return a safe message.
         logger.warning("Chat fallback due to runtime error: %s", e)
         safe = "Je peux répondre aux questions courantes, mais je n’ai pas accès au moteur de réponse avancé pour le moment. Pouvez-vous reformuler votre demande ?"
         return jsonify({"reply": safe, "brand_used": brand, "brand_entry": brand, "error": str(e)}), 200
@@ -1122,6 +1132,7 @@ def admin_api_test():  # type: ignore[override]
 
     # payload could be a dict (test file), list, or string
     if isinstance(payload, dict):
+        # common format: {"results":[{"q": "..."}]}
         res = payload.get("results")
         if isinstance(res, list):
             for item in res:
@@ -1140,6 +1151,7 @@ def admin_api_test():  # type: ignore[override]
     elif isinstance(payload, str):
         text = payload.strip()
         if text:
+            # Plain text: one question per line, ignore "FAST/OPENAI/brand/response" markers
             for line in text.splitlines():
                 ln = line.strip()
                 if not ln:
