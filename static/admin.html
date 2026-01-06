@@ -6,241 +6,558 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <style>
+    :root{
+      --bg:#0f1115;
+      --panel:#161a22;
+      --panel2:#1c212b;
+      --border:#2a2f3a;
+      --text:#eaeaea;
+      --muted:#a7a7a7;
+      --blue:#2563eb;
+      --green:#22c55e;
+      --red:#ef4444;
+    }
     body {
       margin: 0;
-      font-family: Arial, Helvetica, sans-serif;
-      background: #0f1115;
-      color: #eaeaea;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
     }
-
     header {
-      padding: 15px 20px;
-      background: #161a22;
-      border-bottom: 1px solid #2a2f3a;
+      padding: 12px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 12px;
     }
-
     header h1 {
-      font-size: 18px;
+      font-size: 16px;
       margin: 0;
+      font-weight: 650;
     }
+    .pill{
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+    .pill.ok{ color:#bff7d0; border-color:#1f5f3a; }
+    .pill.bad{ color:#ffd1d1; border-color:#5f1f1f; }
 
     main {
-      display: flex;
-      height: calc(100vh - 60px);
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      height: calc(100vh - 54px);
     }
 
     /* Sidebar */
     .sidebar {
-      width: 320px;
-      border-right: 1px solid #2a2f3a;
+      border-right: 1px solid var(--border);
       display: flex;
       flex-direction: column;
+      min-width: 0;
     }
-
-    .sidebar input {
-      margin: 10px;
-      padding: 8px;
-      background: #1c212b;
-      border: 1px solid #2a2f3a;
-      color: #fff;
-      border-radius: 4px;
+    .sidebarTop{
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
     }
-
+    .row{ display:flex; gap:8px; align-items:center; }
+    input, select, textarea{
+      width: 100%;
+      box-sizing: border-box;
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      outline: none;
+    }
+    input::placeholder, textarea::placeholder{ color:#80869a; }
     .conversations {
       flex: 1;
       overflow-y: auto;
     }
-
     .conv {
-      padding: 10px;
-      border-bottom: 1px solid #222;
+      padding: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
       cursor: pointer;
     }
-
-    .conv:hover {
-      background: #1c212b;
+    .conv:hover { background: rgba(255,255,255,0.03); }
+    .conv .top{
+      display:flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
     }
-
-    .conv small {
-      color: #aaa;
+    .conv .id{
+      font-weight: 650;
+      font-size: 13px;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 240px;
+    }
+    .tag{
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      background: rgba(255,255,255,0.02);
+      text-transform: lowercase;
+    }
+    .tag.rw{ border-color:#27407a; color:#cfe1ff; }
+    .tag.rm{ border-color:#2a7a43; color:#bff7d0; }
+    .conv .preview{
+      margin-top: 8px;
+      color: #cbd5e1;
+      font-size: 12px;
+      line-height: 1.35;
+      opacity: .9;
+    }
+    .conv .meta{
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      display:flex;
+      justify-content: space-between;
+      gap: 10px;
     }
 
     /* Content */
     .content {
-      flex: 1;
       display: flex;
       flex-direction: column;
+      min-width: 0;
+    }
+    .toolbar{
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .toolbar .left{
+      display:flex; gap:10px; align-items:center; min-width:0;
+    }
+    .toolbar .right{
+      display:flex; gap:10px; align-items:center;
+    }
+    .title{
+      font-weight: 700;
+      font-size: 13px;
+      color: #e5e7eb;
+      max-width: 560px;
+      overflow:hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .muted{ color: var(--muted); font-size: 12px; }
+    .btn{
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      color: var(--text);
+      padding: 9px 12px;
+      border-radius: 10px;
+      cursor:pointer;
+      font-size: 12px;
+    }
+    .btn:hover{ background: rgba(255,255,255,0.06); }
+    .btn.primary{
+      background: var(--green);
+      border-color: transparent;
+      color: #08110b;
+      font-weight: 700;
+    }
+    .btn.blue{
+      background: var(--blue);
+      border-color: transparent;
+      color: white;
+      font-weight: 700;
     }
 
     .messages {
       flex: 1;
-      padding: 20px;
+      padding: 16px;
       overflow-y: auto;
+      display:flex;
+      flex-direction: column;
+      gap: 10px;
     }
-
     .bubble {
-      max-width: 70%;
-      padding: 10px 14px;
-      margin-bottom: 10px;
-      border-radius: 10px;
-      line-height: 1.4;
+      max-width: 78%;
+      padding: 10px 12px;
+      border-radius: 14px;
+      line-height: 1.35;
       white-space: pre-wrap;
+      font-size: 13px;
+      border: 1px solid rgba(255,255,255,0.06);
     }
-
     .user {
-      background: #2563eb;
+      background: rgba(37,99,235,0.22);
+      border-color: rgba(37,99,235,0.35);
       margin-left: auto;
     }
-
     .assistant {
-      background: #1f2937;
+      background: rgba(255,255,255,0.04);
+      margin-right: auto;
     }
 
-    .meta {
+    .bottom{
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+      display:flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    textarea{
+      height: 92px;
+      resize: vertical;
+      background: #0e1220;
+    }
+    .hint{
       font-size: 12px;
-      color: #aaa;
-      margin-bottom: 10px;
+      color: var(--muted);
     }
-
-    .footer {
-      padding: 15px;
-      border-top: 1px solid #2a2f3a;
-      background: #161a22;
+    .split{
+      display:flex;
+      gap:10px;
+      flex-wrap: wrap;
+      align-items:center;
+      justify-content: space-between;
     }
-
-    textarea {
-      width: 100%;
-      height: 80px;
-      background: #0f1115;
-      color: #fff;
-      border: 1px solid #2a2f3a;
-      padding: 10px;
-      border-radius: 6px;
+    .split .left, .split .right{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .small{
+      font-size: 11px;
+      color: var(--muted);
     }
-
-    button {
-      margin-top: 10px;
-      padding: 8px 14px;
-      background: #22c55e;
-      border: none;
-      color: #000;
-      border-radius: 6px;
-      cursor: pointer;
+    pre{
+      background: #0b0f1c;
+      border: 1px solid var(--border);
+      padding: 12px;
+      border-radius: 12px;
+      overflow:auto;
+      max-height: 280px;
     }
-
-    button.secondary {
-      background: #3b82f6;
-      color: #fff;
-      margin-left: 10px;
-    }
+    .hidden{ display:none; }
   </style>
 </head>
 
 <body>
-  <header>
-    <h1>Admin – Retroworld IA</h1>
-    <div>
-      <span id="tokenStatus"></span>
-    </div>
-  </header>
+<header>
+  <h1>Admin – Retroworld IA</h1>
+  <div class="row">
+    <span id="tokenStatus" class="pill bad">Token manquant</span>
+    <span id="apiStatus" class="pill">API</span>
+  </div>
+</header>
 
-  <main>
-    <div class="sidebar">
-      <input type="text" id="search" placeholder="Rechercher…" />
-      <div class="conversations" id="conversationList"></div>
-    </div>
-
-    <div class="content">
-      <div class="messages" id="messages"></div>
-
-      <div class="footer">
-        <div class="meta" id="convMeta">Aucune conversation sélectionnée</div>
-
-        <textarea id="testInput" placeholder="1 question par ligne pour tester l’IA…"></textarea>
-
-        <button onclick="sendTest()">Tester (Retroworld)</button>
-        <button class="secondary" onclick="sendTest('runningman')">Tester (Runningman)</button>
+<main>
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebarTop">
+      <div class="row">
+        <input type="text" id="search" placeholder="Rechercher par ID / texte…" />
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <select id="brandFilter">
+          <option value="">Toutes marques</option>
+          <option value="retroworld">retroworld</option>
+          <option value="runningman">runningman</option>
+          <option value="unknown">unknown</option>
+          <option value="mixed">mixed</option>
+        </select>
+        <button class="btn" onclick="refresh()">Rafraîchir</button>
+      </div>
+      <div class="small" style="margin-top:8px;">
+        Astuce: ouvre <code>/admin?token=...</code> une fois, ensuite le token est mémorisé.
       </div>
     </div>
-  </main>
+
+    <div class="conversations" id="conversationList"></div>
+  </div>
+
+  <!-- Content -->
+  <div class="content">
+    <div class="toolbar">
+      <div class="left">
+        <div class="title" id="convTitle">Aucune conversation sélectionnée</div>
+        <div class="muted" id="convMeta"></div>
+      </div>
+      <div class="right">
+        <button class="btn" id="btnCopyId" onclick="copyConvId()" disabled>Copier ID</button>
+        <button class="btn" id="btnToggleJson" onclick="toggleJson()" disabled>JSON brut</button>
+      </div>
+    </div>
+
+    <div class="messages" id="messages">
+      <div class="hint">Sélectionne une conversation à gauche.</div>
+    </div>
+
+    <div id="rawJsonWrap" class="bottom hidden">
+      <div class="split">
+        <div class="left">
+          <div class="hint">JSON brut (API)</div>
+        </div>
+        <div class="right">
+          <button class="btn" onclick="copyRawJson()">Copier JSON</button>
+        </div>
+      </div>
+      <pre id="rawJson"></pre>
+    </div>
+
+    <div class="bottom">
+      <div class="split">
+        <div class="left">
+          <div class="hint">Test batch: 1 question par ligne</div>
+        </div>
+        <div class="right">
+          <select id="testBrand">
+            <option value="auto">auto</option>
+            <option value="retroworld">retroworld</option>
+            <option value="runningman">runningman</option>
+          </select>
+          <button class="btn blue" onclick="sendTest()">Tester</button>
+        </div>
+      </div>
+
+      <textarea id="testInput" placeholder="Ex:
+C’est combien pour une session VR ?
+On peut venir à 6 ?
+C’est où Runningman ?"></textarea>
+
+      <div id="testResultsWrap" class="hidden">
+        <div class="split" style="margin-top:6px;">
+          <div class="hint">Résultats</div>
+          <button class="btn" onclick="copyTestResults()">Copier résultats</button>
+        </div>
+        <pre id="testResults"></pre>
+      </div>
+    </div>
+  </div>
+</main>
 
 <script>
-const token =
-  new URLSearchParams(window.location.search).get("token") ||
-  localStorage.getItem("adminToken");
+  // --- Token handling ---
+  const urlToken = new URLSearchParams(window.location.search).get("token");
+  const token = urlToken || localStorage.getItem("adminToken") || "";
+  if (token) localStorage.setItem("adminToken", token);
 
-if (token) {
-  localStorage.setItem("adminToken", token);
-  document.getElementById("tokenStatus").innerText = "Token chargé";
-} else {
-  document.getElementById("tokenStatus").innerText = "⚠️ Token manquant";
-}
+  const tokenStatus = document.getElementById("tokenStatus");
+  tokenStatus.textContent = token ? "Token chargé" : "Token manquant";
+  tokenStatus.className = "pill " + (token ? "ok" : "bad");
 
-let conversations = [];
-let currentConversation = null;
+  const apiStatus = document.getElementById("apiStatus");
 
-async function loadConversations() {
-  const res = await fetch(`/admin/conversations?token=${token}`);
-  conversations = await res.json();
-  renderConversations(conversations);
-}
+  // --- State ---
+  let conversations = [];
+  let filtered = [];
+  let currentConversationId = "";
+  let currentConversationJson = null;
 
-function renderConversations(list) {
-  const container = document.getElementById("conversationList");
-  container.innerHTML = "";
-  list.forEach(c => {
-    const div = document.createElement("div");
-    div.className = "conv";
-    div.innerHTML = `<strong>${c.id}</strong><br><small>${c.brand}</small>`;
-    div.onclick = () => openConversation(c.id);
-    container.appendChild(div);
-  });
-}
+  // --- Helpers ---
+  function qsToken() {
+    return token ? `?token=${encodeURIComponent(token)}` : "";
+  }
 
-async function openConversation(id) {
-  const res = await fetch(`/admin/conversation/${id}?token=${token}`);
-  const data = await res.json();
-  currentConversation = data;
+  function tagForBrand(b){
+    if (b === "retroworld") return "tag rw";
+    if (b === "runningman") return "tag rm";
+    return "tag";
+  }
 
-  document.getElementById("messages").innerHTML = "";
-  document.getElementById("convMeta").innerText =
-    `ID: ${data.id} | Brand: ${data.brand}`;
+  function fmtTime(ts){
+    if(!ts) return "";
+    const d = new Date(ts * 1000);
+    return d.toLocaleString();
+  }
 
-  data.messages.forEach(m => {
-    const div = document.createElement("div");
-    div.className = `bubble ${m.role === "user" ? "user" : "assistant"}`;
-    div.innerText = m.content;
-    document.getElementById("messages").appendChild(div);
-  });
-}
+  function setApi(ok, txt){
+    apiStatus.textContent = txt || (ok ? "API OK" : "API OFF");
+    apiStatus.className = "pill " + (ok ? "ok" : "bad");
+  }
 
-async function sendTest(brand = "retroworld") {
-  const text = document.getElementById("testInput").value.trim();
-  if (!text) return;
+  async function safeFetch(url, options){
+    try{
+      const res = await fetch(url, options);
+      if(!res.ok){
+        const t = await res.text();
+        throw new Error(`${res.status} ${t}`);
+      }
+      return await res.json();
+    }catch(e){
+      setApi(false, "API erreur");
+      throw e;
+    }
+  }
 
-  const questions = text.split("\n").filter(l => l.trim());
+  // --- Load conversations ---
+  async function refresh(){
+    if(!token){
+      alert("Token admin manquant. Ouvre /admin?token=VOTRE_TOKEN");
+      return;
+    }
+    try{
+      setApi(true, "Chargement…");
+      conversations = await safeFetch(`/admin/api/conversations${qsToken()}`);
+      setApi(true, "API OK");
+      applyFilters();
+    }catch(e){
+      console.error(e);
+      alert("Impossible de charger les conversations (token ? serveur ?).");
+    }
+  }
 
-  const res = await fetch(`/admin/test?token=${token}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ brand, questions })
-  });
+  function applyFilters(){
+    const s = (document.getElementById("search").value || "").toLowerCase().trim();
+    const bf = document.getElementById("brandFilter").value;
 
-  const data = await res.json();
-  alert("Test terminé (voir logs serveur)");
-}
+    filtered = conversations.filter(c => {
+      const okBrand = !bf || (String(c.brand||"").toLowerCase() === bf);
+      if(!okBrand) return false;
+      if(!s) return true;
+      const hay = `${c.id} ${c.preview||""} ${c.source||""} ${c.channel||""}`.toLowerCase();
+      return hay.includes(s);
+    });
 
-document.getElementById("search").addEventListener("input", e => {
-  const v = e.target.value.toLowerCase();
-  renderConversations(
-    conversations.filter(c => c.id.toLowerCase().includes(v))
-  );
-});
+    renderConversations(filtered);
+  }
 
-loadConversations();
+  function renderConversations(list){
+    const container = document.getElementById("conversationList");
+    container.innerHTML = "";
+    if(!list.length){
+      container.innerHTML = `<div class="conv"><div class="preview">Aucune conversation.</div></div>`;
+      return;
+    }
+
+    list.forEach(c => {
+      const div = document.createElement("div");
+      div.className = "conv";
+      div.innerHTML = `
+        <div class="top">
+          <div class="id" title="${c.id}">${c.id}</div>
+          <span class="${tagForBrand(c.brand)}">${c.brand || "unknown"}</span>
+        </div>
+        <div class="preview">${(c.preview || "").replace(/</g,"&lt;")}</div>
+        <div class="meta">
+          <span>${fmtTime(c.timestamp)}</span>
+          <span>${c.channel || ""}</span>
+        </div>
+      `;
+      div.onclick = () => openConversation(c.id);
+      container.appendChild(div);
+    });
+  }
+
+  // --- Open conversation ---
+  async function openConversation(id){
+    if(!token) return;
+    try{
+      currentConversationId = id;
+      document.getElementById("convTitle").textContent = id;
+      document.getElementById("convMeta").textContent = "Chargement…";
+      document.getElementById("btnCopyId").disabled = false;
+      document.getElementById("btnToggleJson").disabled = false;
+
+      const data = await safeFetch(`/admin/api/conversation/${encodeURIComponent(id)}${qsToken()}`);
+      currentConversationJson = data;
+
+      const brand = data.brand_final || "unknown";
+      document.getElementById("convMeta").textContent = `brand: ${brand}`;
+
+      const messages = data.messages || [];
+      const msgWrap = document.getElementById("messages");
+      msgWrap.innerHTML = "";
+
+      if(!messages.length){
+        msgWrap.innerHTML = `<div class="hint">Conversation vide.</div>`;
+      }else{
+        messages.forEach(m=>{
+          const div = document.createElement("div");
+          div.className = "bubble " + (m.role === "user" ? "user" : "assistant");
+          div.textContent = m.content || "";
+          msgWrap.appendChild(div);
+        });
+        msgWrap.scrollTop = msgWrap.scrollHeight;
+      }
+
+      document.getElementById("rawJson").textContent = JSON.stringify(data, null, 2);
+
+    }catch(e){
+      console.error(e);
+      alert("Impossible d'ouvrir la conversation.");
+    }
+  }
+
+  function copyConvId(){
+    if(!currentConversationId) return;
+    navigator.clipboard.writeText(currentConversationId);
+  }
+
+  function toggleJson(){
+    const wrap = document.getElementById("rawJsonWrap");
+    wrap.classList.toggle("hidden");
+  }
+
+  function copyRawJson(){
+    if(!currentConversationJson) return;
+    navigator.clipboard.writeText(JSON.stringify(currentConversationJson, null, 2));
+  }
+
+  // --- Batch test ---
+  async function sendTest(){
+    if(!token){
+      alert("Token admin manquant.");
+      return;
+    }
+    const text = document.getElementById("testInput").value || "";
+    const brand = document.getElementById("testBrand").value || "auto";
+    const questions = text.split("\n").map(l=>l.trim()).filter(Boolean);
+
+    if(!questions.length){
+      alert("Ajoute au moins une question.");
+      return;
+    }
+
+    try{
+      const out = await safeFetch(`/admin/api/test${qsToken()}`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ brand, questions })
+      });
+
+      document.getElementById("testResultsWrap").classList.remove("hidden");
+      document.getElementById("testResults").textContent = JSON.stringify(out, null, 2);
+
+    }catch(e){
+      console.error(e);
+      alert("Test impossible (API/test).");
+    }
+  }
+
+  function copyTestResults(){
+    const t = document.getElementById("testResults").textContent || "";
+    navigator.clipboard.writeText(t);
+  }
+
+  // --- Events ---
+  document.getElementById("search").addEventListener("input", applyFilters);
+  document.getElementById("brandFilter").addEventListener("change", applyFilters);
+
+  // Init
+  refresh();
 </script>
 </body>
 </html>
