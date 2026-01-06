@@ -1,25 +1,3 @@
-"""
-Flask application for the Retroworld / Runningman conversation assistant.
-
-- Multi-brand KB (kb_retroworld.json / kb_runningman.json)
-- Conversation logging (.jsonl)
-- Chat endpoint: /chat/<brand>
-- User history endpoint (optional token): /user/api/history
-- KB upsert endpoint: /kb/upsert/<brand> (optional admin token)
-- Qweekle webhook logger: /webhooks/qweekle
-- Admin APIs:
-    /admin/api/conversations
-    /admin/api/conversation/<conversation_id>
-    /admin/api/test
-  Admin UI:
-    /admin (serves static/admin.html)
-    /admin/conversations (back-compat, now also serves static/admin.html)
-  Extra admin aliases:
-    /admin/conversations/list
-    /admin/conversation/<conversation_id>
-    /admin/test
-"""
-
 from __future__ import annotations
 
 import json
@@ -31,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from flask import Flask, jsonify, request, send_from_directory, abort, make_response
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 # ---------------------------------------------------------
@@ -57,7 +35,7 @@ QWEEKLE_SOURCE_NAME = os.getenv("QWEEKLE_SOURCE_NAME", "qweekle")
 
 # OpenAI
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # change if you want
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.2"))
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "600"))
 
@@ -105,7 +83,7 @@ def _safe_write_json(path: str, data: Any) -> bool:
 
 
 # ---------------------------------------------------------
-# USER -> conversation mapping (optional simple index)
+# USER -> conversation mapping
 # ---------------------------------------------------------
 
 USER_INDEX_PATH = os.getenv("USER_INDEX_PATH", "user_index.json")
@@ -127,13 +105,8 @@ def get_user_conversation(user_id: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------
-# KB
+# KB (cached)
 # ---------------------------------------------------------
-
-
-def _read_json(path: str) -> Any:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 @dataclass
@@ -149,10 +122,10 @@ _kb_cache: Dict[str, _KBCacheEntry] = {}
 def load_kb(brand: str) -> Dict[str, Any]:
     brand = (brand or "retroworld").lower()
     path = KB_RETROWORLD_PATH if brand == "retroworld" else KB_RUNNINGMAN_PATH
+
     try:
         mtime = os.path.getmtime(path)
     except Exception:
-        # if KB missing, return empty
         return {"brand": brand, "items": []}
 
     cached = _kb_cache.get(brand)
@@ -172,38 +145,41 @@ def save_kb(brand: str, kb: Dict[str, Any]) -> bool:
     path = KB_RETROWORLD_PATH if brand == "retroworld" else KB_RUNNINGMAN_PATH
     ok = _safe_write_json(path, kb)
     if ok:
-        try:
-            _kb_cache.pop(brand, None)
-        except Exception:
-            pass
+        _kb_cache.pop(brand, None)
     return ok
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "")).strip()
 
 
 # ---------------------------------------------------------
 # OPENAI CALL
 # ---------------------------------------------------------
 
-# OpenAI SDK is optional; keep code robust on hosts where it's not installed
 _openai_client = None
+_openai_init_error = None
+
 try:
     from openai import OpenAI  # type: ignore
 
     if OPENAI_API_KEY:
         _openai_client = OpenAI(api_key=OPENAI_API_KEY)
-except Exception:
+    else:
+        _openai_init_error = "OPENAI_API_KEY vide ou non défini"
+except Exception as e:
     _openai_client = None
+    _openai_init_error = f"Import/initialisation OpenAI impossible: {type(e).__name__}: {e}"
+    logger.exception("OpenAI init failed")
 
 
 def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any]]:
     """
     Returns (assistant_text, usage_dict).
-    If OpenAI isn't configured, returns a safe fallback.
     """
     if not _openai_client:
-        return (
-            "Le service IA n’est pas configuré (clé OpenAI absente).",
-            {"skipped": True},
-        )
+        reason = _openai_init_error or "Client OpenAI non initialisé"
+        return (f"Le service IA n’est pas configuré. Détail: {reason}", {"skipped": True, "reason": reason})
 
     resp = _openai_client.chat.completions.create(
         model=OPENAI_MODEL,
@@ -212,6 +188,7 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
         max_tokens=OPENAI_MAX_TOKENS,
     )
     text = (resp.choices[0].message.content or "").strip()
+
     usage = {}
     try:
         usage = resp.usage.model_dump()  # type: ignore
@@ -228,7 +205,7 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
 
 
 # ---------------------------------------------------------
-# BRAND + GUARDS
+# BRAND DETECTION
 # ---------------------------------------------------------
 
 
@@ -237,39 +214,6 @@ def detect_brand_from_text(text: str) -> str:
     if "runningman" in t or "running man" in t or "action game" in t:
         return "runningman"
     return "retroworld"
-
-
-def _get_nested(d: Dict[str, Any], path: str, default=None):
-    cur: Any = d
-    for part in path.split("."):
-        if not isinstance(cur, dict) or part not in cur:
-            return default
-        cur = cur[part]
-    return cur
-
-
-def _retroworld_defaults() -> Dict[str, Any]:
-    # Minimal. Your KB should contain the real details.
-    return {
-        "brand": "retroworld",
-        "tone": "pro",
-        "signature": "L'équipe Retroworld",
-    }
-
-
-def _runningman_defaults() -> Dict[str, Any]:
-    return {"brand": "runningman", "tone": "pro"}
-
-
-def _merge_defaults(brand: str, kb: Dict[str, Any]) -> Dict[str, Any]:
-    base = _retroworld_defaults() if brand == "retroworld" else _runningman_defaults()
-    merged = dict(base)
-    merged.update(kb or {})
-    return merged
-
-
-def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "")).strip()
 
 
 def _is_reservation_intent(text: str) -> bool:
@@ -377,16 +321,9 @@ def process_chat(
     messages: List[Dict[str, Any]],
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    brand_entry: 'retroworld' | 'runningman' | 'auto'
-    messages: list of {role, content}
-    metadata: optional dict
-    Returns dict with reply, brand_effective, openai_usage, etc.
-    """
     metadata = metadata or {}
     brand_entry = (brand_entry or "auto").lower()
 
-    # Effective brand
     if brand_entry == "auto":
         last_user = ""
         for m in reversed(messages or []):
@@ -398,9 +335,10 @@ def process_chat(
         brand_effective = "runningman" if brand_entry == "runningman" else "retroworld"
 
     kb = load_kb(brand_effective)
-    kb = _merge_defaults(brand_effective, kb)
+    kb_items = kb.get("items") if isinstance(kb, dict) else []
+    if not isinstance(kb_items, list):
+        kb_items = []
 
-    # Build prompt
     system = (
         "Vous êtes un assistant conversationnel professionnel.\n"
         "Répondez de façon claire, précise, utile, sans inventer.\n"
@@ -408,11 +346,9 @@ def process_chat(
         "Respectez la marque et ses règles.\n"
     )
 
-    # Optional: push KB items into system context
-    kb_items = kb.get("items") or []
-    if isinstance(kb_items, list) and kb_items:
+    if kb_items:
         system += "\nConnaissances (KB) :\n"
-        for it in kb_items[:120]:
+        for it in kb_items[:140]:
             if isinstance(it, str):
                 system += f"- {it}\n"
             elif isinstance(it, dict):
@@ -424,7 +360,6 @@ def process_chat(
 
     openai_messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
 
-    # Keep only last N messages to avoid prompt explosion
     clipped = []
     for m in messages[-MAX_HISTORY_MESSAGES:]:
         if not isinstance(m, dict):
@@ -435,7 +370,6 @@ def process_chat(
             clipped.append({"role": role, "content": str(content)})
     openai_messages.extend(clipped)
 
-    # Reservation rule (simple guard)
     last_user_text = ""
     for m in reversed(clipped):
         if m["role"] == "user":
@@ -467,14 +401,14 @@ def _require_admin_token(req) -> bool:
     tok = (req.args.get("token") or "").strip()
     if not tok:
         tok = (req.headers.get("X-Admin-Token") or "").strip()
-    return bool(tok) and tok == ADMIN_DASHBOARD_TOKEN
+    return bool(tok) and bool(ADMIN_DASHBOARD_TOKEN) and tok == ADMIN_DASHBOARD_TOKEN
 
 
 def _require_user_token(req) -> bool:
     tok = (req.args.get("token") or "").strip()
     if not tok:
         tok = (req.headers.get("X-User-Token") or "").strip()
-    return bool(tok) and tok == USER_HISTORY_TOKEN
+    return bool(tok) and bool(USER_HISTORY_TOKEN) and tok == USER_HISTORY_TOKEN
 
 
 # ---------------------------------------------------------
@@ -484,13 +418,7 @@ def _require_user_token(req) -> bool:
 
 @app.route("/", methods=["GET"])
 def root():
-    return jsonify(
-        {
-            "service": SERVICE_NAME,
-            "status": "ok",
-            "time_utc": datetime.utcnow().isoformat() + "Z",
-        }
-    )
+    return jsonify({"service": SERVICE_NAME, "status": "ok", "time_utc": datetime.utcnow().isoformat() + "Z"}), 200
 
 
 @app.route("/health", methods=["GET"])
@@ -500,17 +428,6 @@ def health():
 
 @app.route("/chat/<brand>", methods=["POST"])
 def chat_route(brand: str):
-    """
-    Input JSON:
-      {
-        "conversation_id": "optional",
-        "user_id": "optional",
-        "messages": [{"role":"user","content":"..."}],
-        "metadata": {...}
-      }
-    Output:
-      { reply, brand_effective, conversation_id }
-    """
     try:
         payload = request.get_json(force=True) or {}
     except Exception:
@@ -527,7 +444,6 @@ def chat_route(brand: str):
     conversation_id = str(payload.get("conversation_id") or "").strip()
     user_id = str(payload.get("user_id") or "").strip()
 
-    # If user_id is provided and conversation_id is not, try to re-use mapping
     if not conversation_id and user_id:
         conversation_id = get_user_conversation(user_id) or ""
 
@@ -540,7 +456,6 @@ def chat_route(brand: str):
     out = process_chat(brand_entry=brand, messages=messages, metadata=metadata)
     reply_text = out.get("reply") or ""
 
-    # Log
     channel = str(metadata.get("source") or "web")
     append_conversation_log(
         conversation_id=conversation_id,
@@ -557,23 +472,11 @@ def chat_route(brand: str):
         },
     )
 
-    return jsonify(
-        {
-            "reply": reply_text,
-            "brand_effective": out.get("brand_effective"),
-            "conversation_id": conversation_id,
-        }
-    ), 200
+    return jsonify({"reply": reply_text, "brand_effective": out.get("brand_effective"), "conversation_id": conversation_id}), 200
 
 
 @app.route("/user/api/history", methods=["GET"])
 def user_api_history():
-    """
-    Optional: requires USER_HISTORY_TOKEN if set.
-    Query:
-      ?conversation_id=...
-      or ?user_id=...
-    """
     if USER_HISTORY_TOKEN and not _require_user_token(request):
         return jsonify({"error": "forbidden"}), 403
 
@@ -592,10 +495,6 @@ def user_api_history():
 
 @app.route("/kb/upsert/<brand>", methods=["POST"])
 def kb_upsert(brand: str):
-    """
-    Admin endpoint to add/replace KB items.
-    If ADMIN_DASHBOARD_TOKEN is set, it requires it.
-    """
     if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
 
@@ -614,10 +513,8 @@ def kb_upsert(brand: str):
 
     new_items = body.get("items")
     if isinstance(new_items, list):
-        # Replace strategy by default
         kb["items"] = new_items
     else:
-        # If single item, append
         it = body.get("item")
         if it is not None:
             kb["items"].append(it)
@@ -626,8 +523,6 @@ def kb_upsert(brand: str):
     return jsonify({"status": "ok" if ok else "error", "brand": brand}), (200 if ok else 500)
 
 
-# ---------------- QWEEKLE WEBHOOK ----------------
-
 @app.route("/webhooks/qweekle", methods=["POST"])
 def qweekle_webhook():
     if QWEEKLE_WEBHOOK_SECRET:
@@ -635,6 +530,7 @@ def qweekle_webhook():
         if incoming_secret != QWEEKLE_WEBHOOK_SECRET:
             logger.warning("Qweekle webhook rejected (invalid secret)")
             return jsonify({"error": "forbidden"}), 403
+
     try:
         payload = request.get_json(force=True) or {}
     except Exception:
@@ -651,7 +547,9 @@ def qweekle_webhook():
     return jsonify({"status": "ok", "event_type": event_type}), 200
 
 
-# ---------------- ADMIN API ----------------
+# ---------------------------------------------------------
+# ADMIN API
+# ---------------------------------------------------------
 
 @app.route("/admin/api/conversations", methods=["GET"])
 def admin_api_conversations():
@@ -695,17 +593,15 @@ def admin_api_conversations():
         if len(preview) > LOG_PREVIEW_MAX_CHARS:
             preview = preview[:LOG_PREVIEW_MAX_CHARS].rstrip() + "…"
 
-        convs.append(
-            {
-                "id": conversation_id,
-                "timestamp": ts,
-                "datetime": last.get("datetime"),
-                "brand": brand_final,
-                "channel": channel,
-                "source": source,
-                "preview": preview,
-            }
-        )
+        convs.append({
+            "id": conversation_id,
+            "timestamp": ts,
+            "datetime": last.get("datetime"),
+            "brand": brand_final,
+            "channel": channel,
+            "source": source,
+            "preview": preview,
+        })
 
     convs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
     return jsonify(convs), 200
@@ -715,6 +611,7 @@ def admin_api_conversations():
 def admin_api_conversation_detail(conversation_id: str):
     if not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
+
     records = load_conversation_records(conversation_id)
     if not records:
         return jsonify({"error": "not_found"}), 404
@@ -722,29 +619,20 @@ def admin_api_conversation_detail(conversation_id: str):
     brand_info = classify_conversation_brands(records)
     history = reconstruct_history_from_logs(conversation_id)
 
-    # Compat: keep original 'records', add nicer 'messages' for UI
-    return jsonify(
-        {
-            "conversation_id": conversation_id,
-            "brand_final": brand_info.get("brand_final"),
-            "brands_seen": brand_info.get("brands_seen"),
-            "messages": history,
-            "records": records,
-        }
-    ), 200
+    return jsonify({
+        "conversation_id": conversation_id,
+        "brand_final": brand_info.get("brand_final"),
+        "brands_seen": brand_info.get("brands_seen"),
+        "messages": history,
+        "records": records,
+    }), 200
 
 
 @app.route("/admin/api/test", methods=["POST"])
 def admin_api_test():
-    """
-    Run a batch test:
-      JSON input:
-        { "brand":"auto|retroworld|runningman", "payload": ["q1","q2"] }
-        or { "brand":"...", "payload": "one question per line" }
-      Output: results
-    """
     if not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
+
     try:
         body = request.get_json(force=True) or {}
     except Exception:
@@ -753,107 +641,148 @@ def admin_api_test():
         return jsonify({"error": "invalid_payload"}), 400
 
     brand = str(body.get("brand") or "auto").lower()
-    payload = body.get("payload")
 
-    questions: List[str] = []
+    questions = body.get("questions")
+    if not isinstance(questions, list):
+        # compat: accept payload multiline
+        payload = body.get("payload")
+        questions = []
+        if isinstance(payload, str):
+            for line in payload.splitlines():
+                ln = line.strip()
+                if ln:
+                    questions.append(ln)
 
-    if isinstance(payload, list):
-        for q in payload:
-            if isinstance(q, str) and q.strip():
-                questions.append(q.strip())
-    elif isinstance(payload, str):
-        for line in payload.splitlines():
-            ln = line.strip()
-            if ln:
-                questions.append(ln)
-    else:
-        # also accept body.questions
-        q2 = body.get("questions")
-        if isinstance(q2, list):
-            for q in q2:
-                if isinstance(q, str) and q.strip():
-                    questions.append(q.strip())
+    if not isinstance(questions, list) or not questions:
+        return jsonify({"error": "no_questions"}), 400
 
-    # Deduplicate keep order
+    # dedupe
     seen = set()
-    qs: List[str] = []
+    clean = []
     for q in questions:
-        if q in seen:
-            continue
-        seen.add(q)
-        qs.append(q)
+        if isinstance(q, str):
+            q = q.strip()
+            if q and q not in seen:
+                seen.add(q)
+                clean.append(q)
 
     results = []
-    for q in qs:
+    for q in clean:
         msgs = [{"role": "user", "content": q}]
-        out = process_chat(brand_entry=brand, messages=msgs, metadata={"source": "admin_api_test"})
+        out = process_chat(brand_entry=brand, messages=msgs, metadata={"source": "admin_test"})
         results.append({"q": q, "brand_effective": out.get("brand_effective"), "answer": out.get("reply")})
 
     return jsonify({"status": "ok", "count": len(results), "results": results}), 200
 
 
-# --------- ADMIN UI helper endpoints (aliases) ---------
-
-@app.route("/admin/conversations/list", methods=["GET"])
-def admin_conversations_list():
-    """Alias returning the same as /admin/api/conversations (JSON)."""
-    return admin_api_conversations()
-
-
-@app.route("/admin/conversation/<conversation_id>", methods=["GET"])
-def admin_conversation_flat(conversation_id: str):
-    """Alias returning a UI-friendly conversation payload."""
+@app.route("/admin/api/diag", methods=["GET"])
+def admin_api_diag():
     if not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
-    records = load_conversation_records(conversation_id)
-    if not records:
-        return jsonify({"error": "not_found"}), 404
-    brand_info = classify_conversation_brands(records)
-    history = reconstruct_history_from_logs(conversation_id)
-    return jsonify(
-        {
-            "id": conversation_id,
-            "brand": brand_info.get("brand_final"),
-            "brands_seen": brand_info.get("brands_seen"),
-            "messages": history,
-        }
-    ), 200
 
+    # OpenAI (sans exposer la clé)
+    openai_key_present = bool(OPENAI_API_KEY)
+    openai_key_len = len(OPENAI_API_KEY) if OPENAI_API_KEY else 0
+    openai_client_ready = bool(_openai_client)
+    openai_init_error = _openai_init_error
 
-@app.route("/admin/test", methods=["POST"])
-def admin_test_batch():
-    """Alias for batch testing (expects {brand, questions}). Returns answers."""
-    if not _require_admin_token(request):
-        return jsonify({"error": "forbidden"}), 403
+    # KB
+    kb_rw_exists = os.path.exists(KB_RETROWORLD_PATH)
+    kb_rm_exists = os.path.exists(KB_RUNNINGMAN_PATH)
+
+    kb_rw_ok = False
+    kb_rm_ok = False
+    kb_rw_count = 0
+    kb_rm_count = 0
+
     try:
-        body = request.get_json(force=True) or {}
+        kb_rw = load_kb("retroworld")
+        items = kb_rw.get("items") if isinstance(kb_rw, dict) else []
+        kb_rw_count = len(items) if isinstance(items, list) else 0
+        kb_rw_ok = True
     except Exception:
-        return jsonify({"error": "invalid_json"}), 400
-    brand = str(body.get("brand") or "auto").lower()
-    questions = body.get("questions") or []
-    if not isinstance(questions, list):
-        return jsonify({"error": "invalid_questions"}), 400
+        kb_rw_ok = False
 
-    results = []
-    for q in questions:
-        if not isinstance(q, str) or not q.strip():
-            continue
-        messages = [{"role": "user", "content": q.strip()}]
-        out = process_chat(brand_entry=brand, messages=messages, metadata={"source": "admin_test"})
-        results.append(
-            {"q": q.strip(), "brand_effective": out.get("brand_effective"), "answer": out.get("reply")}
-        )
+    try:
+        kb_rm = load_kb("runningman")
+        items = kb_rm.get("items") if isinstance(kb_rm, dict) else []
+        kb_rm_count = len(items) if isinstance(items, list) else 0
+        kb_rm_ok = True
+    except Exception:
+        kb_rm_ok = False
 
-    return jsonify({"status": "ok", "count": len(results), "results": results}), 200
+    # Logs
+    conv_dir_exists = os.path.isdir(CONVERSATIONS_LOG_DIR)
+    conv_files = []
+    try:
+        if conv_dir_exists:
+            conv_files = [f for f in os.listdir(CONVERSATIONS_LOG_DIR) if f.endswith(".jsonl")]
+    except Exception:
+        conv_files = []
+
+    qweekle_dir_exists = os.path.isdir(QWEEKLE_LOG_DIR)
+    qweekle_files = []
+    try:
+        if qweekle_dir_exists:
+            qweekle_files = [f for f in os.listdir(QWEEKLE_LOG_DIR) if f.endswith(".jsonl")]
+    except Exception:
+        qweekle_files = []
+
+    return jsonify({
+        "service": SERVICE_NAME,
+        "time_utc": datetime.utcnow().isoformat() + "Z",
+
+        "openai": {
+            "key_present": openai_key_present,
+            "key_length": openai_key_len,
+            "client_ready": openai_client_ready,
+            "init_error": openai_init_error,
+            "model": OPENAI_MODEL,
+            "temperature": OPENAI_TEMPERATURE,
+            "max_tokens": OPENAI_MAX_TOKENS,
+        },
+
+        "kb": {
+            "retroworld": {
+                "path": KB_RETROWORLD_PATH,
+                "exists": kb_rw_exists,
+                "load_ok": kb_rw_ok,
+                "items_count": kb_rw_count,
+            },
+            "runningman": {
+                "path": KB_RUNNINGMAN_PATH,
+                "exists": kb_rm_exists,
+                "load_ok": kb_rm_ok,
+                "items_count": kb_rm_count,
+            },
+        },
+
+        "logs": {
+            "conversations_dir": CONVERSATIONS_LOG_DIR,
+            "conversations_dir_exists": conv_dir_exists,
+            "conversations_files_count": len(conv_files),
+            "qweekle_dir": QWEEKLE_LOG_DIR,
+            "qweekle_dir_exists": qweekle_dir_exists,
+            "qweekle_files_count": len(qweekle_files),
+            "qweekle_secret_required": bool(QWEEKLE_WEBHOOK_SECRET),
+        },
+
+        "tokens": {
+            "admin_token_set": bool(ADMIN_DASHBOARD_TOKEN),
+            "user_history_token_set": bool(USER_HISTORY_TOKEN),
+        }
+    }), 200
 
 
-# ---------------- ADMIN UI (HTML) ----------------
+# ---------------------------------------------------------
+# ADMIN UI (HTML)
+# ---------------------------------------------------------
 
 @app.route("/admin", methods=["GET"])
 def admin_page():
-    # Main admin entrypoint (serves static/admin.html).
     if not _require_admin_token(request):
         return "Forbidden", 403
+
     static_dir = os.path.join(app.root_path, "static")
     admin_path = os.path.join(static_dir, "admin.html")
     if os.path.exists(admin_path):
@@ -861,34 +790,10 @@ def admin_page():
     return "admin.html missing in /static", 404
 
 
+# Back-compat: previously /admin/conversations existed
 @app.route("/admin/conversations", methods=["GET"])
 def admin_conversations_page():
-    # Back-compat route that now serves the real admin UI
-    if not _require_admin_token(request):
-        return "Forbidden", 403
-
-    static_dir = os.path.join(app.root_path, "static")
-    admin_path = os.path.join(static_dir, "admin.html")
-
-    if os.path.exists(admin_path):
-        return send_from_directory(static_dir, "admin.html")
-
-    # Fallback (if admin.html is not present)
-    return """<!doctype html>
-<html lang="fr">
-<meta charset="utf-8">
-<title>Admin IA</title>
-<body style="font-family:system-ui;background:#0b1220;color:#e5e7eb;padding:24px;">
-  <h2>Admin IA</h2>
-  <p>La page <code>static/admin.html</code> est absente.</p>
-  <p>API disponibles :</p>
-  <ul>
-    <li><code>/admin/api/conversations</code></li>
-    <li><code>/admin/api/conversation/&lt;conversation_id&gt;</code></li>
-    <li><code>/admin/api/test</code></li>
-  </ul>
-</body>
-</html>"""
+    return admin_page()
 
 
 # ---------------------------------------------------------
