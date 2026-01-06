@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin – Retroworld IA</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #0f1115;
+      color: #eaeaea;
+    }
+
+    header {
+      padding: 15px 20px;
+      background: #161a22;
+      border-bottom: 1px solid #2a2f3a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    header h1 {
+      font-size: 18px;
+      margin: 0;
+    }
+
+    main {
+      display: flex;
+      height: calc(100vh - 60px);
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 320px;
+      border-right: 1px solid #2a2f3a;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar input {
+      margin: 10px;
+      padding: 8px;
+      background: #1c212b;
+      border: 1px solid #2a2f3a;
+      color: #fff;
+      border-radius: 4px;
+    }
+
+    .conversations {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .conv {
+      padding: 10px;
+      border-bottom: 1px solid #222;
+      cursor: pointer;
+    }
+
+    .conv:hover {
+      background: #1c212b;
+    }
+
+    .conv small {
+      color: #aaa;
+    }
+
+    /* Content */
+    .content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .messages {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .bubble {
+      max-width: 70%;
+      padding: 10px 14px;
+      margin-bottom: 10px;
+      border-radius: 10px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
+
+    .user {
+      background: #2563eb;
+      margin-left: auto;
+    }
+
+    .assistant {
+      background: #1f2937;
+    }
+
+    .meta {
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 10px;
+    }
+
+    .footer {
+      padding: 15px;
+      border-top: 1px solid #2a2f3a;
+      background: #161a22;
+    }
+
+    textarea {
+      width: 100%;
+      height: 80px;
+      background: #0f1115;
+      color: #fff;
+      border: 1px solid #2a2f3a;
+      padding: 10px;
+      border-radius: 6px;
+    }
+
+    button {
+      margin-top: 10px;
+      padding: 8px 14px;
+      background: #22c55e;
+      border: none;
+      color: #000;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #3b82f6;
+      color: #fff;
+      margin-left: 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Admin – Retroworld IA</h1>
+    <div>
+      <span id="tokenStatus"></span>
+    </div>
+  </header>
+
+  <main>
+    <div class="sidebar">
+      <input type="text" id="search" placeholder="Rechercher…" />
+      <div class="conversations" id="conversationList"></div>
+    </div>
+
+    <div class="content">
+      <div class="messages" id="messages"></div>
+
+      <div class="footer">
+        <div class="meta" id="convMeta">Aucune conversation sélectionnée</div>
+
+        <textarea id="testInput" placeholder="1 question par ligne pour tester l’IA…"></textarea>
+
+        <button onclick="sendTest()">Tester (Retroworld)</button>
+        <button class="secondary" onclick="sendTest('runningman')">Tester (Runningman)</button>
+      </div>
+    </div>
+  </main>
+
+<script>
+const token =
+  new URLSearchParams(window.location.search).get("token") ||
+  localStorage.getItem("adminToken");
+
+if (token) {
+  localStorage.setItem("adminToken", token);
+  document.getElementById("tokenStatus").innerText = "Token chargé";
+} else {
+  document.getElementById("tokenStatus").innerText = "⚠️ Token manquant";
+}
+
+let conversations = [];
+let currentConversation = null;
+
+async function loadConversations() {
+  const res = await fetch(`/admin/conversations?token=${token}`);
+  conversations = await res.json();
+  renderConversations(conversations);
+}
+
+function renderConversations(list) {
+  const container = document.getElementById("conversationList");
+  container.innerHTML = "";
+  list.forEach(c => {
+    const div = document.createElement("div");
+    div.className = "conv";
+    div.innerHTML = `<strong>${c.id}</strong><br><small>${c.brand}</small>`;
+    div.onclick = () => openConversation(c.id);
+    container.appendChild(div);
+  });
+}
+
+async function openConversation(id) {
+  const res = await fetch(`/admin/conversation/${id}?token=${token}`);
+  const data = await res.json();
+  currentConversation = data;
+
+  document.getElementById("messages").innerHTML = "";
+  document.getElementById("convMeta").innerText =
+    `ID: ${data.id} | Brand: ${data.brand}`;
+
+  data.messages.forEach(m => {
+    const div = document.createElement("div");
+    div.className = `bubble ${m.role === "user" ? "user" : "assistant"}`;
+    div.innerText = m.content;
+    document.getElementById("messages").appendChild(div);
+  });
+}
+
+async function sendTest(brand = "retroworld") {
+  const text = document.getElementById("testInput").value.trim();
+  if (!text) return;
+
+  const questions = text.split("\n").filter(l => l.trim());
+
+  const res = await fetch(`/admin/test?token=${token}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ brand, questions })
+  });
+
+  const data = await res.json();
+  alert("Test terminé (voir logs serveur)");
+}
+
+document.getElementById("search").addEventListener("input", e => {
+  const v = e.target.value.toLowerCase();
+  renderConversations(
+    conversations.filter(c => c.id.toLowerCase().includes(v))
+  );
+});
+
+loadConversations();
+</script>
+</body>
+</html>
