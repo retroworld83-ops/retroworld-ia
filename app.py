@@ -178,7 +178,7 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
     )
     text = (resp.choices[0].message.content or "").strip()
 
-    usage = {}
+    usage: Dict[str, Any] = {}
     try:
         usage = resp.usage.model_dump()  # type: ignore
     except Exception:
@@ -196,7 +196,6 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
 
 def detect_brand_from_text(text: str) -> str:
     t = _norm(text)
-    # heuristique simple
     if "runningman" in t or "running man" in t or "action game" in t:
         return "runningman"
     return "retroworld"
@@ -204,7 +203,6 @@ def detect_brand_from_text(text: str) -> str:
 
 def _is_reservation_intent(text: str) -> bool:
     t = _norm(text)
-    # mots clés simples
     keys = [
         "réserver",
         "reservation",
@@ -367,13 +365,11 @@ def process_chat(
 
     openai_messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
 
-    # history based on conversation id if provided (optional)
     conversation_id = str(metadata.get("conversation_id") or "").strip()
     if conversation_id:
         hist = load_conversation(conversation_id)
         openai_messages.extend(prune_history_for_prompt(hist, max_turns=12))
 
-    # clip/normalize incoming messages
     clipped: List[Dict[str, str]] = []
     for m in (messages or [])[-20:]:
         if not isinstance(m, dict):
@@ -390,7 +386,7 @@ def process_chat(
             last_user_text = m["content"]
             break
 
-    guard_hits = []
+    guard_hits: List[str] = []
     if _is_reservation_intent(last_user_text):
         guard_hits.append("reservation_intent")
 
@@ -426,14 +422,7 @@ def _require_user_token(req) -> bool:
 
 
 def _coerce_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
-    """Accept multiple client payload formats and normalize to OpenAI-style messages.
-
-    Supported:
-    - New format: {"messages": [{"role":"user|assistant","content":"..."}...]}
-    - Legacy format A: {"message":"...", "history":[["u","a"], ...]}
-    - Legacy format B: {"message":"...", "history":[{"role":...,"content":...}, ...]}
-    """
-    # New format
+    """Accept multiple client payload formats and normalize to OpenAI-style messages."""
     raw = payload.get("messages")
     if isinstance(raw, list):
         out: List[Dict[str, str]] = []
@@ -446,12 +435,10 @@ def _coerce_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
                 out.append({"role": role, "content": str(content)})
         return out
 
-    # Legacy formats
-    out = []
+    out: List[Dict[str, str]] = []
     history = payload.get("history") or []
     if isinstance(history, list):
         for item in history:
-            # history as pairs: [[user, assistant], ...]
             if isinstance(item, (list, tuple)) and len(item) == 2:
                 u, a = item
                 if u:
@@ -460,7 +447,6 @@ def _coerce_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
                     out.append({"role": "assistant", "content": str(a)})
                 continue
 
-            # history as message dicts
             if isinstance(item, dict):
                 role = (item.get("role") or "").strip()
                 content = item.get("content")
@@ -498,11 +484,14 @@ def chat_compat():
 
     metadata = _coerce_metadata(payload)
 
-    # If the client didn't specify a brand, auto-detect from last user message
     out = process_chat(brand_entry="auto", messages=messages, metadata=metadata)
+
+    # ✅ Compat: certains fronts lisent reply, d'autres answer
+    reply = out.get("reply", "")
     return jsonify(
         {
-            "reply": out.get("reply", ""),
+            "reply": reply,
+            "answer": reply,
             "brand_effective": out.get("brand_effective"),
             "brand_entry": out.get("brand_entry"),
         }
@@ -511,7 +500,16 @@ def chat_compat():
 
 @app.route("/", methods=["GET"])
 def root():
-    return jsonify({"service": SERVICE_NAME, "status": "ok", "time_utc": datetime.utcnow().isoformat() + "Z"}), 200
+    return (
+        jsonify(
+            {
+                "service": SERVICE_NAME,
+                "status": "ok",
+                "time_utc": datetime.utcnow().isoformat() + "Z",
+            }
+        ),
+        200,
+    )
 
 
 @app.route("/health", methods=["GET"])
@@ -535,18 +533,15 @@ def chat_route(brand: str):
     conversation_id = str(payload.get("conversation_id") or "").strip()
     user_id = str(payload.get("user_id") or "").strip()
 
-    # allow mapping user -> conversation
     if user_id and not conversation_id:
         conversation_id = get_user_conversation(user_id) or ""
 
     if not conversation_id:
-        # create a new one
         conversation_id = "conv_" + datetime.utcnow().strftime("%Y%m%d%H%M%S")
 
     if user_id:
         set_user_conversation(user_id, conversation_id)
 
-    # carry conversation id into metadata (used for prompt history)
     metadata = dict(metadata)
     metadata.setdefault("conversation_id", conversation_id)
 
@@ -567,7 +562,18 @@ def chat_route(brand: str):
         },
     )
 
-    return jsonify({"reply": reply_text, "brand_effective": out.get("brand_effective"), "conversation_id": conversation_id}), 200
+    # ✅ Compat reply/answer
+    return (
+        jsonify(
+            {
+                "reply": reply_text,
+                "answer": reply_text,
+                "brand_effective": out.get("brand_effective"),
+                "conversation_id": conversation_id,
+            }
+        ),
+        200,
+    )
 
 
 @app.route("/user/api/history", methods=["GET"])
@@ -620,7 +626,6 @@ def kb_upsert(brand: str):
 
 @app.route("/qweekle/webhook", methods=["POST"])
 def qweekle_webhook():
-    # Endpoint générique: on stocke juste les payloads pour debug
     path = os.path.join(DATA_DIR, "qweekle_webhook.log")
     try:
         payload = request.get_data(as_text=True) or ""
@@ -695,7 +700,6 @@ def admin_conversations_page():
 
 @app.route("/<path:path>", methods=["GET"])
 def static_proxy(path: str):
-    # serve static files
     return send_from_directory(app.static_folder, path)
 
 
