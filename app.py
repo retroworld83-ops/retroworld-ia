@@ -47,12 +47,15 @@ CORS(app)
 # ---------------------------------------------------------
 
 _openai_client = None
+_openai_init_error = None
+
 try:
     if OPENAI_API_KEY:
         from openai import OpenAI  # type: ignore
 
         _openai_client = OpenAI(api_key=OPENAI_API_KEY)
 except Exception as e:
+    _openai_init_error = str(e)
     logger.warning("OpenAI client init failed: %s", e)
     _openai_client = None
 
@@ -121,6 +124,12 @@ _KB_CACHE_TTL_SEC = 30.0
 
 
 def load_kb(brand: str) -> Dict[str, Any]:
+    """Load KB from disk and normalize it to:
+    {"brand": "<brand>", "items": [ ... ]}
+
+    Compatible with your current KB format (dict with custom keys like "activites", etc.)
+    by converting top-level keys into items.
+    """
     brand = (brand or "").lower().strip()
     if brand not in ("retroworld", "runningman"):
         brand = "retroworld"
@@ -132,9 +141,30 @@ def load_kb(brand: str) -> Dict[str, Any]:
 
     filename = f"kb_{brand}.json"
     path = os.path.join(KB_DIR, filename)
-    kb = _safe_read_json(path, {"brand": brand, "items": []})
-    if not isinstance(kb, dict):
-        kb = {"brand": brand, "items": []}
+    raw = _safe_read_json(path, {})
+
+    kb: Dict[str, Any] = {"brand": brand, "items": []}
+
+    if isinstance(raw, dict):
+        # Already normalized?
+        if isinstance(raw.get("items"), list):
+            kb = {"brand": raw.get("brand") or brand, "items": raw.get("items") or []}
+        else:
+            # Structured dict format -> convert each key to one item
+            items: List[Dict[str, str]] = []
+            for k, v in raw.items():
+                try:
+                    content = json.dumps(v, ensure_ascii=False, indent=2)
+                except Exception:
+                    content = str(v)
+                items.append({"title": str(k), "content": content})
+            kb = {"brand": brand, "items": items}
+
+    elif isinstance(raw, list):
+        kb = {"brand": brand, "items": raw}
+
+    elif isinstance(raw, str):
+        kb = {"brand": brand, "items": [raw]}
 
     _KB_CACHE[brand] = _KBCacheEntry(ts=now, kb=kb)
     return kb
@@ -178,7 +208,7 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
     )
     text = (resp.choices[0].message.content or "").strip()
 
-    usage: Dict[str, Any] = {}
+    usage = {}
     try:
         usage = resp.usage.model_dump()  # type: ignore
     except Exception:
@@ -386,7 +416,7 @@ def process_chat(
             last_user_text = m["content"]
             break
 
-    guard_hits: List[str] = []
+    guard_hits = []
     if _is_reservation_intent(last_user_text):
         guard_hits.append("reservation_intent")
 
@@ -435,7 +465,7 @@ def _coerce_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
                 out.append({"role": role, "content": str(content)})
         return out
 
-    out: List[Dict[str, str]] = []
+    out = []
     history = payload.get("history") or []
     if isinstance(history, list):
         for item in history:
@@ -486,7 +516,7 @@ def chat_compat():
 
     out = process_chat(brand_entry="auto", messages=messages, metadata=metadata)
 
-    # ✅ Compat: certains fronts lisent reply, d'autres answer
+    # ✅ Compat: certains fronts lisent "reply", d'autres "answer"
     reply = out.get("reply", "")
     return jsonify(
         {
@@ -562,7 +592,6 @@ def chat_route(brand: str):
         },
     )
 
-    # ✅ Compat reply/answer
     return (
         jsonify(
             {
@@ -596,6 +625,7 @@ def user_api_history():
 
 @app.route("/kb/<brand>", methods=["GET"])
 def kb_get(brand: str):
+    # returns normalized KB (brand + items)
     kb = load_kb(brand)
     return jsonify(kb), 200
 
@@ -669,18 +699,68 @@ def admin_api_diag():
     if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
 
-    return jsonify(
-        {
-            "service": SERVICE_NAME,
-            "port": PORT,
-            "openai_configured": bool(OPENAI_API_KEY),
-            "model": OPENAI_MODEL,
-            "kb_dir": KB_DIR,
-            "data_dir": DATA_DIR,
-            "has_admin_token": bool(ADMIN_DASHBOARD_TOKEN),
-            "has_user_history_token": bool(USER_HISTORY_TOKEN),
+    # --- OpenAI status ---
+    openai_status = {
+        "key_present": bool(OPENAI_API_KEY),
+        "client_ready": bool(_openai_client),
+        "model": OPENAI_MODEL,
+        "init_error": _openai_init_error,
+    }
+    if not OPENAI_API_KEY:
+        openai_status["init_error"] = "OPENAI_API_KEY manquant."
+
+    # --- KB status ---
+    def kb_status(brand: str) -> Dict[str, Any]:
+        filename = f"kb_{brand}.json"
+        path = os.path.join(KB_DIR, filename)
+        exists = os.path.exists(path)
+        load_ok = False
+        items_count = 0
+        try:
+            kb = load_kb(brand)
+            items = kb.get("items") or []
+            load_ok = isinstance(items, list)
+            items_count = len(items) if isinstance(items, list) else 0
+        except Exception:
+            load_ok = False
+            items_count = 0
+        return {
+            "file": filename,
+            "path": path,
+            "exists": exists,
+            "load_ok": load_ok,
+            "items_count": items_count,
         }
-    ), 200
+
+    kb_info = {
+        "retroworld": kb_status("retroworld"),
+        "runningman": kb_status("runningman"),
+    }
+
+    # --- Logs / storage status ---
+    try:
+        conv_files = [f for f in os.listdir(CONV_DIR) if f.endswith(".json")]
+        conv_count = len(conv_files)
+    except Exception:
+        conv_count = 0
+
+    logs_info = {"conversations_files_count": conv_count}
+
+    return (
+        jsonify(
+            {
+                "service": SERVICE_NAME,
+                "port": PORT,
+                "paths": {"kb_dir": KB_DIR, "data_dir": DATA_DIR, "conv_dir": CONV_DIR},
+                "openai": openai_status,
+                "kb": kb_info,
+                "logs": logs_info,
+                "has_admin_token": bool(ADMIN_DASHBOARD_TOKEN),
+                "has_user_history_token": bool(USER_HISTORY_TOKEN),
+            }
+        ),
+        200,
+    )
 
 
 # ---------------------------------------------------------
