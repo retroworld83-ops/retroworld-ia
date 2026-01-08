@@ -47,7 +47,7 @@ CORS(app)
 # ---------------------------------------------------------
 
 _openai_client = None
-_openai_init_error = None
+_openai_init_error: Optional[str] = None
 
 try:
     if OPENAI_API_KEY:
@@ -84,6 +84,18 @@ def _safe_write_json(path: str, data: Any) -> bool:
     except Exception as e:
         logger.warning("write json failed (%s): %s", path, e)
         return False
+
+
+def _iso_to_epoch(ts: str) -> Optional[float]:
+    try:
+        if not ts:
+            return None
+        s = ts.strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s).timestamp()
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------
@@ -124,12 +136,6 @@ _KB_CACHE_TTL_SEC = 30.0
 
 
 def load_kb(brand: str) -> Dict[str, Any]:
-    """Load KB from disk and normalize it to:
-    {"brand": "<brand>", "items": [ ... ]}
-
-    Compatible with your current KB format (dict with custom keys like "activites", etc.)
-    by converting top-level keys into items.
-    """
     brand = (brand or "").lower().strip()
     if brand not in ("retroworld", "runningman"):
         brand = "retroworld"
@@ -141,30 +147,9 @@ def load_kb(brand: str) -> Dict[str, Any]:
 
     filename = f"kb_{brand}.json"
     path = os.path.join(KB_DIR, filename)
-    raw = _safe_read_json(path, {})
-
-    kb: Dict[str, Any] = {"brand": brand, "items": []}
-
-    if isinstance(raw, dict):
-        # Already normalized?
-        if isinstance(raw.get("items"), list):
-            kb = {"brand": raw.get("brand") or brand, "items": raw.get("items") or []}
-        else:
-            # Structured dict format -> convert each key to one item
-            items: List[Dict[str, str]] = []
-            for k, v in raw.items():
-                try:
-                    content = json.dumps(v, ensure_ascii=False, indent=2)
-                except Exception:
-                    content = str(v)
-                items.append({"title": str(k), "content": content})
-            kb = {"brand": brand, "items": items}
-
-    elif isinstance(raw, list):
-        kb = {"brand": brand, "items": raw}
-
-    elif isinstance(raw, str):
-        kb = {"brand": brand, "items": [raw]}
+    kb = _safe_read_json(path, {"brand": brand, "items": []})
+    if not isinstance(kb, dict):
+        kb = {"brand": brand, "items": []}
 
     _KB_CACHE[brand] = _KBCacheEntry(ts=now, kb=kb)
     return kb
@@ -208,7 +193,7 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
     )
     text = (resp.choices[0].message.content or "").strip()
 
-    usage = {}
+    usage: Dict[str, Any] = {}
     try:
         usage = resp.usage.model_dump()  # type: ignore
     except Exception:
@@ -346,6 +331,72 @@ def classify_conversation_brands(records: List[Dict[str, Any]]) -> Dict[str, Any
     return {"brand_final": last_effective or "unknown", "brands_seen": sorted(brands_seen)}
 
 
+def flatten_records_to_messages(records: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Transform records list into a simple chat transcript: [{role, content}, ...]."""
+    msgs: List[Dict[str, str]] = []
+    if not isinstance(records, list):
+        return msgs
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        user_msgs = rec.get("user_messages") or []
+        if isinstance(user_msgs, list):
+            for um in user_msgs:
+                if isinstance(um, dict):
+                    role = um.get("role")
+                    if role in ("user", "assistant"):
+                        msgs.append({"role": role, "content": str(um.get("content") or "")})
+        ar = rec.get("assistant_reply")
+        if ar is not None:
+            msgs.append({"role": "assistant", "content": str(ar)})
+    return msgs
+
+
+def summarize_conversation(conversation_id: str) -> Dict[str, Any]:
+    records = load_conversation(conversation_id)
+    brands = classify_conversation_brands(records)
+    brand_final = brands.get("brand_final", "unknown")
+
+    ts_epoch: Optional[float] = None
+    preview = ""
+    channel = ""
+    source = "chat"
+
+    if records:
+        # last record timestamp + preview
+        last = records[-1] if isinstance(records[-1], dict) else {}
+        ts_epoch = _iso_to_epoch(str(last.get("ts") or ""))
+
+        # preview from last user message if possible, else assistant
+        user_msgs = last.get("user_messages") or []
+        last_user = ""
+        if isinstance(user_msgs, list):
+            for um in reversed(user_msgs):
+                if isinstance(um, dict) and um.get("role") == "user":
+                    last_user = str(um.get("content") or "")
+                    break
+        preview = (last_user or str(last.get("assistant_reply") or "")).strip()
+
+        extra = last.get("extra") or {}
+        meta = extra.get("metadata") or {}
+        if isinstance(meta, dict):
+            channel = str(meta.get("channel") or "")
+
+    # clean preview
+    preview = re.sub(r"\s+", " ", preview)
+    if len(preview) > 160:
+        preview = preview[:157] + "..."
+
+    return {
+        "id": conversation_id,
+        "brand": brand_final,
+        "preview": preview,
+        "timestamp": ts_epoch or None,
+        "channel": channel,
+        "source": source,
+    }
+
+
 # ---------------------------------------------------------
 # Core chat pipeline
 # ---------------------------------------------------------
@@ -416,7 +467,7 @@ def process_chat(
             last_user_text = m["content"]
             break
 
-    guard_hits = []
+    guard_hits: List[str] = []
     if _is_reservation_intent(last_user_text):
         guard_hits.append("reservation_intent")
 
@@ -465,7 +516,7 @@ def _coerce_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
                 out.append({"role": role, "content": str(content)})
         return out
 
-    out = []
+    out: List[Dict[str, str]] = []
     history = payload.get("history") or []
     if isinstance(history, list):
         for item in history:
@@ -496,7 +547,7 @@ def _coerce_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------
-# ENDPOINTS
+# ENDPOINTS (CHAT)
 # ---------------------------------------------------------
 
 
@@ -513,15 +564,13 @@ def chat_compat():
         return jsonify({"error": "invalid_messages"}), 400
 
     metadata = _coerce_metadata(payload)
-
     out = process_chat(brand_entry="auto", messages=messages, metadata=metadata)
 
-    # ✅ Compat: certains fronts lisent "reply", d'autres "answer"
     reply = out.get("reply", "")
     return jsonify(
         {
             "reply": reply,
-            "answer": reply,
+            "answer": reply,  # compat
             "brand_effective": out.get("brand_effective"),
             "brand_entry": out.get("brand_entry"),
         }
@@ -530,16 +579,7 @@ def chat_compat():
 
 @app.route("/", methods=["GET"])
 def root():
-    return (
-        jsonify(
-            {
-                "service": SERVICE_NAME,
-                "status": "ok",
-                "time_utc": datetime.utcnow().isoformat() + "Z",
-            }
-        ),
-        200,
-    )
+    return jsonify({"service": SERVICE_NAME, "status": "ok", "time_utc": datetime.utcnow().isoformat() + "Z"}), 200
 
 
 @app.route("/health", methods=["GET"])
@@ -592,17 +632,14 @@ def chat_route(brand: str):
         },
     )
 
-    return (
-        jsonify(
-            {
-                "reply": reply_text,
-                "answer": reply_text,
-                "brand_effective": out.get("brand_effective"),
-                "conversation_id": conversation_id,
-            }
-        ),
-        200,
-    )
+    return jsonify(
+        {
+            "reply": reply_text,
+            "answer": reply_text,  # compat
+            "brand_effective": out.get("brand_effective"),
+            "conversation_id": conversation_id,
+        }
+    ), 200
 
 
 @app.route("/user/api/history", methods=["GET"])
@@ -623,9 +660,13 @@ def user_api_history():
     return jsonify({"conversation_id": conversation_id, "records": records}), 200
 
 
+# ---------------------------------------------------------
+# ENDPOINTS (KB)
+# ---------------------------------------------------------
+
+
 @app.route("/kb/<brand>", methods=["GET"])
 def kb_get(brand: str):
-    # returns normalized KB (brand + items)
     kb = load_kb(brand)
     return jsonify(kb), 200
 
@@ -654,6 +695,11 @@ def kb_upsert(brand: str):
     return jsonify({"ok": ok, "brand": brand, "count": len(items)}), 200
 
 
+# ---------------------------------------------------------
+# WEBHOOK DEBUG
+# ---------------------------------------------------------
+
+
 @app.route("/qweekle/webhook", methods=["POST"])
 def qweekle_webhook():
     path = os.path.join(DATA_DIR, "qweekle_webhook.log")
@@ -668,13 +714,22 @@ def qweekle_webhook():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# ---------------------------------------------------------
+# ADMIN API (FIXED TO MATCH admin.html)
+# ---------------------------------------------------------
+
+
 @app.route("/admin/api/conversations", methods=["GET"])
 def admin_api_conversations():
     if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
 
-    convs = list_conversations()
-    return jsonify({"items": convs}), 200
+    conv_ids = list_conversations()
+    # admin.html expects an ARRAY of objects
+    out: List[Dict[str, Any]] = []
+    for cid in conv_ids:
+        out.append(summarize_conversation(cid))
+    return jsonify(out), 200
 
 
 @app.route("/admin/api/conversation/<conversation_id>", methods=["GET"])
@@ -684,14 +739,59 @@ def admin_api_conversation_detail(conversation_id: str):
 
     records = load_conversation(conversation_id)
     brands = classify_conversation_brands(records)
-    return jsonify({"conversation_id": conversation_id, "records": records, "brands": brands}), 200
+    messages = flatten_records_to_messages(records)
+
+    # admin.html expects brand_final + messages
+    return jsonify(
+        {
+            "id": conversation_id,
+            "conversation_id": conversation_id,
+            "brand_final": brands.get("brand_final", "unknown"),
+            "brands_seen": brands.get("brands_seen", []),
+            "messages": messages,
+            "records": records,  # keep full raw for debug
+        }
+    ), 200
 
 
-@app.route("/admin/api/test", methods=["GET"])
+@app.route("/admin/api/test", methods=["GET", "POST"])
 def admin_api_test():
     if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
-    return jsonify({"ok": True, "service": SERVICE_NAME}), 200
+
+    # GET = small ping (used by diag sometimes)
+    if request.method == "GET":
+        return jsonify({"ok": True, "service": SERVICE_NAME}), 200
+
+    # POST = batch test used by admin.html
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid_json"}), 400
+
+    brand = str(payload.get("brand") or "auto").lower().strip()
+    questions = payload.get("questions") or []
+    if not isinstance(questions, list) or not questions:
+        return jsonify({"error": "invalid_questions"}), 400
+
+    results: List[Dict[str, Any]] = []
+    for q in questions[:50]:
+        q_txt = str(q or "").strip()
+        if not q_txt:
+            continue
+        t0 = time.time()
+        out = process_chat(brand_entry=brand, messages=[{"role": "user", "content": q_txt}], metadata={})
+        ms = int((time.time() - t0) * 1000)
+        results.append(
+            {
+                "question": q_txt,
+                "reply": out.get("reply", ""),
+                "brand_effective": out.get("brand_effective"),
+                "ms": ms,
+            }
+        )
+
+    return jsonify({"ok": True, "brand": brand, "count": len(results), "results": results}), 200
 
 
 @app.route("/admin/api/diag", methods=["GET"])
@@ -699,68 +799,49 @@ def admin_api_diag():
     if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
 
-    # --- OpenAI status ---
-    openai_status = {
-        "key_present": bool(OPENAI_API_KEY),
-        "client_ready": bool(_openai_client),
-        "model": OPENAI_MODEL,
-        "init_error": _openai_init_error,
-    }
-    if not OPENAI_API_KEY:
-        openai_status["init_error"] = "OPENAI_API_KEY manquant."
-
-    # --- KB status ---
-    def kb_status(brand: str) -> Dict[str, Any]:
-        filename = f"kb_{brand}.json"
-        path = os.path.join(KB_DIR, filename)
+    def kb_diag(brand: str) -> Dict[str, Any]:
+        fname = f"kb_{brand}.json"
+        path = os.path.join(KB_DIR, fname)
         exists = os.path.exists(path)
-        load_ok = False
+        data = _safe_read_json(path, None) if exists else None
+        load_ok = isinstance(data, dict)
         items_count = 0
-        try:
-            kb = load_kb(brand)
-            items = kb.get("items") or []
-            load_ok = isinstance(items, list)
-            items_count = len(items) if isinstance(items, list) else 0
-        except Exception:
-            load_ok = False
-            items_count = 0
+        if isinstance(data, dict):
+            items = data.get("items")
+            if isinstance(items, list):
+                items_count = len(items)
         return {
-            "file": filename,
-            "path": path,
             "exists": exists,
+            "file": fname,
+            "path": path,
             "load_ok": load_ok,
             "items_count": items_count,
         }
 
-    kb_info = {
-        "retroworld": kb_status("retroworld"),
-        "runningman": kb_status("runningman"),
-    }
-
-    # --- Logs / storage status ---
+    # logs
+    conv_files = 0
     try:
-        conv_files = [f for f in os.listdir(CONV_DIR) if f.endswith(".json")]
-        conv_count = len(conv_files)
+        conv_files = len([f for f in os.listdir(CONV_DIR) if f.endswith(".json")])
     except Exception:
-        conv_count = 0
+        conv_files = 0
 
-    logs_info = {"conversations_files_count": conv_count}
-
-    return (
-        jsonify(
-            {
-                "service": SERVICE_NAME,
-                "port": PORT,
-                "paths": {"kb_dir": KB_DIR, "data_dir": DATA_DIR, "conv_dir": CONV_DIR},
-                "openai": openai_status,
-                "kb": kb_info,
-                "logs": logs_info,
-                "has_admin_token": bool(ADMIN_DASHBOARD_TOKEN),
-                "has_user_history_token": bool(USER_HISTORY_TOKEN),
-            }
-        ),
-        200,
-    )
+    return jsonify(
+        {
+            "service": SERVICE_NAME,
+            "port": PORT,
+            "has_admin_token": bool(ADMIN_DASHBOARD_TOKEN),
+            "has_user_history_token": bool(USER_HISTORY_TOKEN),
+            "paths": {"kb_dir": KB_DIR, "data_dir": DATA_DIR, "conv_dir": CONV_DIR},
+            "kb": {"retroworld": kb_diag("retroworld"), "runningman": kb_diag("runningman")},
+            "logs": {"conversations_files_count": conv_files},
+            "openai": {
+                "client_ready": bool(_openai_client),
+                "key_present": bool(OPENAI_API_KEY),
+                "model": OPENAI_MODEL,
+                "init_error": _openai_init_error,
+            },
+        }
+    ), 200
 
 
 # ---------------------------------------------------------
