@@ -17,47 +17,48 @@ from flask_cors import CORS
 # ---------------------------------------------------------
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "retroworld-ia")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))
+os.makedirs(DATA_DIR, exist_ok=True)
+
+KB_DIR = os.getenv("KB_DIR", BASE_DIR)
+
+# Render fournit PORT en env. On garde 10000 par défaut (Render Docker)
 PORT = int(os.getenv("PORT", "10000"))
 
-# Tokens
-ADMIN_DASHBOARD_TOKEN = (os.getenv("ADMIN_DASHBOARD_TOKEN") or "").strip()
-USER_HISTORY_TOKEN = (os.getenv("USER_HISTORY_TOKEN") or "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
+OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "800"))
 
-# KB paths
-KB_RETROWORLD_PATH = os.getenv("KB_RETROWORLD_PATH", "kb_retroworld.json")
-KB_RUNNINGMAN_PATH = os.getenv("KB_RUNNINGMAN_PATH", "kb_runningman.json")
+ADMIN_DASHBOARD_TOKEN = os.getenv("ADMIN_DASHBOARD_TOKEN", "").strip()
+USER_HISTORY_TOKEN = os.getenv("USER_HISTORY_TOKEN", "").strip()
 
-# Logs
-CONVERSATIONS_LOG_DIR = os.getenv("CONVERSATIONS_LOG_DIR", "conversations")
-QWEEKLE_LOG_DIR = os.getenv("QWEEKLE_LOG_DIR", "qweekle_logs")
-QWEEKLE_WEBHOOK_SECRET = (os.getenv("QWEEKLE_WEBHOOK_SECRET") or "").strip()
-QWEEKLE_SOURCE_NAME = os.getenv("QWEEKLE_SOURCE_NAME", "qweekle")
-
-# OpenAI
-OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.2"))
-OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "600"))
-
-# Behavior
-MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "16"))
-LOG_PREVIEW_MAX_CHARS = int(os.getenv("LOG_PREVIEW_MAX_CHARS", "220"))
-
-# ---------------------------------------------------------
-# APP INIT
-# ---------------------------------------------------------
-
-logging.basicConfig(level=logging.INFO)
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger(SERVICE_NAME)
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
 
-os.makedirs(CONVERSATIONS_LOG_DIR, exist_ok=True)
-os.makedirs(QWEEKLE_LOG_DIR, exist_ok=True)
+# ---------------------------------------------------------
+# OpenAI client (lazy)
+# ---------------------------------------------------------
+
+_openai_client = None
+try:
+    if OPENAI_API_KEY:
+        from openai import OpenAI  # type: ignore
+
+        _openai_client = OpenAI(api_key=OPENAI_API_KEY)
+except Exception as e:
+    logger.warning("OpenAI client init failed: %s", e)
+    _openai_client = None
+
 
 # ---------------------------------------------------------
-# SMALL UTILS
+# JSON helpers
 # ---------------------------------------------------------
 
 
@@ -73,24 +74,24 @@ def _safe_read_json(path: str, default: Any) -> Any:
 
 def _safe_write_json(path: str, data: Any) -> bool:
     try:
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
         return True
-    except Exception:
+    except Exception as e:
+        logger.warning("write json failed (%s): %s", path, e)
         return False
 
 
 # ---------------------------------------------------------
-# USER -> conversation mapping
+# user index (user_id -> conversation_id)
 # ---------------------------------------------------------
 
-USER_INDEX_PATH = os.getenv("USER_INDEX_PATH", "user_index.json")
+USER_INDEX_PATH = os.path.join(DATA_DIR, "user_index.json")
 
 
 def get_user_index() -> Dict[str, str]:
-    return _safe_read_json(USER_INDEX_PATH, {})
+    return _safe_read_json(USER_INDEX_PATH, {}) or {}
 
 
 def set_user_conversation(user_id: str, conversation_id: str) -> None:
@@ -105,81 +106,69 @@ def get_user_conversation(user_id: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------
-# KB (cached)
+# KB (knowledge base) cache
 # ---------------------------------------------------------
 
 
 @dataclass
 class _KBCacheEntry:
-    path: str
-    mtime: float
-    data: Dict[str, Any]
+    ts: float
+    kb: Dict[str, Any]
 
 
-_kb_cache: Dict[str, _KBCacheEntry] = {}
+_KB_CACHE: Dict[str, _KBCacheEntry] = {}
+_KB_CACHE_TTL_SEC = 30.0
 
 
 def load_kb(brand: str) -> Dict[str, Any]:
-    brand = (brand or "retroworld").lower()
-    path = KB_RETROWORLD_PATH if brand == "retroworld" else KB_RUNNINGMAN_PATH
+    brand = (brand or "").lower().strip()
+    if brand not in ("retroworld", "runningman"):
+        brand = "retroworld"
 
-    try:
-        mtime = os.path.getmtime(path)
-    except Exception:
-        return {"brand": brand, "items": []}
+    now = time.time()
+    entry = _KB_CACHE.get(brand)
+    if entry and (now - entry.ts) < _KB_CACHE_TTL_SEC:
+        return entry.kb
 
-    cached = _kb_cache.get(brand)
-    if cached and cached.path == path and cached.mtime == mtime:
-        return cached.data
+    filename = f"kb_{brand}.json"
+    path = os.path.join(KB_DIR, filename)
+    kb = _safe_read_json(path, {"brand": brand, "items": []})
+    if not isinstance(kb, dict):
+        kb = {"brand": brand, "items": []}
 
-    data = _safe_read_json(path, {"brand": brand, "items": []})
-    if not isinstance(data, dict):
-        data = {"brand": brand, "items": []}
-
-    _kb_cache[brand] = _KBCacheEntry(path=path, mtime=mtime, data=data)
-    return data
+    _KB_CACHE[brand] = _KBCacheEntry(ts=now, kb=kb)
+    return kb
 
 
 def save_kb(brand: str, kb: Dict[str, Any]) -> bool:
-    brand = (brand or "retroworld").lower()
-    path = KB_RETROWORLD_PATH if brand == "retroworld" else KB_RUNNINGMAN_PATH
+    brand = (brand or "").lower().strip()
+    if brand not in ("retroworld", "runningman"):
+        brand = "retroworld"
+    filename = f"kb_{brand}.json"
+    path = os.path.join(KB_DIR, filename)
     ok = _safe_write_json(path, kb)
     if ok:
-        _kb_cache.pop(brand, None)
+        _KB_CACHE[brand] = _KBCacheEntry(ts=time.time(), kb=kb)
     return ok
 
 
+# ---------------------------------------------------------
+# OpenAI wrapper + basic NLP
+# ---------------------------------------------------------
+
+
 def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "")).strip()
-
-
-# ---------------------------------------------------------
-# OPENAI CALL
-# ---------------------------------------------------------
-
-_openai_client = None
-_openai_init_error = None
-
-try:
-    from openai import OpenAI  # type: ignore
-
-    if OPENAI_API_KEY:
-        _openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    else:
-        _openai_init_error = "OPENAI_API_KEY vide ou non défini"
-except Exception as e:
-    _openai_client = None
-    _openai_init_error = f"Import/initialisation OpenAI impossible: {type(e).__name__}: {e}"
-    logger.exception("OpenAI init failed")
+    s = (s or "").strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    return s
 
 
 def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any]]:
-    """
-    Returns (assistant_text, usage_dict).
-    """
     if not _openai_client:
-        reason = _openai_init_error or "Client OpenAI non initialisé"
-        return (f"Le service IA n’est pas configuré. Détail: {reason}", {"skipped": True, "reason": reason})
+        return (
+            "Le service IA n’est pas configuré (OPENAI_API_KEY manquant).",
+            {"error": "openai_not_configured"},
+        )
 
     resp = _openai_client.chat.completions.create(
         model=OPENAI_MODEL,
@@ -201,93 +190,115 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
             }
         except Exception:
             usage = {}
+
     return text, usage
 
 
-# ---------------------------------------------------------
-# BRAND DETECTION
-# ---------------------------------------------------------
-
-
 def detect_brand_from_text(text: str) -> str:
-    t = (text or "").lower()
+    t = _norm(text)
+    # heuristique simple
     if "runningman" in t or "running man" in t or "action game" in t:
         return "runningman"
     return "retroworld"
 
 
 def _is_reservation_intent(text: str) -> bool:
-    t = (text or "").lower()
-    keywords = ["réserver", "reservation", "réservation", "disponible", "disponibilité", "horaire", "créneau"]
-    return any(k in t for k in keywords)
+    t = _norm(text)
+    # mots clés simples
+    keys = [
+        "réserver",
+        "reservation",
+        "réservation",
+        "dispo",
+        "disponible",
+        "créneau",
+        "horaire",
+        "aujourd",
+        "demain",
+        "ce week",
+        "samedi",
+        "dimanche",
+    ]
+    return any(k in t for k in keys)
 
 
 # ---------------------------------------------------------
-# CONVERSATION LOGGING
+# Conversation storage
 # ---------------------------------------------------------
+
+CONV_DIR = os.path.join(DATA_DIR, "conversations")
+os.makedirs(CONV_DIR, exist_ok=True)
 
 
 def _conversation_path(conversation_id: str) -> str:
-    safe = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", conversation_id)
-    return os.path.join(CONVERSATIONS_LOG_DIR, f"{safe}.jsonl")
+    conversation_id = re.sub(r"[^a-zA-Z0-9_\-]", "", conversation_id or "")
+    if not conversation_id:
+        conversation_id = "conv_" + datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    return os.path.join(CONV_DIR, f"{conversation_id}.json")
 
 
-def append_conversation_log(
+def load_conversation(conversation_id: str) -> List[Dict[str, Any]]:
+    path = _conversation_path(conversation_id)
+    data = _safe_read_json(path, [])
+    if not isinstance(data, list):
+        return []
+    return data
+
+
+def append_conversation_record(
     conversation_id: str,
     brand: str,
-    channel: str,
     user_messages: List[Dict[str, Any]],
     assistant_reply: str,
     extra: Optional[Dict[str, Any]] = None,
 ) -> None:
     path = _conversation_path(conversation_id)
-    rec = {
-        "timestamp": time.time(),
-        "datetime": datetime.utcnow().isoformat() + "Z",
-        "conversation_id": conversation_id,
-        "brand": brand,
-        "channel": channel,
-        "user_messages": user_messages,
-        "assistant_reply": assistant_reply,
-        "extra": extra or {},
-    }
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    records = _safe_read_json(path, [])
+    if not isinstance(records, list):
+        records = []
+    records.append(
+        {
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "brand": brand,
+            "user_messages": user_messages,
+            "assistant_reply": assistant_reply,
+            "extra": extra or {},
+        }
+    )
+    _safe_write_json(path, records)
 
 
-def load_conversation_records(conversation_id: str) -> List[Dict[str, Any]]:
-    path = _conversation_path(conversation_id)
-    if not os.path.exists(path):
+def list_conversations() -> List[str]:
+    try:
+        files = [f for f in os.listdir(CONV_DIR) if f.endswith(".json")]
+        files.sort(reverse=True)
+        return [os.path.splitext(f)[0] for f in files]
+    except Exception:
         return []
-    out: List[Dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                out.append(json.loads(line))
-            except Exception:
-                continue
+
+
+def prune_history_for_prompt(
+    history: List[Dict[str, Any]], max_turns: int = 18
+) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    if not isinstance(history, list):
+        return out
+    turns = 0
+    for rec in reversed(history):
+        if turns >= max_turns:
+            break
+        if not isinstance(rec, dict):
+            continue
+        user_msgs = rec.get("user_messages") or []
+        if isinstance(user_msgs, list):
+            for um in user_msgs:
+                if isinstance(um, dict) and um.get("role") == "user":
+                    out.append({"role": "user", "content": str(um.get("content") or "")})
+        ar = rec.get("assistant_reply") or ""
+        out.append({"role": "assistant", "content": str(ar)})
+        turns += 1
+    out.reverse()
     return out
-
-
-def reconstruct_history_from_logs(conversation_id: str) -> List[Dict[str, str]]:
-    records = load_conversation_records(conversation_id)
-    history: List[Dict[str, str]] = []
-    for rec in records:
-        rec_msgs = rec.get("user_messages") or []
-        for m in rec_msgs:
-            if not isinstance(m, dict):
-                continue
-            role = m.get("role")
-            content = m.get("content")
-            if role in ("user", "assistant") and content is not None:
-                history.append({"role": role, "content": str(content)})
-        assistant_text = rec.get("assistant_reply")
-        if assistant_text:
-            history.append({"role": "assistant", "content": str(assistant_text)})
-    return history
 
 
 def classify_conversation_brands(records: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -303,16 +314,12 @@ def classify_conversation_brands(records: List[Dict[str, Any]]) -> Dict[str, Any
     if not brands_seen:
         return {"brand_final": "unknown", "brands_seen": []}
     if len(brands_seen) == 1:
-        b = next(iter(brands_seen))
-        return {"brand_final": b, "brands_seen": [b]}
-    brand_final = last_effective or "mixed"
-    if brand_final not in ("runningman", "retroworld"):
-        brand_final = "mixed"
-    return {"brand_final": brand_final, "brands_seen": sorted(list(brands_seen))}
+        return {"brand_final": list(brands_seen)[0], "brands_seen": sorted(brands_seen)}
+    return {"brand_final": last_effective or "unknown", "brands_seen": sorted(brands_seen)}
 
 
 # ---------------------------------------------------------
-# CORE CHAT ENGINE
+# Core chat pipeline
 # ---------------------------------------------------------
 
 
@@ -332,15 +339,15 @@ def process_chat(
                 break
         brand_effective = detect_brand_from_text(last_user)
     else:
-        brand_effective = "runningman" if brand_entry == "runningman" else "retroworld"
+        brand_effective = brand_entry
 
     kb = load_kb(brand_effective)
-    kb_items = kb.get("items") if isinstance(kb, dict) else []
+    kb_items = kb.get("items") or []
     if not isinstance(kb_items, list):
         kb_items = []
 
     system = (
-        "Vous êtes un assistant conversationnel professionnel.\n"
+        "Vous êtes un assistant pour deux marques: Retroworld (VR/Quiz/Salle enfant) et Runningman Games (action game).\n"
         "Répondez de façon claire, précise, utile, sans inventer.\n"
         "Si l’utilisateur veut réserver: répondre 'disponible' puis proposer la suite.\n"
         "Respectez la marque et ses règles.\n"
@@ -356,12 +363,19 @@ def process_chat(
                 content = it.get("content") or it.get("text") or it.get("value") or ""
                 s = _norm(f"{title} {content}")
                 if s:
-                    system += f"- {s}\n"
+                    system += f"- {title}: {content}\n" if title else f"- {content}\n"
 
     openai_messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
 
-    clipped = []
-    for m in messages[-MAX_HISTORY_MESSAGES:]:
+    # history based on conversation id if provided (optional)
+    conversation_id = str(metadata.get("conversation_id") or "").strip()
+    if conversation_id:
+        hist = load_conversation(conversation_id)
+        openai_messages.extend(prune_history_for_prompt(hist, max_turns=12))
+
+    # clip/normalize incoming messages
+    clipped: List[Dict[str, str]] = []
+    for m in (messages or [])[-20:]:
         if not isinstance(m, dict):
             continue
         role = m.get("role")
@@ -411,9 +425,88 @@ def _require_user_token(req) -> bool:
     return bool(tok) and bool(USER_HISTORY_TOKEN) and tok == USER_HISTORY_TOKEN
 
 
+def _coerce_messages(payload: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Accept multiple client payload formats and normalize to OpenAI-style messages.
+
+    Supported:
+    - New format: {"messages": [{"role":"user|assistant","content":"..."}...]}
+    - Legacy format A: {"message":"...", "history":[["u","a"], ...]}
+    - Legacy format B: {"message":"...", "history":[{"role":...,"content":...}, ...]}
+    """
+    # New format
+    raw = payload.get("messages")
+    if isinstance(raw, list):
+        out: List[Dict[str, str]] = []
+        for m in raw:
+            if not isinstance(m, dict):
+                continue
+            role = (m.get("role") or "").strip()
+            content = m.get("content")
+            if role in ("user", "assistant") and content is not None:
+                out.append({"role": role, "content": str(content)})
+        return out
+
+    # Legacy formats
+    out = []
+    history = payload.get("history") or []
+    if isinstance(history, list):
+        for item in history:
+            # history as pairs: [[user, assistant], ...]
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                u, a = item
+                if u:
+                    out.append({"role": "user", "content": str(u)})
+                if a:
+                    out.append({"role": "assistant", "content": str(a)})
+                continue
+
+            # history as message dicts
+            if isinstance(item, dict):
+                role = (item.get("role") or "").strip()
+                content = item.get("content")
+                if role in ("user", "assistant") and content is not None:
+                    out.append({"role": role, "content": str(content)})
+
+    msg = payload.get("message")
+    if msg:
+        out.append({"role": "user", "content": str(msg)})
+
+    return out
+
+
+def _coerce_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
+    meta = payload.get("metadata") or {}
+    return meta if isinstance(meta, dict) else {}
+
+
 # ---------------------------------------------------------
 # ENDPOINTS
 # ---------------------------------------------------------
+
+
+@app.route("/chat", methods=["POST"])
+def chat_compat():
+    """Backwards-compatible endpoint for clients that POST to /chat."""
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid_json"}), 400
+
+    messages = _coerce_messages(payload)
+    if not messages:
+        return jsonify({"error": "invalid_messages"}), 400
+
+    metadata = _coerce_metadata(payload)
+
+    # If the client didn't specify a brand, auto-detect from last user message
+    out = process_chat(brand_entry="auto", messages=messages, metadata=metadata)
+    return jsonify(
+        {
+            "reply": out.get("reply", ""),
+            "brand_effective": out.get("brand_effective"),
+            "brand_entry": out.get("brand_entry"),
+        }
+    ), 200
 
 
 @app.route("/", methods=["GET"])
@@ -433,34 +526,36 @@ def chat_route(brand: str):
     except Exception:
         return jsonify({"error": "invalid_json"}), 400
 
-    messages = payload.get("messages") or []
-    if not isinstance(messages, list):
+    messages = _coerce_messages(payload)
+    if not messages:
         return jsonify({"error": "invalid_messages"}), 400
 
-    metadata = payload.get("metadata") or {}
-    if not isinstance(metadata, dict):
-        metadata = {}
+    metadata = _coerce_metadata(payload)
 
     conversation_id = str(payload.get("conversation_id") or "").strip()
     user_id = str(payload.get("user_id") or "").strip()
 
-    if not conversation_id and user_id:
+    # allow mapping user -> conversation
+    if user_id and not conversation_id:
         conversation_id = get_user_conversation(user_id) or ""
 
     if not conversation_id:
-        conversation_id = f"conv_{int(time.time())}_{abs(hash(str(user_id) or str(request.remote_addr) or 'x'))%100000}"
+        # create a new one
+        conversation_id = "conv_" + datetime.utcnow().strftime("%Y%m%d%H%M%S")
 
     if user_id:
         set_user_conversation(user_id, conversation_id)
 
-    out = process_chat(brand_entry=brand, messages=messages, metadata=metadata)
-    reply_text = out.get("reply") or ""
+    # carry conversation id into metadata (used for prompt history)
+    metadata = dict(metadata)
+    metadata.setdefault("conversation_id", conversation_id)
 
-    channel = str(metadata.get("source") or "web")
-    append_conversation_log(
+    out = process_chat(brand_entry=brand, messages=messages, metadata=metadata)
+    reply_text = out.get("reply", "")
+
+    append_conversation_record(
         conversation_id=conversation_id,
-        brand=out.get("brand_effective") or (brand or "auto"),
-        channel=channel,
+        brand=brand,
         user_messages=messages,
         assistant_reply=reply_text,
         extra={
@@ -489,316 +584,125 @@ def user_api_history():
     if not conversation_id:
         return jsonify({"error": "missing_conversation_id"}), 400
 
-    history = reconstruct_history_from_logs(conversation_id)
-    return jsonify({"conversation_id": conversation_id, "messages": history}), 200
+    records = load_conversation(conversation_id)
+    return jsonify({"conversation_id": conversation_id, "records": records}), 200
 
 
-@app.route("/kb/upsert/<brand>", methods=["POST"])
+@app.route("/kb/<brand>", methods=["GET"])
+def kb_get(brand: str):
+    kb = load_kb(brand)
+    return jsonify(kb), 200
+
+
+@app.route("/kb/<brand>", methods=["POST"])
 def kb_upsert(brand: str):
     if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
-
-    try:
-        body = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify({"error": "invalid_json"}), 400
-    if not isinstance(body, dict):
-        return jsonify({"error": "invalid_payload"}), 400
-
-    kb = load_kb(brand)
-    items = kb.get("items")
-    if not isinstance(items, list):
-        items = []
-        kb["items"] = items
-
-    new_items = body.get("items")
-    if isinstance(new_items, list):
-        kb["items"] = new_items
-    else:
-        it = body.get("item")
-        if it is not None:
-            kb["items"].append(it)
-
-    ok = save_kb(brand, kb)
-    return jsonify({"status": "ok" if ok else "error", "brand": brand}), (200 if ok else 500)
-
-
-@app.route("/webhooks/qweekle", methods=["POST"])
-def qweekle_webhook():
-    if QWEEKLE_WEBHOOK_SECRET:
-        incoming_secret = request.headers.get("X-Qweekle-Secret") or ""
-        if incoming_secret != QWEEKLE_WEBHOOK_SECRET:
-            logger.warning("Qweekle webhook rejected (invalid secret)")
-            return jsonify({"error": "forbidden"}), 403
 
     try:
         payload = request.get_json(force=True) or {}
     except Exception:
         return jsonify({"error": "invalid_json"}), 400
 
-    event_type = payload.get("event_type") or payload.get("type") or "unknown"
-    logger.info("Webhook Qweekle received: %s", event_type)
+    kb = load_kb(brand)
+    items = kb.get("items") or []
+    if not isinstance(items, list):
+        items = []
 
-    fname = f"{event_type or 'unknown'}.jsonl"
-    path = os.path.join(QWEEKLE_LOG_DIR, fname)
-    record = {"timestamp": time.time(), "event_type": event_type, "payload": payload, "source": QWEEKLE_SOURCE_NAME}
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    return jsonify({"status": "ok", "event_type": event_type}), 200
+    new_items = payload.get("items")
+    if isinstance(new_items, list):
+        items = new_items
+
+    kb["items"] = items
+    ok = save_kb(brand, kb)
+    return jsonify({"ok": ok, "brand": brand, "count": len(items)}), 200
 
 
-# ---------------------------------------------------------
-# ADMIN API
-# ---------------------------------------------------------
+@app.route("/qweekle/webhook", methods=["POST"])
+def qweekle_webhook():
+    # Endpoint générique: on stocke juste les payloads pour debug
+    path = os.path.join(DATA_DIR, "qweekle_webhook.log")
+    try:
+        payload = request.get_data(as_text=True) or ""
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"\n[{datetime.utcnow().isoformat()}Z]\n")
+            f.write(payload)
+            f.write("\n")
+        return jsonify({"ok": True}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 @app.route("/admin/api/conversations", methods=["GET"])
 def admin_api_conversations():
-    if not _require_admin_token(request):
+    if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
 
-    convs: List[Dict[str, Any]] = []
-    if not os.path.isdir(CONVERSATIONS_LOG_DIR):
-        return jsonify(convs), 200
-
-    for fname in os.listdir(CONVERSATIONS_LOG_DIR):
-        if not fname.endswith(".jsonl"):
-            continue
-
-        conversation_id = fname[:-5]
-        records = load_conversation_records(conversation_id)
-        if not records:
-            continue
-
-        last = records[-1]
-        ts = float(last.get("timestamp") or 0.0)
-        channel = last.get("channel") or "web"
-        extra = last.get("extra") or {}
-        meta = extra.get("metadata") or {}
-        source = extra.get("source") or meta.get("source") or "unknown"
-
-        brand_info = classify_conversation_brands(records)
-        brand_final = brand_info.get("brand_final")
-
-        preview = ""
-        for rec in reversed(records):
-            umsgs = rec.get("user_messages") or []
-            for m in reversed(umsgs):
-                if isinstance(m, dict) and m.get("role") == "user":
-                    preview = str(m.get("content") or "")
-                    break
-            if preview:
-                break
-
-        preview = _norm(preview)
-        if len(preview) > LOG_PREVIEW_MAX_CHARS:
-            preview = preview[:LOG_PREVIEW_MAX_CHARS].rstrip() + "…"
-
-        convs.append({
-            "id": conversation_id,
-            "timestamp": ts,
-            "datetime": last.get("datetime"),
-            "brand": brand_final,
-            "channel": channel,
-            "source": source,
-            "preview": preview,
-        })
-
-    convs.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-    return jsonify(convs), 200
+    convs = list_conversations()
+    return jsonify({"items": convs}), 200
 
 
 @app.route("/admin/api/conversation/<conversation_id>", methods=["GET"])
 def admin_api_conversation_detail(conversation_id: str):
-    if not _require_admin_token(request):
+    if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
 
-    records = load_conversation_records(conversation_id)
-    if not records:
-        return jsonify({"error": "not_found"}), 404
-
-    brand_info = classify_conversation_brands(records)
-    history = reconstruct_history_from_logs(conversation_id)
-
-    return jsonify({
-        "conversation_id": conversation_id,
-        "brand_final": brand_info.get("brand_final"),
-        "brands_seen": brand_info.get("brands_seen"),
-        "messages": history,
-        "records": records,
-    }), 200
+    records = load_conversation(conversation_id)
+    brands = classify_conversation_brands(records)
+    return jsonify({"conversation_id": conversation_id, "records": records, "brands": brands}), 200
 
 
-@app.route("/admin/api/test", methods=["POST"])
+@app.route("/admin/api/test", methods=["GET"])
 def admin_api_test():
-    if not _require_admin_token(request):
+    if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
-
-    try:
-        body = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify({"error": "invalid_json"}), 400
-    if not isinstance(body, dict):
-        return jsonify({"error": "invalid_payload"}), 400
-
-    brand = str(body.get("brand") or "auto").lower()
-
-    questions = body.get("questions")
-    if not isinstance(questions, list):
-        # compat: accept payload multiline
-        payload = body.get("payload")
-        questions = []
-        if isinstance(payload, str):
-            for line in payload.splitlines():
-                ln = line.strip()
-                if ln:
-                    questions.append(ln)
-
-    if not isinstance(questions, list) or not questions:
-        return jsonify({"error": "no_questions"}), 400
-
-    # dedupe
-    seen = set()
-    clean = []
-    for q in questions:
-        if isinstance(q, str):
-            q = q.strip()
-            if q and q not in seen:
-                seen.add(q)
-                clean.append(q)
-
-    results = []
-    for q in clean:
-        msgs = [{"role": "user", "content": q}]
-        out = process_chat(brand_entry=brand, messages=msgs, metadata={"source": "admin_test"})
-        results.append({"q": q, "brand_effective": out.get("brand_effective"), "answer": out.get("reply")})
-
-    return jsonify({"status": "ok", "count": len(results), "results": results}), 200
+    return jsonify({"ok": True, "service": SERVICE_NAME}), 200
 
 
 @app.route("/admin/api/diag", methods=["GET"])
 def admin_api_diag():
-    if not _require_admin_token(request):
+    if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
 
-    # OpenAI (sans exposer la clé)
-    openai_key_present = bool(OPENAI_API_KEY)
-    openai_key_len = len(OPENAI_API_KEY) if OPENAI_API_KEY else 0
-    openai_client_ready = bool(_openai_client)
-    openai_init_error = _openai_init_error
-
-    # KB
-    kb_rw_exists = os.path.exists(KB_RETROWORLD_PATH)
-    kb_rm_exists = os.path.exists(KB_RUNNINGMAN_PATH)
-
-    kb_rw_ok = False
-    kb_rm_ok = False
-    kb_rw_count = 0
-    kb_rm_count = 0
-
-    try:
-        kb_rw = load_kb("retroworld")
-        items = kb_rw.get("items") if isinstance(kb_rw, dict) else []
-        kb_rw_count = len(items) if isinstance(items, list) else 0
-        kb_rw_ok = True
-    except Exception:
-        kb_rw_ok = False
-
-    try:
-        kb_rm = load_kb("runningman")
-        items = kb_rm.get("items") if isinstance(kb_rm, dict) else []
-        kb_rm_count = len(items) if isinstance(items, list) else 0
-        kb_rm_ok = True
-    except Exception:
-        kb_rm_ok = False
-
-    # Logs
-    conv_dir_exists = os.path.isdir(CONVERSATIONS_LOG_DIR)
-    conv_files = []
-    try:
-        if conv_dir_exists:
-            conv_files = [f for f in os.listdir(CONVERSATIONS_LOG_DIR) if f.endswith(".jsonl")]
-    except Exception:
-        conv_files = []
-
-    qweekle_dir_exists = os.path.isdir(QWEEKLE_LOG_DIR)
-    qweekle_files = []
-    try:
-        if qweekle_dir_exists:
-            qweekle_files = [f for f in os.listdir(QWEEKLE_LOG_DIR) if f.endswith(".jsonl")]
-    except Exception:
-        qweekle_files = []
-
-    return jsonify({
-        "service": SERVICE_NAME,
-        "time_utc": datetime.utcnow().isoformat() + "Z",
-
-        "openai": {
-            "key_present": openai_key_present,
-            "key_length": openai_key_len,
-            "client_ready": openai_client_ready,
-            "init_error": openai_init_error,
+    return jsonify(
+        {
+            "service": SERVICE_NAME,
+            "port": PORT,
+            "openai_configured": bool(OPENAI_API_KEY),
             "model": OPENAI_MODEL,
-            "temperature": OPENAI_TEMPERATURE,
-            "max_tokens": OPENAI_MAX_TOKENS,
-        },
-
-        "kb": {
-            "retroworld": {
-                "path": KB_RETROWORLD_PATH,
-                "exists": kb_rw_exists,
-                "load_ok": kb_rw_ok,
-                "items_count": kb_rw_count,
-            },
-            "runningman": {
-                "path": KB_RUNNINGMAN_PATH,
-                "exists": kb_rm_exists,
-                "load_ok": kb_rm_ok,
-                "items_count": kb_rm_count,
-            },
-        },
-
-        "logs": {
-            "conversations_dir": CONVERSATIONS_LOG_DIR,
-            "conversations_dir_exists": conv_dir_exists,
-            "conversations_files_count": len(conv_files),
-            "qweekle_dir": QWEEKLE_LOG_DIR,
-            "qweekle_dir_exists": qweekle_dir_exists,
-            "qweekle_files_count": len(qweekle_files),
-            "qweekle_secret_required": bool(QWEEKLE_WEBHOOK_SECRET),
-        },
-
-        "tokens": {
-            "admin_token_set": bool(ADMIN_DASHBOARD_TOKEN),
-            "user_history_token_set": bool(USER_HISTORY_TOKEN),
+            "kb_dir": KB_DIR,
+            "data_dir": DATA_DIR,
+            "has_admin_token": bool(ADMIN_DASHBOARD_TOKEN),
+            "has_user_history_token": bool(USER_HISTORY_TOKEN),
         }
-    }), 200
+    ), 200
 
 
 # ---------------------------------------------------------
-# ADMIN UI (HTML)
+# Static pages
 # ---------------------------------------------------------
+
 
 @app.route("/admin", methods=["GET"])
 def admin_page():
-    if not _require_admin_token(request):
-        return "Forbidden", 403
-
-    static_dir = os.path.join(app.root_path, "static")
-    admin_path = os.path.join(static_dir, "admin.html")
-    if os.path.exists(admin_path):
-        return send_from_directory(static_dir, "admin.html")
-    return "admin.html missing in /static", 404
+    return send_from_directory(app.static_folder, "admin.html")
 
 
-# Back-compat: previously /admin/conversations existed
 @app.route("/admin/conversations", methods=["GET"])
 def admin_conversations_page():
-    return admin_page()
+    return send_from_directory(app.static_folder, "admin.html")
+
+
+@app.route("/<path:path>", methods=["GET"])
+def static_proxy(path: str):
+    # serve static files
+    return send_from_directory(app.static_folder, path)
 
 
 # ---------------------------------------------------------
-# MAIN
+# Main
 # ---------------------------------------------------------
 
 if __name__ == "__main__":
+    logger.info("Starting %s on port %s", SERVICE_NAME, PORT)
     app.run(host="0.0.0.0", port=PORT)
