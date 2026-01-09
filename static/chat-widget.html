@@ -10,7 +10,7 @@
     .card { background:#121824; border:1px solid #1f2937; border-radius:16px; padding:16px; box-shadow:0 6px 24px rgba(0,0,0,0.3); }
     .title { font-weight:700; font-size:18px; margin-bottom:12px; }
     .messages { height: 420px; overflow:auto; padding:8px; border-radius:12px; background:#0d131f; border:1px solid #1b2638; }
-    .bubble { padding:10px 12px; border-radius:12px; margin:8px 0; max-width: 80%; line-height:1.35 }
+    .bubble { padding:10px 12px; border-radius:12px; margin:8px 0; max-width: 80%; line-height:1.35; white-space:pre-wrap }
     .user { background:#1e293b; margin-left:auto; }
     .bot  { background:#111827; border:1px solid #22324a; }
     .row { display:flex; gap:8px; margin-top:12px; }
@@ -29,27 +29,15 @@
         <input id="input" type="text" placeholder="Posez votre question (tarifs, horaires, réservation…)">
         <button id="send">Envoyer</button>
       </div>
-      <div class="hint">Conseil : “Je veux réserver samedi 16h pour 4 joueurs.”</div>
+      <div class="hint">Exemple : “Je veux réserver samedi 16h pour 4 joueurs.”</div>
     </div>
   </div>
 
   <script>
-    const API_BASE = location.origin; // si servi depuis Render directement
+    const API_BASE = location.origin;
     const $messages = document.getElementById('messages');
     const $input = document.getElementById('input');
     const $send = document.getElementById('send');
-    const history = []; // pour l'affichage uniquement (le serveur garde la mémoire)
-
-    function getOrCreateUserId(){
-      const key = 'rw_user_id';
-      let v = localStorage.getItem(key);
-      if(!v){
-        v = 'u_' + Math.random().toString(16).slice(2) + Date.now().toString(16);
-        localStorage.setItem(key, v);
-      }
-      return v;
-    }
-    const USER_ID = getOrCreateUserId();
 
     function addBubble(text, from='bot') {
       const b = document.createElement('div');
@@ -59,24 +47,61 @@
       $messages.scrollTop = $messages.scrollHeight;
     }
 
+    function getOrCreateUserId(){
+      const key = 'rw_user_id';
+      let v = "";
+      try { v = localStorage.getItem(key) || ""; } catch(e) {}
+      if(!v){
+        v = 'u_' + Math.random().toString(16).slice(2) + Date.now().toString(16);
+        try { localStorage.setItem(key, v); } catch(e) {}
+      }
+      return v;
+    }
+    const USER_ID = getOrCreateUserId();
+
+    // ✅ béton même si localStorage/cookies bloqués
+    let MEM_CONV_ID = "";
+
+    function getConvId(){
+      if (MEM_CONV_ID) return MEM_CONV_ID;
+      try {
+        const v = localStorage.getItem("rw_conversation_id") || "";
+        if(v) { MEM_CONV_ID = v; return v; }
+      } catch(e) {}
+      return "";
+    }
+    function setConvId(v){
+      if(!v) return;
+      MEM_CONV_ID = v;
+      try { localStorage.setItem("rw_conversation_id", v); } catch(e) {}
+    }
+
     async function sendMessage() {
       const msg = $input.value.trim();
       if (!msg) return;
+
       addBubble(msg, 'user');
-      $input.value = ''; $input.focus(); $send.disabled = true;
+      $input.value = '';
+      $input.focus();
+      $send.disabled = true;
 
       try {
         const res = await fetch(API_BASE + '/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          // IMPORTANT: on n'envoie plus l'historique complet (sinon doublons en admin).
-          // Le serveur garde la mémoire via cookie + user_id.
-          body: JSON.stringify({ message: msg, user_id: USER_ID })
+          body: JSON.stringify({
+            message: msg,
+            user_id: USER_ID,
+            conversation_id: getConvId()
+          })
         });
+
         const data = await res.json();
-        const answer = data.answer || "Désolé, je n'ai pas compris.";
+        if (data && data.conversation_id) setConvId(data.conversation_id);
+
+        const answer = data.answer || data.reply || "Désolé, je n'ai pas compris.";
         addBubble(answer, 'bot');
-        history.push([msg, answer]);
+
       } catch (e) {
         addBubble("Erreur de connexion. Réessayez.", 'bot');
       } finally {
