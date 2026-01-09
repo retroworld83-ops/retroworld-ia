@@ -26,15 +26,15 @@
       <div class="title">💬 Assistant Retroworld</div>
       <div id="messages" class="messages"></div>
       <div class="row">
-        <input id="input" type="text" placeholder="Posez votre question (tarifs, horaires, réservation…)">
+        <input id="input" type="text" placeholder="Posez votre question (tarifs, goûter, réservation…)">
         <button id="send">Envoyer</button>
       </div>
-      <div class="hint">Exemple : “Je veux réserver samedi 16h pour 4 joueurs.”</div>
+      <div class="hint">Ex: “Je veux organiser un goûter samedi, 10 enfants. Combien et comment ça se passe ?”</div>
     </div>
   </div>
 
   <script>
-    const API_BASE = location.origin;
+    const API_BASE = location.origin; // si widget servi par le même serveur que l'API
     const $messages = document.getElementById('messages');
     const $input = document.getElementById('input');
     const $send = document.getElementById('send');
@@ -47,34 +47,80 @@
       $messages.scrollTop = $messages.scrollHeight;
     }
 
-    function getOrCreateUserId(){
-      const key = 'rw_user_id';
-      let v = "";
-      try { v = localStorage.getItem(key) || ""; } catch(e) {}
-      if(!v){
-        v = 'u_' + Math.random().toString(16).slice(2) + Date.now().toString(16);
-        try { localStorage.setItem(key, v); } catch(e) {}
+    function genId(prefix){
+      return prefix + "_" + Math.random().toString(16).slice(2) + Date.now().toString(16);
+    }
+
+    function getParam(name){
+      try {
+        return new URL(location.href).searchParams.get(name) || "";
+      } catch(e){
+        return "";
       }
+    }
+
+    function setParam(name, value){
+      try{
+        const url = new URL(location.href);
+        if(value) url.searchParams.set(name, value);
+        else url.searchParams.delete(name);
+        history.replaceState({}, "", url.toString()); // ✅ persiste même si storage KO
+      }catch(e){}
+    }
+
+    // -------------------------------
+    // BETON IDs (URL -> RAM -> storage)
+    // -------------------------------
+    let MEM_UID = "";
+    let MEM_CID = "";
+
+    function getOrCreateUserId(){
+      // 1) URL
+      const fromUrl = getParam("rw_uid");
+      if(fromUrl){ MEM_UID = fromUrl; return fromUrl; }
+
+      // 2) RAM
+      if(MEM_UID) return MEM_UID;
+
+      // 3) localStorage
+      try {
+        const v = localStorage.getItem("rw_user_id") || "";
+        if(v){ MEM_UID = v; return v; }
+      } catch(e){}
+
+      // 4) create
+      const v = genId("u");
+      MEM_UID = v;
+      setParam("rw_uid", v);
+      try { localStorage.setItem("rw_user_id", v); } catch(e){}
       return v;
     }
-    const USER_ID = getOrCreateUserId();
-
-    // ✅ béton même si localStorage/cookies bloqués
-    let MEM_CONV_ID = "";
 
     function getConvId(){
-      if (MEM_CONV_ID) return MEM_CONV_ID;
+      // 1) URL
+      const fromUrl = getParam("rw_cid");
+      if(fromUrl){ MEM_CID = fromUrl; return fromUrl; }
+
+      // 2) RAM
+      if(MEM_CID) return MEM_CID;
+
+      // 3) localStorage
       try {
         const v = localStorage.getItem("rw_conversation_id") || "";
-        if(v) { MEM_CONV_ID = v; return v; }
-      } catch(e) {}
+        if(v){ MEM_CID = v; return v; }
+      } catch(e){}
+
       return "";
     }
+
     function setConvId(v){
       if(!v) return;
-      MEM_CONV_ID = v;
-      try { localStorage.setItem("rw_conversation_id", v); } catch(e) {}
+      MEM_CID = v;
+      setParam("rw_cid", v); // ✅ clé béton
+      try { localStorage.setItem("rw_conversation_id", v); } catch(e){}
     }
+
+    const USER_ID = getOrCreateUserId();
 
     async function sendMessage() {
       const msg = $input.value.trim();
@@ -114,7 +160,7 @@
       if (e.key === 'Enter') sendMessage();
     });
 
-    addBubble("Bonjour ! Je suis l’assistant Retroworld. Comment puis-je vous aider ?");
+    addBubble("Bonjour 👋 Je suis l’assistant Retroworld. Dites-moi ce que vous souhaitez organiser (VR, Escape VR, quiz, goûter/anniversaire, fidélité…).");
   </script>
 </body>
 </html>
