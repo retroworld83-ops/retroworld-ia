@@ -1,755 +1,760 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <title>Admin – Retroworld IA</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin Retroworld IA</title>
   <style>
     :root{
-      --bg:#0f1115;
-      --panel:#161a22;
-      --panel2:#1c212b;
-      --border:#2a2f3a;
-      --text:#eaeaea;
-      --muted:#a7a7a7;
-      --blue:#2563eb;
-      --green:#22c55e;
-      --red:#ef4444;
-      --amber:#f59e0b;
+      --bg:#0b0f14;
+      --card:#121824;
+      --card2:#0d131f;
+      --border:#1f2937;
+      --border2:#22324a;
+      --text:#e9eef5;
+      --muted:#9fb1ca;
+      --accent:#3b82f6;
+      --ok:#22c55e;
+      --warn:#f59e0b;
+      --bad:#ef4444;
+      --chip:#111827;
+      --shadow:0 10px 30px rgba(0,0,0,.35);
+      --radius:16px;
+      --radius2:12px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
-    *{ box-sizing:border-box; }
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:var(--sans);
+      background: radial-gradient(1000px 600px at 20% 0%, rgba(59,130,246,.16), transparent 60%),
+                  radial-gradient(900px 600px at 90% 20%, rgba(245,158,11,.10), transparent 60%),
+                  var(--bg);
+      color:var(--text);
     }
-    header {
-      padding: 12px 16px;
-      background: var(--panel);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
+    a{color:inherit}
+    .topbar{
+      position:sticky; top:0; z-index:10;
+      backdrop-filter: blur(10px);
+      background: rgba(11,15,20,.72);
+      border-bottom:1px solid rgba(255,255,255,.06);
     }
-    header h1 {
-      font-size: 16px;
-      margin: 0;
-      font-weight: 650;
-    }
-    .pill{
-      font-size: 12px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255,255,255,0.03);
-      color: var(--muted);
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      white-space: nowrap;
-    }
-    .pill.ok{ color:#bff7d0; border-color:#1f5f3a; }
-    .pill.bad{ color:#ffd1d1; border-color:#5f1f1f; }
-    .pill.warn{ color:#ffe7b7; border-color:#6b4a16; }
-
-    /* Tabs */
-    .tabs{
-      display:flex;
-      gap: 8px;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(255,255,255,0.02);
-    }
-    .tab{
-      border: 1px solid var(--border);
-      background: rgba(255,255,255,0.03);
-      color: var(--text);
-      padding: 8px 12px;
-      border-radius: 999px;
-      cursor:pointer;
-      font-size: 12px;
-    }
-    .tab.active{
-      background: rgba(37,99,235,0.25);
-      border-color: rgba(37,99,235,0.45);
-      font-weight: 700;
-    }
-
-    main {
-      height: calc(100vh - 54px);
-      display:flex;
-      flex-direction: column;
-    }
-
-    .view{ display:none; height:100%; }
-    .view.active{ display:block; }
-
-    /* Conversations view layout */
-    .layout{
-      display: grid;
-      grid-template-columns: 360px 1fr;
-      height: 100%;
-    }
-
-    .sidebar {
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-    }
-    .sidebarTop{
-      padding: 12px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(255,255,255,0.02);
-      display:flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .row{ display:flex; gap:8px; align-items:center; }
-    input, select, textarea{
-      width: 100%;
-      background: var(--panel2);
-      border: 1px solid var(--border);
-      color: var(--text);
-      border-radius: 10px;
-      padding: 10px 12px;
-      outline: none;
-    }
-    input::placeholder, textarea::placeholder{ color:#80869a; }
-
-    .conversations {
-      flex: 1;
-      overflow-y: auto;
-    }
-    .conv {
-      padding: 12px;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-      cursor: pointer;
-    }
-    .conv:hover { background: rgba(255,255,255,0.03); }
-    .conv .top{
-      display:flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: center;
-    }
-    .conv .id{
-      font-weight: 650;
-      font-size: 13px;
-      overflow:hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      max-width: 240px;
-    }
-    .tag{
-      font-size: 11px;
-      padding: 3px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      color: var(--muted);
-      background: rgba(255,255,255,0.02);
-      text-transform: lowercase;
-    }
-    .tag.rw{ border-color:#27407a; color:#cfe1ff; }
-    .tag.rm{ border-color:#2a7a43; color:#bff7d0; }
-    .conv .preview{
-      margin-top: 8px;
-      color: #cbd5e1;
-      font-size: 12px;
-      line-height: 1.35;
-      opacity: .9;
-    }
-    .conv .meta{
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 11px;
-      display:flex;
-      justify-content: space-between;
-      gap: 10px;
-    }
-
-    /* Content pane */
-    .content {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-    }
-    .toolbar{
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(255,255,255,0.02);
+    .topbar-inner{
+      max-width:1200px;
+      margin:0 auto;
+      padding:14px 16px;
       display:flex;
       align-items:center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
+      justify-content:space-between;
+      gap:12px;
     }
-    .toolbar .left{
-      display:flex; gap:10px; align-items:center; min-width:0;
+    .brand{
+      display:flex; align-items:center; gap:10px;
+      font-weight:800;
+      letter-spacing:.2px;
     }
-    .toolbar .right{
-      display:flex; gap:10px; align-items:center;
+    .logo{
+      width:34px; height:34px;
+      border-radius:12px;
+      background: linear-gradient(135deg, #ff0066, #ffcc00);
+      box-shadow: 0 8px 24px rgba(0,0,0,.3);
     }
-    .title{
-      font-weight: 700;
-      font-size: 13px;
-      color: #e5e7eb;
-      max-width: 560px;
-      overflow:hidden; text-overflow: ellipsis; white-space: nowrap;
+    .controls{
+      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
     }
-    .muted{ color: var(--muted); font-size: 12px; }
     .btn{
-      border: 1px solid var(--border);
-      background: rgba(255,255,255,0.03);
-      color: var(--text);
-      padding: 9px 12px;
-      border-radius: 10px;
+      border:0;
+      background: var(--accent);
+      color:white;
+      padding:10px 12px;
+      border-radius:12px;
       cursor:pointer;
-      font-size: 12px;
+      font-weight:700;
+      box-shadow: 0 10px 24px rgba(59,130,246,.22);
     }
-    .btn:hover{ background: rgba(255,255,255,0.06); }
-    .btn.primary{
-      background: var(--green);
-      border-color: transparent;
-      color: #08110b;
-      font-weight: 800;
+    .btn.secondary{
+      background:#1e293b;
+      border:1px solid rgba(255,255,255,.08);
+      box-shadow:none;
+      color:var(--text);
     }
-    .btn.blue{
-      background: var(--blue);
-      border-color: transparent;
-      color: white;
-      font-weight: 800;
+    .btn.ghost{
+      background: transparent;
+      border:1px solid rgba(255,255,255,.12);
+      box-shadow:none;
+      color:var(--text);
     }
-
-    .messages {
-      flex: 1;
-      padding: 16px;
-      overflow-y: auto;
-      display:flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .bubble {
-      max-width: 78%;
-      padding: 10px 12px;
-      border-radius: 14px;
-      line-height: 1.35;
-      white-space: pre-wrap;
-      font-size: 13px;
-      border: 1px solid rgba(255,255,255,0.06);
-    }
-    .user {
-      background: rgba(37,99,235,0.22);
-      border-color: rgba(37,99,235,0.35);
-      margin-left: auto;
-    }
-    .assistant {
-      background: rgba(255,255,255,0.04);
-      margin-right: auto;
-    }
-
-    .panel{
-      padding: 14px 16px;
-    }
-
-    .hint{
-      font-size: 12px;
+    .btn:disabled{opacity:.6; cursor:not-allowed}
+    .pill{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:8px 10px;
+      border-radius:999px;
+      background: rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.08);
+      font-size:12px;
       color: var(--muted);
+      white-space:nowrap;
     }
-
-    pre{
-      background: #0b0f1c;
-      border: 1px solid var(--border);
-      padding: 12px;
-      border-radius: 12px;
-      overflow:auto;
-      max-height: 360px;
-      margin: 0;
+    .pill strong{color:var(--text); font-weight:800}
+    .wrap{
+      max-width:1200px;
+      margin:0 auto;
+      padding:16px;
     }
-
     .grid{
       display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      grid-template-columns: 360px 1fr;
+      gap:14px;
+    }
+    @media (max-width: 980px){
+      .grid{grid-template-columns: 1fr}
     }
     .card{
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 12px;
+      background: rgba(18,24,36,.9);
+      border:1px solid rgba(255,255,255,.06);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow:hidden;
     }
-    .card h3{
-      margin:0 0 8px 0;
-      font-size: 13px;
+    .card-header{
+      padding:12px 14px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
     }
-    .kv{
-      display:grid;
-      grid-template-columns: 180px 1fr;
-      gap: 6px 12px;
-      font-size: 12px;
-      color: #cbd5e1;
+    .card-title{
+      font-weight:900;
+      font-size:13px;
+      letter-spacing:.3px;
+      text-transform:uppercase;
+      color: var(--muted);
     }
-    .k{ color: var(--muted); }
-    .statusLine{
+    .search{
+      display:flex; gap:10px; padding:12px 14px; align-items:center;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      background: rgba(13,19,31,.35);
+    }
+    .search input{
+      width:100%;
+      padding:11px 12px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.10);
+      background:#0b1220;
+      color:var(--text);
+      outline:none;
+    }
+    .list{
+      max-height: calc(100vh - 210px);
+      overflow:auto;
+    }
+    .conv{
+      padding:12px 14px;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      cursor:pointer;
+      transition: background .15s ease;
+    }
+    .conv:hover{background: rgba(255,255,255,.03)}
+    .conv.active{
+      background: rgba(59,130,246,.14);
+      border-bottom:1px solid rgba(59,130,246,.26);
+    }
+    .conv-top{
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+      margin-bottom:6px;
+    }
+    .conv-id{
+      font-family: var(--mono);
+      font-size:11px;
+      color: var(--muted);
+    }
+    .chip{
+      display:inline-flex; align-items:center; gap:6px;
+      padding:4px 8px;
+      font-size:11px;
+      border-radius:999px;
+      background: rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.08);
+      color: var(--muted);
+      white-space:nowrap;
+    }
+    .chip.retroworld{color:#dbeafe; border-color: rgba(59,130,246,.35); background: rgba(59,130,246,.12)}
+    .chip.runningman{color:#fde68a; border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.12)}
+    .preview{
+      color: var(--text);
+      opacity:.92;
+      font-size:12px;
+      line-height:1.25;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient: vertical;
+      overflow:hidden;
+    }
+    .meta{
+      margin-top:8px;
       display:flex;
+      flex-wrap:wrap;
+      gap:8px;
       align-items:center;
-      justify-content: space-between;
-      gap: 10px;
-      font-size: 12px;
-      padding: 8px 10px;
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      background: rgba(255,255,255,0.02);
-      margin-top: 8px;
+      color: var(--muted);
+      font-size:11px;
     }
-    .statusLine strong{ font-weight: 700; }
-    .okTxt{ color:#bff7d0; }
-    .badTxt{ color:#ffd1d1; }
-    .warnTxt{ color:#ffe7b7; }
+    .meta code{
+      font-family: var(--mono);
+      background: rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.08);
+      padding:2px 6px;
+      border-radius:8px;
+      color: var(--text);
+    }
 
-    textarea{ height: 130px; resize: vertical; background: #0e1220; }
+    .pane{
+      display:flex;
+      flex-direction:column;
+      min-height: 520px;
+    }
+    .pane-body{
+      padding:14px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+    .empty{
+      border:1px dashed rgba(255,255,255,.14);
+      border-radius: var(--radius);
+      padding:18px;
+      color: var(--muted);
+      background: rgba(13,19,31,.35);
+    }
+    .thread{
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      max-height: calc(100vh - 240px);
+      overflow:auto;
+      padding-right:2px;
+    }
+    .msg{
+      max-width: 88%;
+      padding:10px 12px;
+      border-radius: 14px;
+      line-height: 1.35;
+      font-size: 13px;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(17,24,39,.55);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .msg.user{
+      margin-left:auto;
+      background: rgba(30,41,59,.75);
+      border-color: rgba(148,163,184,.18);
+    }
+    .msg.assistant{
+      margin-right:auto;
+      background: rgba(13,19,31,.55);
+      border-color: rgba(34,50,74,.32);
+    }
+    .msg-footer{
+      margin-top:6px;
+      font-size:10px;
+      color: var(--muted);
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+    }
+    .msg-footer .role{
+      font-family: var(--mono);
+      opacity:.9;
+    }
+    .msg-footer .ts{
+      font-family: var(--mono);
+      opacity:.7;
+    }
+    .toolbar{
+      display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+      padding:12px 14px;
+      border-top: 1px solid rgba(255,255,255,.06);
+      background: rgba(13,19,31,.35);
+    }
+    .field{
+      display:flex; gap:8px; align-items:center;
+      padding:8px 10px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.10);
+      background:#0b1220;
+      color:var(--text);
+    }
+    .field input{
+      border:0; outline:none;
+      background:transparent;
+      color:var(--text);
+      min-width: 220px;
+      font-family: var(--mono);
+      font-size:12px;
+    }
+    .toast{
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(17,24,39,.92);
+      border:1px solid rgba(255,255,255,.10);
+      color: var(--text);
+      box-shadow: var(--shadow);
+      display:none;
+      max-width: 420px;
+      font-size: 12px;
+    }
+    .toast.show{display:block}
+    .kbd{
+      font-family: var(--mono);
+      font-size:11px;
+      padding:2px 6px;
+      border-radius:8px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(255,255,255,.06);
+      color: var(--text);
+    }
+    .small{
+      font-size:12px;
+      color: var(--muted);
+      line-height:1.25;
+    }
   </style>
 </head>
 
 <body>
-<header>
-  <h1>Admin – Retroworld IA</h1>
-  <div class="row">
-    <span id="tokenStatus" class="pill bad">Token manquant</span>
-    <span id="apiStatus" class="pill">API</span>
-  </div>
-</header>
-
-<main>
-  <div class="tabs">
-    <button class="tab active" data-tab="conversations" onclick="openTab('conversations')">Conversations</button>
-    <button class="tab" data-tab="test" onclick="openTab('test')">Test batch</button>
-    <button class="tab" data-tab="etat" onclick="openTab('etat')">État</button>
-  </div>
-
-  <!-- VIEW: Conversations -->
-  <section class="view active" id="view-conversations">
-    <div class="layout">
-      <div class="sidebar">
-        <div class="sidebarTop">
-          <input type="text" id="search" placeholder="Rechercher par ID / texte…" />
-          <div class="row">
-            <select id="brandFilter">
-              <option value="">Toutes marques</option>
-              <option value="retroworld">retroworld</option>
-              <option value="runningman">runningman</option>
-              <option value="unknown">unknown</option>
-              <option value="mixed">mixed</option>
-            </select>
-            <button class="btn" onclick="refreshConversations()">Rafraîchir</button>
-          </div>
-          <div class="hint">
-            Astuce: ouvre <code>/admin?token=...</code> une fois, le token est mémorisé.
-          </div>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div>
+          <div style="font-size:14px; font-weight:900;">Admin Retroworld IA</div>
+          <div class="small">Conversations en 1 seul fil (format v2)</div>
         </div>
-
-        <div class="conversations" id="conversationList"></div>
       </div>
 
-      <div class="content">
-        <div class="toolbar">
-          <div class="left">
-            <div class="title" id="convTitle">Aucune conversation sélectionnée</div>
-            <div class="muted" id="convMeta"></div>
-          </div>
-          <div class="right">
-            <button class="btn" id="btnCopyId" onclick="copyConvId()" disabled>Copier ID</button>
-            <button class="btn" id="btnToggleJson" onclick="toggleJson()" disabled>JSON brut</button>
-          </div>
-        </div>
-
-        <div class="messages" id="messages">
-          <div class="hint">Sélectionne une conversation à gauche.</div>
-        </div>
-
-        <div class="panel" id="rawJsonWrap" style="display:none;">
-          <div class="row" style="justify-content: space-between;">
-            <div class="hint">JSON brut (API)</div>
-            <button class="btn" onclick="copyRawJson()">Copier JSON</button>
-          </div>
-          <div style="height:8px;"></div>
-          <pre id="rawJson"></pre>
-        </div>
+      <div class="controls">
+        <span class="pill" id="pillStatus">Statut: <strong id="statusText">…</strong></span>
+        <span class="pill">Serveur: <strong id="originText"></strong></span>
+        <button class="btn secondary" id="btnDiag">Diag</button>
+        <button class="btn" id="btnRefresh">Rafraîchir</button>
       </div>
     </div>
-  </section>
+  </div>
 
-  <!-- VIEW: Test batch -->
-  <section class="view" id="view-test">
-    <div class="panel">
+  <div class="wrap">
+    <div class="grid">
+      <!-- LEFT: conversations list -->
       <div class="card">
-        <h3>Test batch (1 question par ligne)</h3>
-        <div class="row" style="margin: 8px 0 10px 0;">
-          <select id="testBrand" style="max-width:240px;">
-            <option value="auto">auto</option>
-            <option value="retroworld">retroworld</option>
-            <option value="runningman">runningman</option>
-          </select>
-          <button class="btn blue" onclick="sendTest()">Tester</button>
-          <button class="btn" onclick="copyTestResults()">Copier résultats</button>
-        </div>
-        <textarea id="testInput" placeholder="Ex:
-C’est combien une session VR ?
-Vous êtes ouverts à quelle heure ?
-Où se trouve Runningman ?"></textarea>
-        <div style="height:10px;"></div>
-        <pre id="testResults">Aucun test encore.</pre>
-      </div>
-    </div>
-  </section>
-
-  <!-- VIEW: Etat / Diagnostic -->
-  <section class="view" id="view-etat">
-    <div class="panel">
-      <div class="row" style="justify-content: space-between; margin-bottom: 10px;">
-        <div class="hint">Diagnostic automatique (admin/api/diag + tests API)</div>
-        <button class="btn primary" onclick="runDiagnostics()">Relancer diagnostic</button>
-      </div>
-
-      <div class="grid">
-        <div class="card">
-          <h3>Tests rapides</h3>
-
-          <div class="statusLine" id="st-token">
-            <span><strong>Token admin</strong></span>
-            <span class="warnTxt">…</span>
-          </div>
-
-          <div class="statusLine" id="st-api-conv">
-            <span><strong>API conversations</strong></span>
-            <span class="warnTxt">…</span>
-          </div>
-
-          <div class="statusLine" id="st-api-diag">
-            <span><strong>API diagnostic</strong></span>
-            <span class="warnTxt">…</span>
-          </div>
-
-          <div class="statusLine" id="st-openai">
-            <span><strong>OpenAI prêt</strong></span>
-            <span class="warnTxt">…</span>
-          </div>
-
-          <div class="statusLine" id="st-kb">
-            <span><strong>KB chargeable</strong></span>
-            <span class="warnTxt">…</span>
-          </div>
-
-          <div class="statusLine" id="st-logs">
-            <span><strong>Logs présents</strong></span>
-            <span class="warnTxt">…</span>
-          </div>
-
+        <div class="card-header">
+          <div class="card-title">Conversations</div>
+          <span class="chip" id="countChip">0</span>
         </div>
 
-        <div class="card">
-          <h3>Détails diagnostic</h3>
-          <pre id="diagJson">Clique “Relancer diagnostic”.</pre>
+        <div class="search">
+          <input id="searchInput" placeholder="Rechercher (id, user_id, preview)…" />
+          <button class="btn ghost" id="btnClear">Effacer</button>
+        </div>
+
+        <div class="list" id="convList"></div>
+      </div>
+
+      <!-- RIGHT: thread -->
+      <div class="card pane">
+        <div class="card-header">
+          <div class="card-title">Fil complet</div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <span class="chip" id="brandChip">brand: —</span>
+            <span class="chip" id="userChip">user_id: —</span>
+          </div>
+        </div>
+
+        <div class="pane-body">
+          <div class="empty" id="emptyState">
+            Sélectionnez une conversation à gauche.
+            <div style="margin-top:10px" class="small">
+              Astuce: si le token admin n’est pas en URL, vous pouvez le mettre via le champ en bas, puis <span class="kbd">Rafraîchir</span>.
+            </div>
+          </div>
+
+          <div class="thread" id="thread" style="display:none;"></div>
+        </div>
+
+        <div class="toolbar">
+          <div class="field" title="Token admin (X-Admin-Token / ?token=...)">
+            <span style="opacity:.8;">🔑</span>
+            <input id="tokenInput" placeholder="ADMIN_DASHBOARD_TOKEN (optionnel si déjà en URL)" />
+          </div>
+
+          <button class="btn secondary" id="btnCopyId">Copier conv_id</button>
+          <button class="btn secondary" id="btnCopyJson">Copier JSON</button>
+          <button class="btn" id="btnReload">Recharger la conversation</button>
         </div>
       </div>
     </div>
-  </section>
-</main>
+  </div>
 
-<script>
-  // --- Token handling ---
-  const urlToken = new URLSearchParams(window.location.search).get("token");
-  const token = urlToken || localStorage.getItem("adminToken") || "";
-  if (token) localStorage.setItem("adminToken", token);
+  <div class="toast" id="toast"></div>
 
-  const tokenStatus = document.getElementById("tokenStatus");
-  tokenStatus.textContent = token ? "Token chargé" : "Token manquant";
-  tokenStatus.className = "pill " + (token ? "ok" : "bad");
+  <script>
+    // -------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------
+    const $ = (id) => document.getElementById(id);
 
-  const apiStatus = document.getElementById("apiStatus");
-
-  // --- State ---
-  let conversations = [];
-  let currentConversationId = "";
-  let currentConversationJson = null;
-
-  // --- UI helpers ---
-  function setApi(ok, txt){
-    apiStatus.textContent = txt || (ok ? "API OK" : "API erreur");
-    apiStatus.className = "pill " + (ok ? "ok" : "bad");
-  }
-
-  function qsToken() {
-    return token ? `?token=${encodeURIComponent(token)}` : "";
-  }
-
-  function tagForBrand(b){
-    b = String(b||"").toLowerCase();
-    if (b === "retroworld") return "tag rw";
-    if (b === "runningman") return "tag rm";
-    return "tag";
-  }
-
-  function fmtTime(ts){
-    if(!ts) return "";
-    const d = new Date(ts * 1000);
-    return d.toLocaleString();
-  }
-
-  async function safeFetchJson(url, options){
-    const res = await fetch(url, options);
-    if(!res.ok){
-      const t = await res.text();
-      throw new Error(`${res.status} ${t}`);
-    }
-    return await res.json();
-  }
-
-  // --- Tabs ---
-  function openTab(name){
-    document.querySelectorAll(".tab").forEach(t=>{
-      t.classList.toggle("active", t.dataset.tab === name);
-    });
-    document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
-    document.getElementById(`view-${name}`).classList.add("active");
-
-    if(name === "conversations") refreshConversations();
-    if(name === "etat") runDiagnostics();
-  }
-
-  // --- Conversations ---
-  async function refreshConversations(){
-    if(!token){
-      setApi(false, "Token manquant");
-      return;
-    }
-    try{
-      setApi(true, "Chargement…");
-      conversations = await safeFetchJson(`/admin/api/conversations${qsToken()}`);
-      setApi(true, "API OK");
-      applyFilters();
-    }catch(e){
-      console.error(e);
-      setApi(false, "API erreur");
-      document.getElementById("conversationList").innerHTML =
-        `<div class="conv"><div class="preview">Impossible de charger (token ? serveur ?)</div></div>`;
-    }
-  }
-
-  function applyFilters(){
-    const s = (document.getElementById("search").value || "").toLowerCase().trim();
-    const bf = document.getElementById("brandFilter").value;
-
-    const filtered = conversations.filter(c => {
-      const okBrand = !bf || (String(c.brand||"").toLowerCase() === bf);
-      if(!okBrand) return false;
-      if(!s) return true;
-      const hay = `${c.id} ${c.preview||""} ${c.source||""} ${c.channel||""}`.toLowerCase();
-      return hay.includes(s);
-    });
-
-    renderConversations(filtered);
-  }
-
-  function renderConversations(list){
-    const container = document.getElementById("conversationList");
-    container.innerHTML = "";
-    if(!list.length){
-      container.innerHTML = `<div class="conv"><div class="preview">Aucune conversation.</div></div>`;
-      return;
+    function toast(msg){
+      const t = $("toast");
+      t.textContent = msg;
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 2200);
     }
 
-    list.forEach(c => {
-      const div = document.createElement("div");
-      div.className = "conv";
-      div.innerHTML = `
-        <div class="top">
-          <div class="id" title="${c.id}">${c.id}</div>
-          <span class="${tagForBrand(c.brand)}">${c.brand || "unknown"}</span>
-        </div>
-        <div class="preview">${(c.preview || "").replace(/</g,"&lt;")}</div>
-        <div class="meta">
-          <span>${fmtTime(c.timestamp)}</span>
-          <span>${c.channel || ""}</span>
-        </div>
-      `;
-      div.onclick = () => openConversation(c.id);
-      container.appendChild(div);
-    });
-  }
+    function qs(name){
+      const u = new URL(location.href);
+      return u.searchParams.get(name);
+    }
 
-  async function openConversation(id){
-    try{
-      currentConversationId = id;
-      document.getElementById("convTitle").textContent = id;
-      document.getElementById("convMeta").textContent = "Chargement…";
-      document.getElementById("btnCopyId").disabled = false;
-      document.getElementById("btnToggleJson").disabled = false;
+    function setQs(name, value){
+      const u = new URL(location.href);
+      if(value === null || value === undefined || value === ""){
+        u.searchParams.delete(name);
+      } else {
+        u.searchParams.set(name, value);
+      }
+      history.replaceState({}, "", u.toString());
+    }
 
-      const data = await safeFetchJson(`/admin/api/conversation/${encodeURIComponent(id)}${qsToken()}`);
-      currentConversationJson = data;
+    function fmtTs(ts){
+      if(!ts) return "";
+      // keep ISO, short
+      try{
+        const d = new Date(ts);
+        if(isNaN(d.getTime())) return String(ts);
+        const pad = (n)=>String(n).padStart(2,"0");
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      }catch(e){
+        return String(ts);
+      }
+    }
 
-      const brand = data.brand_final || "unknown";
-      document.getElementById("convMeta").textContent = `brand: ${brand}`;
+    // -------------------------------------------------------
+    // State
+    // -------------------------------------------------------
+    const state = {
+      adminToken: "",
+      conversations: [],
+      filtered: [],
+      activeId: "",
+      activeObj: null,
+      activeMessages: [],
+    };
 
-      const msgWrap = document.getElementById("messages");
-      msgWrap.innerHTML = "";
-      const messages = data.messages || [];
+    $("originText").textContent = location.origin;
 
-      if(!messages.length){
-        msgWrap.innerHTML = `<div class="hint">Conversation vide.</div>`;
-      }else{
-        messages.forEach(m=>{
-          const div = document.createElement("div");
-          div.className = "bubble " + (m.role === "user" ? "user" : "assistant");
-          div.textContent = m.content || "";
-          msgWrap.appendChild(div);
-        });
-        msgWrap.scrollTop = msgWrap.scrollHeight;
+    // Load token from URL, else from localStorage
+    const URL_TOKEN = qs("token") || "";
+    const LS_KEY = "rw_admin_token";
+    const LS_TOKEN = localStorage.getItem(LS_KEY) || "";
+
+    state.adminToken = URL_TOKEN || LS_TOKEN || "";
+    $("tokenInput").value = state.adminToken;
+
+    // -------------------------------------------------------
+    // API
+    // -------------------------------------------------------
+    async function apiGet(path){
+      const token = (state.adminToken || "").trim();
+      const url = new URL(location.origin + path);
+
+      // Prefer query param token (matches backend _require_admin_token)
+      if(token){
+        url.searchParams.set("token", token);
       }
 
-      document.getElementById("rawJson").textContent = JSON.stringify(data, null, 2);
-    }catch(e){
-      console.error(e);
-      alert("Impossible d'ouvrir la conversation.");
-    }
-  }
+      const headers = {};
+      if(token){
+        headers["X-Admin-Token"] = token;
+      }
 
-  function copyConvId(){
-    if(!currentConversationId) return;
-    navigator.clipboard.writeText(currentConversationId);
-  }
+      const res = await fetch(url.toString(), { headers });
+      let data = null;
+      try { data = await res.json(); } catch(e){}
 
-  function toggleJson(){
-    const wrap = document.getElementById("rawJsonWrap");
-    wrap.style.display = (wrap.style.display === "none" || !wrap.style.display) ? "block" : "none";
-  }
-
-  function copyRawJson(){
-    if(!currentConversationJson) return;
-    navigator.clipboard.writeText(JSON.stringify(currentConversationJson, null, 2));
-  }
-
-  document.getElementById("search").addEventListener("input", applyFilters);
-  document.getElementById("brandFilter").addEventListener("change", applyFilters);
-
-  // --- Test batch ---
-  async function sendTest(){
-    if(!token){
-      alert("Token admin manquant.");
-      return;
+      if(!res.ok){
+        const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+      return data;
     }
 
-    const text = document.getElementById("testInput").value || "";
-    const brand = document.getElementById("testBrand").value || "auto";
-    const questions = text.split("\n").map(l=>l.trim()).filter(Boolean);
-
-    if(!questions.length){
-      alert("Ajoute au moins une question.");
-      return;
+    async function loadDiag(){
+      const d = await apiGet("/admin/api/diag");
+      const ok = d && d.openai && d.openai.client_ready;
+      $("statusText").textContent = ok ? "OK" : "Dégradé";
+      $("pillStatus").style.borderColor = ok ? "rgba(34,197,94,.35)" : "rgba(245,158,11,.35)";
+      $("pillStatus").style.background = ok ? "rgba(34,197,94,.10)" : "rgba(245,158,11,.10)";
+      toast("Diag chargé");
+      return d;
     }
 
-    document.getElementById("testResults").textContent = "Test en cours…";
+    async function loadConversations(){
+      const items = await apiGet("/admin/api/conversations");
+      state.conversations = Array.isArray(items) ? items : [];
+      applyFilter();
+      renderList();
+      $("countChip").textContent = String(state.filtered.length);
+      $("statusText").textContent = "OK";
+      toast("Conversations chargées");
+    }
 
-    try{
-      const out = await safeFetchJson(`/admin/api/test${qsToken()}`, {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ brand, questions })
+    async function loadConversationDetail(convId){
+      if(!convId) return;
+      const detail = await apiGet("/admin/api/conversation/" + encodeURIComponent(convId));
+      state.activeId = convId;
+      state.activeObj = detail && detail.conversation ? detail.conversation : null;
+      state.activeMessages = Array.isArray(detail.messages) ? detail.messages : [];
+      renderThread();
+    }
+
+    // -------------------------------------------------------
+    // Rendering
+    // -------------------------------------------------------
+    function applyFilter(){
+      const q = ($("searchInput").value || "").trim().toLowerCase();
+      if(!q){
+        state.filtered = [...state.conversations];
+        return;
+      }
+      state.filtered = state.conversations.filter(c => {
+        const id = String(c.id || "").toLowerCase();
+        const userId = String(c.user_id || "").toLowerCase();
+        const prev = String(c.preview || "").toLowerCase();
+        const brand = String(c.brand || "").toLowerCase();
+        return id.includes(q) || userId.includes(q) || prev.includes(q) || brand.includes(q);
       });
-
-      document.getElementById("testResults").textContent = JSON.stringify(out, null, 2);
-    }catch(e){
-      console.error(e);
-      document.getElementById("testResults").textContent = "Erreur test (API).";
-      alert("Test impossible.");
-    }
-  }
-
-  function copyTestResults(){
-    const t = document.getElementById("testResults").textContent || "";
-    navigator.clipboard.writeText(t);
-  }
-
-  // --- Diagnostics ---
-  function setStatus(id, state, text){
-    const el = document.getElementById(id);
-    const right = el.querySelector("span:last-child");
-    right.textContent = text;
-
-    right.classList.remove("okTxt", "badTxt", "warnTxt");
-    if(state === "ok") right.classList.add("okTxt");
-    else if(state === "bad") right.classList.add("badTxt");
-    else right.classList.add("warnTxt");
-  }
-
-  async function runDiagnostics(){
-    // token
-    if(token){
-      setStatus("st-token", "ok", "OK");
-    }else{
-      setStatus("st-token", "bad", "Manquant");
-      document.getElementById("diagJson").textContent = "Token manquant. Ouvre /admin?token=...";
-      return;
     }
 
-    // API conversations
-    try{
-      await safeFetchJson(`/admin/api/conversations${qsToken()}`);
-      setStatus("st-api-conv", "ok", "OK");
-    }catch(e){
-      console.error(e);
-      setStatus("st-api-conv", "bad", "KO");
+    function brandChipClass(brand){
+      if(brand === "runningman") return "chip runningman";
+      return "chip retroworld";
     }
 
-    // API diag
-    let diag = null;
-    try{
-      diag = await safeFetchJson(`/admin/api/diag${qsToken()}`);
-      setStatus("st-api-diag", "ok", "OK");
-      document.getElementById("diagJson").textContent = JSON.stringify(diag, null, 2);
-    }catch(e){
-      console.error(e);
-      setStatus("st-api-diag", "bad", "KO");
-      document.getElementById("diagJson").textContent = "Impossible d'appeler /admin/api/diag";
-      return;
-    }
+    function renderList(){
+      const list = $("convList");
+      list.innerHTML = "";
 
-    // OpenAI
-    if(diag && diag.openai){
-      if(diag.openai.client_ready && diag.openai.key_present){
-        setStatus("st-openai", "ok", `OK (${diag.openai.model})`);
-      }else{
-        const reason = diag.openai.init_error || "non prêt";
-        setStatus("st-openai", "bad", reason);
+      if(state.filtered.length === 0){
+        const div = document.createElement("div");
+        div.className = "conv";
+        div.innerHTML = `<div class="preview">Aucune conversation.</div>`;
+        list.appendChild(div);
+        return;
+      }
+
+      for(const c of state.filtered){
+        const div = document.createElement("div");
+        div.className = "conv" + (c.id === state.activeId ? " active" : "");
+        const brand = String(c.brand || "unknown");
+        const chipClass = brandChipClass(brand);
+        const ts = fmtTs(c.timestamp);
+
+        div.innerHTML = `
+          <div class="conv-top">
+            <div class="conv-id">${escapeHtml(c.id || "")}</div>
+            <span class="${chipClass}">${escapeHtml(brand)}</span>
+          </div>
+          <div class="preview">${escapeHtml(c.preview || "")}</div>
+          <div class="meta">
+            <span>🕒 <code>${escapeHtml(ts || "—")}</code></span>
+            <span>👤 <code>${escapeHtml(c.user_id || "—")}</code></span>
+          </div>
+        `;
+
+        div.addEventListener("click", async () => {
+          // highlight immediately
+          state.activeId = c.id;
+          renderList();
+          $("emptyState").style.display = "none";
+          $("thread").style.display = "block";
+          $("thread").innerHTML = `<div class="empty">Chargement…</div>`;
+          try{
+            await loadConversationDetail(c.id);
+          }catch(e){
+            $("thread").innerHTML = `<div class="empty">Erreur: ${escapeHtml(e.message || String(e))}</div>`;
+            toast("Erreur chargement conversation");
+          }
+        });
+
+        list.appendChild(div);
       }
     }
 
-    // KB
-    const rw = diag?.kb?.retroworld;
-    const rm = diag?.kb?.runningman;
-    const kbOk = (rw?.exists && rw?.load_ok) || (rm?.exists && rm?.load_ok);
-    if(kbOk){
-      setStatus("st-kb", "ok", `RW:${rw?.items_count||0} | RM:${rm?.items_count||0}`);
-    }else{
-      setStatus("st-kb", "warn", "KB manquante/KO");
+    function renderThread(){
+      const thread = $("thread");
+      const empty = $("emptyState");
+
+      if(!state.activeId){
+        empty.style.display = "block";
+        thread.style.display = "none";
+        return;
+      }
+
+      empty.style.display = "none";
+      thread.style.display = "block";
+      thread.innerHTML = "";
+
+      const brand = (state.activeObj && state.activeObj.brand_last) ? String(state.activeObj.brand_last) : "—";
+      const userId = (state.activeObj && state.activeObj.user_id) ? String(state.activeObj.user_id) : "—";
+      $("brandChip").className = brandChipClass(brand);
+      $("brandChip").textContent = "brand: " + brand;
+      $("userChip").textContent = "user_id: " + userId;
+
+      const msgs = state.activeMessages || [];
+      if(msgs.length === 0){
+        thread.innerHTML = `<div class="empty">Conversation vide.</div>`;
+        return;
+      }
+
+      for(const m of msgs){
+        const role = String(m.role || "");
+        const content = String(m.content || "");
+        const ts = fmtTs(m.ts);
+
+        const wrap = document.createElement("div");
+        wrap.className = "msg " + (role === "user" ? "user" : "assistant");
+
+        wrap.innerHTML = `
+          <div>${escapeHtml(content)}</div>
+          <div class="msg-footer">
+            <span class="role">${escapeHtml(role)}</span>
+            <span class="ts">${escapeHtml(ts)}</span>
+          </div>
+        `;
+        thread.appendChild(wrap);
+      }
+
+      // scroll to bottom
+      thread.scrollTop = thread.scrollHeight;
     }
 
-    // Logs
-    const logs = diag?.logs;
-    const convCount = logs?.conversations_files_count || 0;
-    if(convCount > 0){
-      setStatus("st-logs", "ok", `${convCount} fichiers`);
-    }else{
-      setStatus("st-logs", "warn", "Aucun log");
+    function escapeHtml(str){
+      return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
     }
-  }
 
-  // Init
-  refreshConversations();
-</script>
+    // -------------------------------------------------------
+    // Events
+    // -------------------------------------------------------
+    $("btnRefresh").addEventListener("click", async () => {
+      state.adminToken = ($("tokenInput").value || "").trim();
+      if(state.adminToken){
+        localStorage.setItem(LS_KEY, state.adminToken);
+        setQs("token", state.adminToken); // keep it in URL (handy on Render)
+      } else {
+        localStorage.removeItem(LS_KEY);
+        setQs("token", "");
+      }
+
+      $("statusText").textContent = "…";
+      try{
+        await loadConversations();
+        if(state.activeId){
+          await loadConversationDetail(state.activeId);
+        }
+      }catch(e){
+        $("statusText").textContent = "Erreur";
+        toast("Erreur: " + (e.message || e));
+      }
+    });
+
+    $("btnDiag").addEventListener("click", async () => {
+      state.adminToken = ($("tokenInput").value || "").trim();
+      if(state.adminToken){
+        localStorage.setItem(LS_KEY, state.adminToken);
+        setQs("token", state.adminToken);
+      }
+      try{
+        const d = await loadDiag();
+        // Small extra toast info
+        const kbR = d && d.kb && d.kb.retroworld ? d.kb.retroworld.items_count : "?";
+        const kbRM = d && d.kb && d.kb.runningman ? d.kb.runningman.items_count : "?";
+        toast(`KB retroworld: ${kbR} | KB runningman: ${kbRM}`);
+      }catch(e){
+        toast("Diag erreur: " + (e.message || e));
+        $("statusText").textContent = "Erreur";
+      }
+    });
+
+    $("btnClear").addEventListener("click", () => {
+      $("searchInput").value = "";
+      applyFilter();
+      renderList();
+      $("countChip").textContent = String(state.filtered.length);
+    });
+
+    $("searchInput").addEventListener("input", () => {
+      applyFilter();
+      renderList();
+      $("countChip").textContent = String(state.filtered.length);
+    });
+
+    $("btnReload").addEventListener("click", async () => {
+      if(!state.activeId){ toast("Aucune conversation sélectionnée"); return; }
+      try{
+        await loadConversationDetail(state.activeId);
+        toast("Conversation rechargée");
+      }catch(e){
+        toast("Erreur: " + (e.message || e));
+      }
+    });
+
+    $("btnCopyId").addEventListener("click", async () => {
+      if(!state.activeId){ toast("Aucune conversation sélectionnée"); return; }
+      try{
+        await navigator.clipboard.writeText(state.activeId);
+        toast("conv_id copié");
+      }catch(e){
+        toast("Impossible de copier");
+      }
+    });
+
+    $("btnCopyJson").addEventListener("click", async () => {
+      if(!state.activeId || !state.activeObj){ toast("Aucune conversation sélectionnée"); return; }
+      try{
+        const payload = JSON.stringify(state.activeObj, null, 2);
+        await navigator.clipboard.writeText(payload);
+        toast("JSON conversation copié");
+      }catch(e){
+        toast("Impossible de copier");
+      }
+    });
+
+    // -------------------------------------------------------
+    // Init
+    // -------------------------------------------------------
+    (async function init(){
+      $("statusText").textContent = "…";
+      try{
+        await loadConversations();
+        // Auto-open by conv param if provided
+        const conv = qs("conv");
+        if(conv){
+          state.activeId = conv;
+          await loadConversationDetail(conv);
+          renderList();
+        }
+      }catch(e){
+        $("statusText").textContent = "Erreur";
+        toast("Erreur chargement: " + (e.message || e));
+      }
+    })();
+  </script>
 </body>
 </html>
