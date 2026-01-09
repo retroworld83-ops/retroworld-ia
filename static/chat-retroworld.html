@@ -148,6 +148,18 @@
     const formEl = document.getElementById("chat-form");
     const sendBtn = document.getElementById("send-btn");
 
+    // --- Stable user id (memory per user across reloads) ---
+    function getOrCreateUserId(){
+      const key = "rw_user_id";
+      let v = localStorage.getItem(key);
+      if(!v){
+        v = "u_" + Math.random().toString(16).slice(2) + Date.now().toString(16);
+        localStorage.setItem(key, v);
+      }
+      return v;
+    }
+    const USER_ID = getOrCreateUserId();
+
     function addMessage(text, from = "bot") {
       const wrap = document.createElement("div");
       wrap.className = "msg " + (from === "user" ? "msg-user" : "msg-bot");
@@ -174,7 +186,7 @@
         const res = await fetch(API_URL, {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ message: text })
+          body: JSON.stringify({ message: text, user_id: USER_ID })
         });
         const data = await res.json();
         const answer = data.answer || data.reply || "Désolé, je n'ai pas compris la réponse du serveur.";
