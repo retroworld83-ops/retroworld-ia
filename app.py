@@ -202,6 +202,37 @@ def _is_price_intent(text: str) -> bool:
     return any(k in t for k in ["c'est combien", "cest combien", "tarif", "prix", "combien ça coute", "ça coute combien", "ca coute combien"])
 
 
+def _is_hours_intent(text: str) -> bool:
+    t = _norm(text)
+    return any(k in t for k in ["horaire", "horaires", "ouvert", "ouverts", "ferme", "fermé", "fermez", "ouvre", "jusqu'à quelle", "jusqu’a quelle"])
+
+
+def _is_location_intent(text: str) -> bool:
+    t = _norm(text)
+    return any(k in t for k in ["adresse", "où", "ou", "localisation", "venir", "comment venir", "draguignan", "parking"])
+
+
+def _retroworld_static_info(kind: str) -> str:
+    if kind == "hours":
+        return "Retroworld France est **ouvert du mardi au dimanche, de 11h à 22h**."
+    if kind == "location":
+        return "Retroworld France se trouve au **815 avenue Pierre Brossolette, 83300 Draguignan**."
+    if kind == "contact":
+        return "Contact Retroworld : **04 94 47 94 64** | **contact@retroworldfrance.com**."
+    # fallback
+    return "Retroworld France : **815 avenue Pierre Brossolette, 83300 Draguignan**, du mardi au dimanche **11h-22h**."
+
+
+def _retroworld_price_table() -> str:
+    return (
+        "Tarifs Retroworld :\n"
+        "- **VR** : 15 € / joueur (jusqu’à 5 joueurs)\n"
+        "- **Escape Game VR** : 30 € / joueur\n"
+        "- **Quiz interactifs** : 8 € (30 min) | 15 € (60 min) | 20 € (90 min) (jusqu’à 12 joueurs)\n"
+        "- **Salle enfant** : 50 € / heure, puis 20 € par demi-heure supplémentaire"
+    )
+
+
 def _retroworld_price_answer(text: str) -> Optional[str]:
     """
     Réponse déterministe pour éviter les hallucinations tarifaires.
@@ -209,18 +240,18 @@ def _retroworld_price_answer(text: str) -> Optional[str]:
     """
     t = _norm(text)
 
+    # Escape VR (doit passer AVANT le test "vr", sinon "escape vr" renvoie le tarif VR)
+    if "escape" in t:
+        return (
+            "Pour Retroworld, un **Escape Game VR** est à **30 € / joueur**. "
+            "Combien de joueurs serez-vous et plutôt quel type d’univers (aventure, enquête, horreur, enfants) ?"
+        )
+
     # VR
     if "vr" in t or "virtual" in t:
         return (
             "Pour Retroworld, une partie de VR est à **15 € / joueur** (jusqu’à 5 joueurs). "
             "Souhaitez-vous une simple session VR ou un **Escape Game VR** ?"
-        )
-
-    # Escape VR
-    if "escape" in t:
-        return (
-            "Pour Retroworld, un **Escape Game VR** est à **30 € / joueur**. "
-            "Combien de joueurs serez-vous et plutôt quel type d’univers (aventure, enquête, horreur, enfants) ?"
         )
 
     # Quiz
@@ -286,35 +317,119 @@ def _conversation_path(conversation_id: str) -> str:
     return os.path.join(CONV_DIR, f"{conversation_id}.json")
 
 
-def load_conversation(conversation_id: str) -> List[Dict[str, Any]]:
+def _utc_iso() -> str:
+    return datetime.utcnow().isoformat() + "Z"
+
+
+def _coerce_legacy_records_to_messages(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convertit l'ancien format (liste de records) en timeline de messages."""
+    msgs: List[Dict[str, Any]] = []
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        ts = str(rec.get("ts") or _utc_iso())
+        user_msgs = rec.get("user_messages") or []
+        if isinstance(user_msgs, list):
+            for um in user_msgs:
+                if isinstance(um, dict) and um.get("role") in ("user", "assistant"):
+                    msgs.append(
+                        {
+                            "role": um.get("role"),
+                            "content": str(um.get("content") or ""),
+                            "ts": ts,
+                        }
+                    )
+        ar = rec.get("assistant_reply")
+        if ar is not None:
+            msgs.append({"role": "assistant", "content": str(ar), "ts": ts})
+    return msgs
+
+
+def load_conversation_obj(conversation_id: str) -> Dict[str, Any]:
+    """
+    Nouveau format (v2):
+      { "version": 2, "id": ..., "created": ..., "user_id": ..., "brand_last": ..., "messages": [...] }
+
+    Compat:
+      si fichier = liste (ancien format), on renvoie un objet v2 reconstruit.
+    """
     path = _conversation_path(conversation_id)
-    data = _safe_read_json(path, [])
-    if not isinstance(data, list):
-        return []
-    return data
+    data = _safe_read_json(path, {})
+
+    # v2
+    if isinstance(data, dict) and isinstance(data.get("messages"), list):
+        data.setdefault("version", 2)
+        data.setdefault("id", conversation_id)
+        data.setdefault("created", data.get("created") or _utc_iso())
+        return data
+
+    # legacy list -> v2
+    if isinstance(data, list):
+        msgs = _coerce_legacy_records_to_messages(data)
+        return {
+            "version": 2,
+            "id": conversation_id,
+            "created": (data[0].get("ts") if data and isinstance(data[0], dict) else _utc_iso()),
+            "user_id": None,
+            "brand_last": (data[-1].get("brand") if data and isinstance(data[-1], dict) else None),
+            "messages": msgs,
+            "legacy_records": data,
+        }
+
+    # empty
+    return {"version": 2, "id": conversation_id, "created": _utc_iso(), "user_id": None, "brand_last": None, "messages": []}
 
 
-def append_conversation_record(
+def save_conversation_obj(conversation_id: str, obj: Dict[str, Any]) -> None:
+    path = _conversation_path(conversation_id)
+    _safe_write_json(path, obj)
+
+
+def load_conversation_messages(conversation_id: str) -> List[Dict[str, Any]]:
+    return load_conversation_obj(conversation_id).get("messages") or []
+
+
+def append_conversation_turn(
     conversation_id: str,
-    brand: str,
+    brand_effective: str,
     user_messages: List[Dict[str, Any]],
     assistant_reply: str,
     extra: Optional[Dict[str, Any]] = None,
 ) -> None:
-    path = _conversation_path(conversation_id)
-    records = _safe_read_json(path, [])
-    if not isinstance(records, list):
-        records = []
-    records.append(
-        {
-            "ts": datetime.utcnow().isoformat() + "Z",
-            "brand": brand,
-            "user_messages": user_messages,
-            "assistant_reply": assistant_reply,
-            "extra": extra or {},
-        }
-    )
-    _safe_write_json(path, records)
+    """Ajoute un tour de conversation au format v2 (timeline)."""
+    obj = load_conversation_obj(conversation_id)
+    msgs = obj.get("messages")
+    if not isinstance(msgs, list):
+        msgs = []
+
+    ts = _utc_iso()
+
+    # On n'enregistre QUE les messages utilisateur de ce tour.
+    # (Le widget envoyait parfois l'historique complet, ce qui créait des doublons en admin.)
+    for um in (user_messages or []):
+        if not isinstance(um, dict):
+            continue
+        if um.get("role") != "user":
+            continue
+        content = str(um.get("content") or "").strip()
+        if not content:
+            continue
+        msgs.append({"role": "user", "content": content, "ts": ts})
+
+    msgs.append({"role": "assistant", "content": str(assistant_reply or ""), "ts": ts})
+
+    obj["version"] = 2
+    obj["id"] = conversation_id
+    obj.setdefault("created", obj.get("created") or ts)
+    obj["brand_last"] = str(brand_effective or "")
+    if extra and isinstance(extra, dict):
+        obj["extra_last"] = extra
+        # conserver un user_id si présent
+        uid = extra.get("user_id")
+        if uid:
+            obj["user_id"] = uid
+    obj["messages"] = msgs
+    save_conversation_obj(conversation_id, obj)
 
 
 def list_conversations() -> List[str]:
@@ -326,25 +441,21 @@ def list_conversations() -> List[str]:
         return []
 
 
-def prune_history_for_prompt(history: List[Dict[str, Any]], max_turns: int = 18) -> List[Dict[str, str]]:
+def prune_messages_for_prompt(messages: List[Dict[str, Any]], max_pairs: int = 14) -> List[Dict[str, str]]:
+    """Garde les derniers échanges (user+assistant) pour le prompt, sans exploser en tokens."""
+    if not isinstance(messages, list):
+        return []
+
+    # On prend un peu large, puis on coupe par paires.
+    clipped = [m for m in messages if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content") is not None]
+
+    # Garder les derniers N paires (2 messages par paire)
+    max_msgs = max_pairs * 2
+    clipped = clipped[-max_msgs:]
+
     out: List[Dict[str, str]] = []
-    if not isinstance(history, list):
-        return out
-    turns = 0
-    for rec in reversed(history):
-        if turns >= max_turns:
-            break
-        if not isinstance(rec, dict):
-            continue
-        user_msgs = rec.get("user_messages") or []
-        if isinstance(user_msgs, list):
-            for um in user_msgs:
-                if isinstance(um, dict) and um.get("role") == "user":
-                    out.append({"role": "user", "content": str(um.get("content") or "")})
-        ar = rec.get("assistant_reply") or ""
-        out.append({"role": "assistant", "content": str(ar)})
-        turns += 1
-    out.reverse()
+    for m in clipped:
+        out.append({"role": str(m.get("role")), "content": str(m.get("content") or "")})
     return out
 
 
@@ -475,11 +586,15 @@ def process_chat(brand_entry: str, messages: List[Dict[str, Any]], metadata: Opt
         system = (
             "Vous êtes l’assistant officiel de Retroworld (VR, Escape Game VR, quiz interactifs, salle enfant).\n"
             "Ne demandez pas 'quelle marque' : vous répondez côté Retroworld.\n"
+            "Règle importante: pour les informations de base (tarifs, horaires, adresse, contact), vous répondez directement et vous n'envoyez pas l'utilisateur 'voir le site' (sauf s'il demande explicitement un lien).\n"
             "Tarifs Retroworld:\n"
             "- VR : 15 €/joueur, jusqu’à 5 joueurs.\n"
             "- Escape Game VR : 30 €/joueur.\n"
             "- Quiz : 8€ (30min), 15€ (60min), 20€ (90min), jusqu’à 12 joueurs.\n"
             "- Salle enfant : 50 €/h, +20 €/demi-heure supplémentaire.\n"
+            "Horaires: du mardi au dimanche, 11h à 22h.\n"
+            "Adresse: 815 avenue Pierre Brossolette, 83300 Draguignan.\n"
+            "Contact: 04 94 47 94 64 / contact@retroworldfrance.com.\n"
             "Si l’utilisateur veut réserver: répondre 'disponible' puis demander date/heure + nombre de personnes.\n"
             "Répondez clairement, sans inventer.\n"
         )
@@ -507,8 +622,8 @@ def process_chat(brand_entry: str, messages: List[Dict[str, Any]], metadata: Opt
 
     conversation_id = str(metadata.get("conversation_id") or "").strip()
     if conversation_id:
-        hist = load_conversation(conversation_id)
-        openai_messages.extend(prune_history_for_prompt(hist, max_turns=12))
+        hist_msgs = load_conversation_messages(conversation_id)
+        openai_messages.extend(prune_messages_for_prompt(hist_msgs, max_pairs=12))
 
     clipped: List[Dict[str, str]] = []
     for m in (messages or [])[-20:]:
@@ -529,13 +644,35 @@ def process_chat(brand_entry: str, messages: List[Dict[str, Any]], metadata: Opt
     # Deterministic pricing for Retroworld (prevents "durée 30min/60min" hallucination)
     if brand_effective == "retroworld" and _is_price_intent(last_user_text):
         price_reply = _retroworld_price_answer(last_user_text)
-        if price_reply:
+        reply = price_reply or _retroworld_price_table()
+        if reply:
             return {
-                "reply": price_reply,
+                "reply": reply,
                 "brand_entry": brand_entry,
                 "brand_effective": brand_effective,
                 "openai_usage": {"bypass": "price_rule"},
                 "guard_hits": ["price_intent"],
+                "metadata": metadata,
+            }
+
+    # Deterministic hours/location/contact for Retroworld
+    if brand_effective == "retroworld" and last_user_text:
+        if _is_hours_intent(last_user_text):
+            return {
+                "reply": _retroworld_static_info("hours"),
+                "brand_entry": brand_entry,
+                "brand_effective": brand_effective,
+                "openai_usage": {"bypass": "hours_rule"},
+                "guard_hits": ["hours_intent"],
+                "metadata": metadata,
+            }
+        if _is_location_intent(last_user_text):
+            return {
+                "reply": _retroworld_static_info("location"),
+                "brand_entry": brand_entry,
+                "brand_effective": brand_effective,
+                "openai_usage": {"bypass": "location_rule"},
+                "guard_hits": ["location_intent"],
                 "metadata": metadata,
             }
 
@@ -593,9 +730,9 @@ def chat_compat():
     out = process_chat(brand_entry="auto", messages=messages, metadata=metadata)
     reply_text = out.get("reply", "")
 
-    append_conversation_record(
+    append_conversation_turn(
         conversation_id=conversation_id,
-        brand=str(out.get("brand_effective") or "auto"),
+        brand_effective=str(out.get("brand_effective") or "auto"),
         user_messages=messages,
         assistant_reply=reply_text,
         extra={
@@ -643,9 +780,9 @@ def chat_route(brand: str):
     out = process_chat(brand_entry=brand, messages=messages, metadata=metadata)
     reply_text = out.get("reply", "")
 
-    append_conversation_record(
+    append_conversation_turn(
         conversation_id=conversation_id,
-        brand=brand,
+        brand_effective=str(out.get("brand_effective") or brand),
         user_messages=messages,
         assistant_reply=reply_text,
         extra={
@@ -690,8 +827,8 @@ def user_api_history():
     if not conversation_id:
         return jsonify({"error": "missing_conversation_id"}), 400
 
-    records = load_conversation(conversation_id)
-    return jsonify({"conversation_id": conversation_id, "records": records}), 200
+    obj = load_conversation_obj(conversation_id)
+    return jsonify({"conversation_id": conversation_id, "conversation": obj}), 200
 
 
 @app.route("/kb/<brand>", methods=["GET"])
@@ -732,25 +869,26 @@ def admin_api_conversations():
     conv_ids = list_conversations()
     items: List[Dict[str, Any]] = []
     for cid in conv_ids:
-        recs = load_conversation(cid)
+        obj = load_conversation_obj(cid)
+        msgs = obj.get("messages") or []
+        brand_eff = str(obj.get("brand_last") or "unknown")
         preview = ""
-        brand_eff = "unknown"
-        if recs:
-            last = recs[-1] if isinstance(recs[-1], dict) else {}
-            brand_eff = str(last.get("brand") or "unknown")
-            user_msgs = last.get("user_messages") or []
+        timestamp = None
+        if isinstance(msgs, list) and msgs:
+            lastm = msgs[-1] if isinstance(msgs[-1], dict) else {}
+            timestamp = lastm.get("ts")
+            # preview = dernier message user si possible
             last_user = ""
-            if isinstance(user_msgs, list):
-                for um in reversed(user_msgs):
-                    if isinstance(um, dict) and um.get("role") == "user":
-                        last_user = str(um.get("content") or "")
-                        break
-            preview = (last_user or str(last.get("assistant_reply") or "")).strip()
+            for m in reversed(msgs):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    last_user = str(m.get("content") or "")
+                    break
+            preview = (last_user or str(lastm.get("content") or "")).strip()
             preview = re.sub(r"\s+", " ", preview)
             if len(preview) > 120:
                 preview = preview[:117] + "..."
 
-        items.append({"id": cid, "brand": brand_eff, "preview": preview})
+        items.append({"id": cid, "brand": brand_eff, "preview": preview, "timestamp": timestamp, "user_id": obj.get("user_id")})
 
     return jsonify(items), 200
 
@@ -760,21 +898,11 @@ def admin_api_conversation_detail(conversation_id: str):
     if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
         return jsonify({"error": "forbidden"}), 403
 
-    records = load_conversation(conversation_id)
-    msgs: List[Dict[str, str]] = []
-    for rec in records:
-        if not isinstance(rec, dict):
-            continue
-        user_msgs = rec.get("user_messages") or []
-        if isinstance(user_msgs, list):
-            for um in user_msgs:
-                if isinstance(um, dict) and um.get("role") in ("user", "assistant"):
-                    msgs.append({"role": um["role"], "content": str(um.get("content") or "")})
-        ar = rec.get("assistant_reply")
-        if ar is not None:
-            msgs.append({"role": "assistant", "content": str(ar)})
-
-    return jsonify({"conversation_id": conversation_id, "messages": msgs, "records": records}), 200
+    obj = load_conversation_obj(conversation_id)
+    msgs: List[Dict[str, Any]] = obj.get("messages") or []
+    # Pour l'UI: fournir aussi une version "messages" simplifiée
+    simple = [{"role": m.get("role"), "content": m.get("content"), "ts": m.get("ts")} for m in msgs if isinstance(m, dict)]
+    return jsonify({"conversation_id": conversation_id, "messages": simple, "conversation": obj, "brand_final": obj.get("brand_last")}), 200
 
 
 @app.route("/admin/api/test", methods=["GET", "POST"])
