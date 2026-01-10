@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "brand": "common",
+  "generated_at": "2026-01-10T00:00:00Z",
+  "items": [
+    {
+      "id": "rw-001",
+      "brand": "retroworld",
+      "category": "Tarifs",
+      "q": "Quels sont vos tarifs ?",
+      "a": "Voici les tarifs chez Retroworld :\n- VR : 15 € par joueur (jusqu’à 5 joueurs).\n- Escape Game VR : 30 € par joueur.\n- Quiz interactifs : 8 € (30 min), 15 € (60 min), 20 € (90 min), jusqu’à 12 joueurs.\n- Salle enfant : 50 € / heure, puis 20 € / demi-heure supplémentaire.\n\nSi vous me dites l’activité et le nombre de participants, je vous calcule le total.",
+      "tags": ["tarifs", "prix", "coût", "vr", "escape", "quiz", "salle enfant"]
+    },
+    {
+      "id": "rw-002",
+      "brand": "retroworld",
+      "category": "VR",
+      "q": "Combien coûte une session de VR ?",
+      "a": "Une session VR est à 15 € par joueur, jusqu’à 5 joueurs en même temps.",
+      "tags": ["vr", "tarifs", "prix", "session"]
+    },
+    {
+      "id": "rw-003",
+      "brand": "retroworld",
+      "category": "Escape VR",
+      "q": "Combien coûte un escape game VR ?",
+      "a": "L’escape game VR est à 30 € par joueur.",
+      "tags": ["escape", "escape vr", "tarifs", "prix"]
+    },
+    {
+      "id": "rw-004",
+      "brand": "retroworld",
+      "category": "Quiz",
+      "q": "Quels sont les tarifs des quiz interactifs ?",
+      "a": "Quiz interactifs : 8 € (30 min), 15 € (60 min), 20 € (90 min), jusqu’à 12 joueurs.",
+      "tags": ["quiz", "tarifs", "prix", "durée", "12 joueurs"]
+    },
+    {
+      "id": "rw-005",
+      "brand": "retroworld",
+      "category": "Salle enfant",
+      "q": "Quel est le tarif de la salle enfant ?",
+      "a": "La salle enfant est à 50 € par heure, puis 20 € par demi-heure supplémentaire.\nElle comprend des jeux en bois, un mur interactif, une ballayeuse, et un espace de stockage pour le goûter.",
+      "tags": ["salle enfant", "tarifs", "prix", "gouter", "anniversaire"]
+    },
+    {
+      "id": "rw-006",
+      "brand": "retroworld",
+      "category": "Horaires",
+      "q": "Quels sont vos horaires d’ouverture ?",
+      "a": "Retroworld est ouvert du mardi au dimanche, de 11h à 22h.",
+      "tags": ["horaires", "ouverture", "fermeture"]
+    },
+    {
+      "id": "rw-007",
+      "brand": "retroworld",
+      "category": "Adresse",
+      "q": "Où êtes-vous situés ?",
+      "a": "Retroworld France : 815 avenue Pierre Brossolette, 83300 Draguignan.",
+      "tags": ["adresse", "localisation", "draguignan", "venir"]
+    },
+    {
+      "id": "rw-008",
+      "brand": "retroworld",
+      "category": "Contact",
+      "q": "Comment vous contacter ?",
+      "a": "Vous pouvez nous contacter :\n- Téléphone : 04 94 47 94 64\n- Email : contact@retroworldfrance.com\n- Site : https://www.retroworldfrance.com",
+      "tags": ["contact", "telephone", "email", "site"]
+    },
+    {
+      "id": "rw-009",
+      "brand": "retroworld",
+      "category": "Réservation",
+      "q": "Je veux réserver, comment on fait ?",
+      "a": "Disponible ✅\nDites-moi : la date, l’heure, le nombre de personnes, et l’activité (VR / Escape VR / Quiz / Salle enfant).",
+      "tags": ["réserver", "reservation", "disponible", "creneau"]
+    },
+    {
+      "id": "rw-010",
+      "brand": "retroworld",
+      "category": "Anniversaire",
+      "q": "Organisez-vous des goûters / anniversaires ?",
+      "a": "Oui. Nous proposons une salle enfant (50 € / heure, puis 20 € / demi-heure supplémentaire) avec possibilité de stockage du goûter selon la place.\nPour vous renseigner précisément : quelle date, combien d’enfants, et quelle activité souhaitez-vous (VR / Quiz / autre) ?",
+      "tags": ["anniversaire", "gouter", "enfants", "salle enfant"]
+    },
+    {
+      "id": "rw-011",
+      "brand": "retroworld",
+      "category": "Salle d’attente",
+      "q": "Y a-t-il une salle d’attente sur place ?",
+      "a": "Oui. Nous avons une salle d’attente avec canapés, boissons, snacks, baby-foot, air hockey, borne de basketball, écrans de diffusion, et climatisation.",
+      "tags": ["salle d'attente", "attente", "boisson", "snack", "babyfoot", "air hockey"]
+    },
+    {
+      "id": "rw-012",
+      "brand": "retroworld",
+      "category": "Matériel & hygiène",
+      "q": "Quel matériel VR utilisez-vous et comment assurez-vous l’hygiène ?",
+      "a": "Nous utilisons des casques VR professionnels (ex : Vive Pro 2, Meta Quest 3). Tous les équipements sont soigneusement nettoyés entre chaque session pour garantir une hygiène optimale.",
+      "tags": ["hygiène", "materiel", "casque", "vive pro 2", "meta quest 3"]
+    },
+    {
+      "id": "rw-013",
+      "brand": "retroworld",
+      "category": "Fidélité",
+      "q": "Comment fonctionne le programme de fidélité ?",
+      "a": "Le système fonctionne ainsi :\n- 1 partie de VR = 1 point\n- 1 escape game VR = 2 points\n- Les points ne sont pas attribués pour les formules anniversaire.\n\nRécompenses :\n- 10 points = 1 partie VR offerte\n- 20 points = 1 escape game VR offert\n\nPour cumuler vos points : présentez votre QR code (ou prévenez l’équipe) avant de jouer. Pour utiliser vos points : informez un agent ou un gamemaster lors de votre visite.",
+      "tags": ["fidélité", "points", "qr", "recompense", "10 points", "20 points"]
+    },
+    {
+      "id": "rw-014",
+      "brand": "retroworld",
+      "category": "Fidélité",
+      "q": "Comment consulter mes points de fidélité ?",
+      "a": "Les points peuvent être consultés via l’application Retroworld (Android) ou sur le site en vous connectant à votre compte.",
+      "tags": ["fidélité", "points", "application", "android", "compte"]
+    },
+    {
+      "id": "rm-001",
+      "brand": "runningman",
+      "category": "Partenariat",
+      "q": "Runningman Games, c’est quoi par rapport à Retroworld ?",
+      "a": "Runningman Games est un partenaire situé dans le même bâtiment. Si vous souhaitez faire leur action game, il faut les contacter directement.",
+      "tags": ["runningman", "partenaire", "action game", "même bâtiment"]
+    },
+    {
+      "id": "rm-002",
+      "brand": "runningman",
+      "category": "Contact Runningman",
+      "q": "Comment contacter Runningman Games ?",
+      "a": "Runningman Games :\n- Téléphone : 04 98 09 30 59\n- Site : http://www.runningmangames.fr\nLes réservations de l’action game se font directement auprès d’eux.",
+      "tags": ["runningman", "contact", "telephone", "site", "reservation"]
+    },
+    {
+      "id": "co-001",
+      "brand": "common",
+      "category": "Général",
+      "q": "Je ne sais pas quoi choisir entre VR, Escape VR et quiz, vous conseillez quoi ?",
+      "a": "Dites-moi : l’âge moyen, le nombre de joueurs, et si vous préférez action/aventure/horreur/coopération. Je vous conseille l’activité la plus adaptée.",
+      "tags": ["conseil", "choisir", "vr", "escape", "quiz"]
+    },
+    {
+      "id": "co-002",
+      "brand": "common",
+      "category": "Réservation",
+      "q": "Quelles informations faut-il pour réserver ?",
+      "a": "Pour réserver rapidement : date, heure, nombre de personnes, et activité (VR / Escape VR / Quiz / Salle enfant).",
+      "tags": ["réserver", "infos", "date", "heure", "participants"]
+    }
+  ]
+}
