@@ -229,13 +229,18 @@ def _is_fidelity_intent(text: str) -> bool:
     return any(k in t for k in ["fidélité", "fidelite", "points", "qr", "qr code", "récompense", "recompense"])
 
 
+def _is_age_intent(text: str) -> bool:
+    t = _norm(text)
+    return any(k in t for k in ["âge", "age", "ans", "enfant", "enfants", "-12", "moins de 12", "12 ans", "7 ans"])
+
+
 def _is_just_question_mark(text: str) -> bool:
     t = (text or "").strip()
     return t in ["?", "??", "???"]
 
 
 # =========================================================
-# Retroworld facts (source fiable) + prompt "analyse"
+# Retroworld facts (source fiable) + Runningman facts
 # =========================================================
 
 def retroworld_facts_block() -> str:
@@ -253,6 +258,55 @@ def retroworld_facts_block() -> str:
         "- Goûter/anniversaire : salle enfant possible, stockage goûter possible (selon place), demander date + nb enfants + activité.\n"
         "IMPORTANT : ne jamais dire 'allez voir sur le site' sauf si l'utilisateur demande explicitement un lien.\n"
     )
+
+
+def runningman_facts_block(kb: Dict[str, Any]) -> str:
+    ident = kb.get("identite", {}) or {}
+    loc = (ident.get("localisation", {}) or {})
+    contact = (ident.get("contact", {}) or {})
+
+    age = kb.get("age_et_accompagnement", {}) or {}
+    acc = (age.get("accompagnement", {}) or {})
+    age_min = age.get("age_minimum", 7)
+
+    tarif = ((kb.get("tarification", {}) or {}).get("action_game", {}) or {})
+    enfant = (tarif.get("enfant", {}) or {})
+    adulte = (tarif.get("adulte_accompagnateur", {}) or {})
+
+    cap = ((kb.get("horaires_et_creneaux", {}) or {}).get("capacite", {}) or {})
+    cap_msg = cap.get("message") or ""
+
+    return (
+        "VÉRITÉS OFFICIELLES RUNNINGMAN (à respecter strictement) :\n"
+        f"- Âge minimum : {age_min} ans.\n"
+        f"- Moins de 12 ans : {acc.get('moins_de_12_ans', 'Un adulte accompagnateur est requis.')}\n"
+        f"- À partir de 12 ans : {acc.get('a_partir_de_12_ans', 'Il n’est plus nécessaire d’avoir un adulte accompagnateur.')}\n"
+        f"- Tarifs action game (session 60 min, confirmés) :\n"
+        f"  - Enfant (-12 ans) : {enfant.get('prix', '?')} {enfant.get('unite', '')}\n"
+        f"  - Adulte accompagnateur : {adulte.get('prix', '?')} {adulte.get('unite', '')}\n"
+        + (f"- Capacité : {cap_msg}\n" if cap_msg else "")
+        + f"- Adresse : {loc.get('adresse_complete', '815 avenue Pierre Brossolette, 83300 Draguignan, France')}\n"
+        + f"- Contact : {contact.get('telephone', '04 98 09 30 59')} / {contact.get('site_web', 'https://runningmangames.fr')}\n"
+        "IMPORTANT : ne jamais confondre “à partir de 12 ans (sans adulte)” avec “âge minimum”.\n"
+    )
+
+
+def kb_to_items(brand: str, kb: Dict[str, Any]) -> List[Any]:
+    """Normalise différentes structures KB vers une liste exploitable dans le prompt."""
+    brand = (brand or "").lower().strip()
+    items = kb.get("items")
+    if isinstance(items, list) and items:
+        return items
+
+    if brand == "runningman":
+        out: List[Any] = []
+        for k in ["instructions_generales", "anti_erreurs"]:
+            arr = kb.get(k)
+            if isinstance(arr, list):
+                out.extend([str(x) for x in arr if str(x).strip()])
+        return out
+
+    return []
 
 
 def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any]]:
@@ -469,9 +523,19 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
         brand_effective = "runningman" if brand_entry == "runningman" else "retroworld"
 
     kb = load_kb(brand_effective)
-    kb_items = kb.get("items") or []
-    if not isinstance(kb_items, list):
-        kb_items = []
+    kb_items = kb_to_items(brand_effective, kb)
+
+    # Pare-chocs anti-hallucination Runningman (âge)
+    if brand_effective == "runningman" and _is_age_intent(user_text):
+        ident = kb.get("identite", {}) or {}
+        contact = (ident.get("contact", {}) or {})
+        reply = (
+            "Runningman est accessible dès 7 ans.\n"
+            "Pour les moins de 12 ans, un adulte accompagnateur est requis.\n"
+            "À partir de 12 ans, l’adulte n’est plus obligatoire.\n"
+            f"Pour réserver : {contact.get('site_web','https://runningmangames.fr')} (ou {contact.get('telephone','04 98 09 30 59')})."
+        )
+        return reply, {"mode": "rule_based_age"}, brand_effective
 
     if brand_effective == "retroworld":
         system = (
@@ -488,10 +552,16 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
         )
     else:
         system = (
-            "Vous êtes l’assistant côté Runningman Games (action game).\n"
-            "Analysez la demande complète avant de répondre.\n"
-            "Si l'utilisateur veut réserver Runningman: indiquer qu'ils doivent contacter Runningman directement.\n"
-            "Répondez clairement, sans inventer.\n"
+            "Vous êtes l’assistant officiel de Runningman Game Zone (action game) à Draguignan.\\n"
+            "Objectif: répondre immédiatement et de façon fiable, sans inventer.\\n"
+            "Règles:\\n"
+            "1) Vous lisez et analysez la demande complète avant de répondre.\\n"
+            "2) Interdiction totale d’inventer un chiffre, une règle, une promotion ou une disponibilité.\\n"
+            "3) Si la demande concerne une réservation/disponibilité: vous orientez vers le site officiel et le téléphone (vous ne confirmez jamais un créneau).\\n"
+            "4) Si la demande concerne l’âge: ne jamais confondre 'à partir de 12 ans (sans adulte)' avec l’âge minimum.\\n"
+            "5) Si la demande concerne VR/quiz Retroworld: rediriger vers Retroworld.\\n\\n"
+            + runningman_facts_block(kb) +
+            "\\nStyle: professionnel, vouvoiement, clair, réponses courtes.\\n"
         )
 
     if kb_items:
@@ -533,6 +603,11 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
             hints.append("Fidélité: VR=1 point, Escape VR=2 points, pas de points sur formules anniversaire. 10 points=VR offerte, 20=Escape VR offert. Présenter QR code ou prévenir l'équipe avant de jouer.")
         if _is_reservation_intent(t):
             hints.append("Réservation: commencez par 'disponible' puis demandez date+heure+nombre de personnes+activité.")
+    if brand_effective == "runningman":
+        if _is_age_intent(t):
+            hints.append("Âge Runningman: dès 7 ans. Moins de 12 ans: adulte accompagnateur requis. Dès 12 ans: adulte non obligatoire (ceci n'est pas l'âge minimum).")
+        if _is_reservation_intent(t):
+            hints.append("Runningman: ne jamais confirmer un créneau. Donnez le site officiel https://runningmangames.fr et le téléphone 04 98 09 30 59.")
     if hints:
         messages.append({"role": "system", "content": "GUIDE DE RÉPONSE:\n- " + "\n- ".join(hints)})
 
