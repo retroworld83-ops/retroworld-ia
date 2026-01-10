@@ -1,4 +1,4 @@
-# Retroworld IA — Voix + Chat
+# Retroworld/Runningman IA — Voix + Chat
 
 ## 1) Créer le repo
 Créez un nouveau dépôt GitHub public, copiez les fichiers:
