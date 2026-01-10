@@ -1,0 +1,104 @@
+{
+  "items": [
+    {
+      "question": "Quels sont vos horaires d’ouverture ?",
+      "answer": "Retroworld est ouvert du mardi au dimanche, de 11h à 22h.",
+      "tags": ["horaires", "ouverture", "infos"]
+    },
+    {
+      "question": "Où se situe Retroworld ?",
+      "answer": "Nous sommes au 815 avenue Pierre Brossolette, 83300 Draguignan, France.",
+      "tags": ["adresse", "localisation", "accès"]
+    },
+    {
+      "question": "Quel est le tarif pour les jeux VR ?",
+      "answer": "Les jeux VR sont à 15 € par joueur (jusqu’à 5 joueurs).",
+      "tags": ["tarifs", "vr", "prix"]
+    },
+    {
+      "question": "Quel est le tarif pour l’escape game VR ?",
+      "answer": "L’escape game VR est à 30 € par joueur.",
+      "tags": ["tarifs", "escape", "vr"]
+    },
+    {
+      "question": "Combien de joueurs peuvent jouer en VR en même temps ?",
+      "answer": "Jusqu’à 5 joueurs peuvent jouer en même temps sur les jeux VR (hors escape game VR).",
+      "tags": ["vr", "joueurs", "capacité"]
+    },
+    {
+      "question": "Proposez-vous des quiz interactifs ?",
+      "answer": "Oui. Quiz interactifs : 8 € (30 min), 15 € (60 min), 20 € (90 min). Jusqu’à 12 joueurs. Dès 10 ans avec accompagnant.",
+      "tags": ["quiz", "tarifs", "groupes"]
+    },
+    {
+      "question": "À partir de quel âge peut-on faire le quiz ?",
+      "answer": "Le quiz interactif est conseillé dès 10 ans, avec accompagnant si nécessaire.",
+      "tags": ["quiz", "âge", "enfants"]
+    },
+    {
+      "question": "Avez-vous une salle pour les enfants / anniversaires ?",
+      "answer": "Oui. Salle enfant : 50 € par heure, puis 20 € par demi-heure supplémentaire. Elle comprend jeux en bois, mur interactif, ballayeuse, et un espace pour stocker le goûter.",
+      "tags": ["anniversaire", "enfants", "salle"]
+    },
+    {
+      "question": "Peut-on apporter un gâteau ou un goûter ?",
+      "answer": "Oui, vous pouvez apporter un goûter. Nous pouvons le stocker sur place et vous installer dans la salle enfant (selon disponibilité).",
+      "tags": ["anniversaire", "gâteau", "goûter"]
+    },
+    {
+      "question": "Est-ce que 15 personnes peuvent jouer en même temps ?",
+      "answer": "Non. Les sessions se font par activité. La VR est jusqu’à 5 joueurs, le quiz jusqu’à 12 joueurs, et l’escape VR dépend du scénario. Pour un grand groupe, on organise des rotations.",
+      "tags": ["groupes", "capacité", "organisation"]
+    },
+    {
+      "question": "Comment réserver ?",
+      "answer": "Indiquez-nous la date, l’heure, le nombre de personnes et l’activité (VR, escape VR, quiz). Nous vous confirmons ensuite l’organisation.",
+      "tags": ["réservation", "disponibilités", "infos"]
+    },
+    {
+      "question": "Êtes-vous disponibles ?",
+      "answer": "Disponible. Pouvez-vous me préciser la date, l’heure, le nombre de personnes et l’activité souhaitée (VR, escape VR, quiz) ?",
+      "tags": ["réservation", "disponible", "créneau"]
+    },
+    {
+      "question": "Proposez-vous une salle d’attente ?",
+      "answer": "Oui. Salle d’attente avec canapés, boissons/snacks, baby-foot, air hockey, borne de basketball et écrans de diffusion pour suivre discrètement les sessions.",
+      "tags": ["accueil", "attente", "confort"]
+    },
+    {
+      "question": "Vendez-vous des boissons et snacks ?",
+      "answer": "Oui, vous trouverez une machine à café (café/thé/chocolat chaud) et un distributeur de snacks et boissons fraîches.",
+      "tags": ["snacks", "boissons", "accueil"]
+    },
+    {
+      "question": "Les casques VR sont-ils nettoyés ?",
+      "answer": "Oui. Tout le matériel est soigneusement nettoyé entre chaque session pour garantir une hygiène optimale.",
+      "tags": ["hygiène", "vr", "sécurité"]
+    },
+    {
+      "question": "Quel matériel VR utilisez-vous ?",
+      "answer": "Nous utilisons des casques VR professionnels haut de gamme, notamment Vive Pro 2 et Meta Quest 3.",
+      "tags": ["vr", "matériel", "casques"]
+    },
+    {
+      "question": "Comment vous contacter ?",
+      "answer": "Téléphone : 04 94 47 94 64. Email : contact@retroworldfrance.com. Site : https://www.retroworldfrance.com",
+      "tags": ["contact", "infos", "téléphone"]
+    },
+    {
+      "question": "Où voir vos actualités ?",
+      "answer": "Vous pouvez nous suivre sur Facebook : https://www.facebook.com/retroworldfr/",
+      "tags": ["réseaux", "facebook", "actus"]
+    },
+    {
+      "question": "Avez-vous un système de fidélité ?",
+      "answer": "Oui. 1 partie VR = 1 point, 1 escape game VR = 2 points. Les formules anniversaire ne donnent pas de points. 10 points = 1 VR offerte, 20 points = 1 escape VR offert.",
+      "tags": ["fidélité", "points", "récompenses"]
+    },
+    {
+      "question": "Comment cumuler et utiliser mes points fidélité ?",
+      "answer": "Pour cumuler vos points, présentez votre QR code ou prévenez l’équipe avant de jouer. Pour utiliser vos points, il suffit d’en informer un agent ou gamemaster lors de votre visite.",
+      "tags": ["fidélité", "qr", "utilisation"]
+    }
+  ]
+}
