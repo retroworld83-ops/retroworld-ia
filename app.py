@@ -27,15 +27,9 @@ KB_DIR = os.getenv("KB_DIR", BASE_DIR)
 PORT = int(os.getenv("PORT", "10000"))
 
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-4.1-mini").strip()
+OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip()
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.4"))
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "900"))
-
-# Historique: on envoie la conversation entière autant que possible (pour cohérence).
-# Si ça devient trop long, on compresse automatiquement la partie la plus ancienne.
-OPENAI_MAX_HISTORY_PAIRS = int(os.getenv("OPENAI_MAX_HISTORY_PAIRS", "120"))
-OPENAI_PROMPT_CHAR_BUDGET = int(os.getenv("OPENAI_PROMPT_CHAR_BUDGET", "32000"))
-OPENAI_HISTORY_MODE = (os.getenv("OPENAI_HISTORY_MODE") or "full").strip().lower()
 
 ADMIN_DASHBOARD_TOKEN = (os.getenv("ADMIN_DASHBOARD_TOKEN") or "").strip()
 USER_HISTORY_TOKEN = (os.getenv("USER_HISTORY_TOKEN") or "").strip()
@@ -43,18 +37,6 @@ USER_HISTORY_TOKEN = (os.getenv("USER_HISTORY_TOKEN") or "").strip()
 LOG_LEVEL = (os.getenv("LOG_LEVEL") or "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger(SERVICE_NAME)
-
-
-
-def _normalize_openai_model(model_name: str) -> str:
-    """Normalise le modèle. Aucun forçage: on respecte OPENAI_MODEL si fourni.
-    En cas de modèle vide/invalide, on retombe sur un modèle récent et stable.
-    """
-    m = (model_name or "").strip()
-    return m or "gpt-4.1-mini"
-
-
-OPENAI_MODEL = _normalize_openai_model(OPENAI_MODEL)
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
@@ -327,7 +309,6 @@ def kb_to_items(brand: str, kb: Dict[str, Any]) -> List[Any]:
     return []
 
 
-
 def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any]]:
     if not _openai_client:
         return (
@@ -335,73 +316,28 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
             {"error": "openai_not_ready"},
         )
 
-    # On tente d'abord le modèle demandé, puis des modèles de secours récents.
-    models_to_try: List[str] = []
-    for m in [OPENAI_MODEL, *OPENAI_FALLBACK_MODELS]:
-        m = (m or "").strip()
-        if m and m not in models_to_try:
-            models_to_try.append(m)
-
-    last_err: Optional[Exception] = None
-
-    for model_name in models_to_try:
-        try:
-            resp = _openai_client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                temperature=OPENAI_TEMPERATURE,
-                max_tokens=OPENAI_MAX_TOKENS,
-            )
-            text = (resp.choices[0].message.content or "").strip()
-
-            usage: Dict[str, Any] = {"model": model_name}
-            try:
-                usage.update(resp.usage.model_dump())  # type: ignore
-            except Exception:
-                try:
-                    usage.update(
-                        {
-                            "prompt_tokens": getattr(resp.usage, "prompt_tokens", None),
-                            "completion_tokens": getattr(resp.usage, "completion_tokens", None),
-                            "total_tokens": getattr(resp.usage, "total_tokens", None),
-                        }
-                    )
-                except Exception:
-                    pass
-
-            # Si on a dû utiliser un fallback, on le loggue (utile sur Render).
-            if model_name != OPENAI_MODEL:
-                logger.warning("OpenAI: modèle fallback utilisé (%s au lieu de %s).", model_name, OPENAI_MODEL)
-
-            return text, usage
-
-        except Exception as e:
-            last_err = e
-            msg = str(e)
-
-            # Erreurs typiques quand un modèle n'est pas accessible (org non vérifiée, modèle inconnu, etc.)
-            model_access_issue = (
-                "model_not_found" in msg
-                or "The model" in msg and "does not exist" in msg
-                or "must be verified" in msg
-                or "organisation doit être vérifiée" in msg.lower()
-                or "organization must be verified" in msg.lower()
-            )
-
-            # Si ce n'est pas un problème d'accès modèle, on n'insiste pas sur d'autres modèles.
-            if not model_access_issue:
-                break
-
-            logger.warning("OpenAI: échec avec le modèle %s (%s).", model_name, msg)
-
-    # Échec: on renvoie un message utilisateur propre + trace dans usage.
-    err_txt = str(last_err) if last_err else "unknown_error"
-    logger.error("OpenAI call failed: %s", err_txt)
-    return (
-        "Le service IA rencontre une difficulté technique pour le moment. "
-        "Vous pouvez nous appeler au 04 94 47 94 64 ou écrire à contact@retroworldfrance.com.",
-        {"error": "openai_call_failed", "detail": err_txt, "model": OPENAI_MODEL},
+    resp = _openai_client.chat.completions.create(
+        model=OPENAI_MODEL,
+        messages=messages,
+        temperature=OPENAI_TEMPERATURE,
+        max_tokens=OPENAI_MAX_TOKENS,
     )
+    text = (resp.choices[0].message.content or "").strip()
+
+    usage: Dict[str, Any] = {}
+    try:
+        usage = resp.usage.model_dump()  # type: ignore
+    except Exception:
+        try:
+            usage = {
+                "prompt_tokens": getattr(resp.usage, "prompt_tokens", None),
+                "completion_tokens": getattr(resp.usage, "completion_tokens", None),
+                "total_tokens": getattr(resp.usage, "total_tokens", None),
+            }
+        except Exception:
+            usage = {}
+
+    return text, usage
 
 
 # =========================================================
@@ -488,77 +424,18 @@ def list_conversations() -> List[str]:
         return []
 
 
-def _compact_text(s: str, limit: int = 220) -> str:
-    s = re.sub(r"\s+", " ", (s or "").strip())
-    if len(s) <= limit:
-        return s
-    return s[: max(0, limit - 1)] + "…"
-
-
-def build_history_for_prompt(
-    messages: List[Dict[str, Any]],
-    *,
-    mode: str = "full",
-    max_pairs: int = 120,
-    char_budget: int = 32000,
-) -> List[Dict[str, str]]:
-    """Construit l'historique à envoyer à OpenAI.
-
-    Objectif: envoyer la conversation entière autant que possible pour garantir la cohérence.
-    Sécurité: si l'historique dépasse un budget (caractères), on garde la partie récente
-    et on compresse la partie plus ancienne dans un seul bloc 'system'.
-    """
-
+def prune_messages_for_prompt(messages: List[Dict[str, Any]], max_pairs: int = 12) -> List[Dict[str, str]]:
     if not isinstance(messages, list):
         return []
-
-    cleaned: List[Dict[str, str]] = []
-    for m in messages:
-        if not isinstance(m, dict):
-            continue
-        role = str(m.get("role") or "")
-        if role not in ("user", "assistant"):
-            continue
-        content = m.get("content")
-        if content is None:
-            continue
-        cleaned.append({"role": role, "content": str(content)})
-
-    if not cleaned:
-        return []
-
-    # Mode 'recent': compat ...
-    if mode == "recent":
-        cleaned = cleaned[-(max_pairs * 2):]
-        return cleaned
-
-    # Mode 'full': on essaie ...
-    total_chars = sum(len(m["content"]) for m in cleaned)
-    if char_budget <= 0 or total_chars <= char_budget:
-        return cleaned
-
-    # Trop long: on garde un gros bloc récent + on compresse le début.
-    recent = cleaned[-(max_pairs * 2):] if max_pairs > 0 else cleaned[-200:]
-
-    # Les messages non inclus dans 'recent' deviennent un résumé.
-    older_count = max(0, len(cleaned) - len(recent))
-    older = cleaned[:older_count]
-
-    # Résumé heuristique ...
-    lines: List[str] = []
-    for i, m in enumerate(older):
-        role = "U" if m["role"] == "user" else "A"
-        lines.append(f"{role}{i+1}: {_compact_text(m['content'], 200)}")
-        if len(lines) >= 50:  # cap ...
-            break
-
-    summary_block = (
-        "RÉSUMÉ DES ÉCHANGES PRÉCÉDENTS (compression automatique pour rester cohérent):\n"
-        + "\n".join(lines)
-        + ("\n…" if older_count > len(lines) else "")
-    )
-
-    return [{"role": "system", "content": summary_block}] + recent
+    clipped = [
+        m for m in messages
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content") is not None
+    ]
+    clipped = clipped[-(max_pairs * 2):]
+    out: List[Dict[str, str]] = []
+    for m in clipped:
+        out.append({"role": str(m.get("role")), "content": str(m.get("content") or "")})
+    return out
 
 
 # =========================================================
@@ -703,14 +580,7 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
     # server-side memory
     if conversation_id:
         hist = load_conversation_messages(conversation_id)
-        messages.extend(
-            build_history_for_prompt(
-                hist,
-                mode=OPENAI_HISTORY_MODE,
-                max_pairs=OPENAI_MAX_HISTORY_PAIRS,
-                char_budget=OPENAI_PROMPT_CHAR_BUDGET,
-            )
-        )
+        messages.extend(prune_messages_for_prompt(hist, max_pairs=12))
 
     # user message
     messages.append({"role": "user", "content": user_text})
