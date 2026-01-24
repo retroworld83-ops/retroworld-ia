@@ -27,7 +27,7 @@ KB_DIR = os.getenv("KB_DIR", BASE_DIR)
 PORT = int(os.getenv("PORT", "10000"))
 
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-5").strip()
+OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-4.1-mini").strip()
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.4"))
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "900"))
 
@@ -45,19 +45,16 @@ logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger(SERVICE_NAME)
 
 
-def _enforce_min_openai_model(model_name: str) -> str:
-    """Force un modèle minimum GPT-5 (demande utilisateur), sans fallback silencieux vers un modèle plus faible."""
+
+def _normalize_openai_model(model_name: str) -> str:
+    """Normalise le modèle. Aucun forçage: on respecte OPENAI_MODEL si fourni.
+    En cas de modèle vide/invalide, on retombe sur un modèle récent et stable.
+    """
     m = (model_name or "").strip()
-    if not m:
-        return "gpt-5"
-    # On accepte gpt-5, gpt-5.1, gpt-5-mini, etc. tant que ça commence par "gpt-5".
-    if not re.match(r"^gpt-5(\b|[\.\-])", m):
-        logger.warning("OPENAI_MODEL=%s rejeté (minimum requis: gpt-5). Passage forcé à gpt-5.", m)
-        return "gpt-5"
-    return m
+    return m or "gpt-4.1-mini"
 
 
-OPENAI_MODEL = _enforce_min_openai_model(OPENAI_MODEL)
+OPENAI_MODEL = _normalize_openai_model(OPENAI_MODEL)
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
@@ -330,6 +327,7 @@ def kb_to_items(brand: str, kb: Dict[str, Any]) -> List[Any]:
     return []
 
 
+
 def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any]]:
     if not _openai_client:
         return (
@@ -337,28 +335,73 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
             {"error": "openai_not_ready"},
         )
 
-    resp = _openai_client.chat.completions.create(
-        model=OPENAI_MODEL,
-        messages=messages,
-        temperature=OPENAI_TEMPERATURE,
-        max_tokens=OPENAI_MAX_TOKENS,
-    )
-    text = (resp.choices[0].message.content or "").strip()
+    # On tente d'abord le modèle demandé, puis des modèles de secours récents.
+    models_to_try: List[str] = []
+    for m in [OPENAI_MODEL, *OPENAI_FALLBACK_MODELS]:
+        m = (m or "").strip()
+        if m and m not in models_to_try:
+            models_to_try.append(m)
 
-    usage: Dict[str, Any] = {}
-    try:
-        usage = resp.usage.model_dump()  # type: ignore
-    except Exception:
+    last_err: Optional[Exception] = None
+
+    for model_name in models_to_try:
         try:
-            usage = {
-                "prompt_tokens": getattr(resp.usage, "prompt_tokens", None),
-                "completion_tokens": getattr(resp.usage, "completion_tokens", None),
-                "total_tokens": getattr(resp.usage, "total_tokens", None),
-            }
-        except Exception:
-            usage = {}
+            resp = _openai_client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                temperature=OPENAI_TEMPERATURE,
+                max_tokens=OPENAI_MAX_TOKENS,
+            )
+            text = (resp.choices[0].message.content or "").strip()
 
-    return text, usage
+            usage: Dict[str, Any] = {"model": model_name}
+            try:
+                usage.update(resp.usage.model_dump())  # type: ignore
+            except Exception:
+                try:
+                    usage.update(
+                        {
+                            "prompt_tokens": getattr(resp.usage, "prompt_tokens", None),
+                            "completion_tokens": getattr(resp.usage, "completion_tokens", None),
+                            "total_tokens": getattr(resp.usage, "total_tokens", None),
+                        }
+                    )
+                except Exception:
+                    pass
+
+            # Si on a dû utiliser un fallback, on le loggue (utile sur Render).
+            if model_name != OPENAI_MODEL:
+                logger.warning("OpenAI: modèle fallback utilisé (%s au lieu de %s).", model_name, OPENAI_MODEL)
+
+            return text, usage
+
+        except Exception as e:
+            last_err = e
+            msg = str(e)
+
+            # Erreurs typiques quand un modèle n'est pas accessible (org non vérifiée, modèle inconnu, etc.)
+            model_access_issue = (
+                "model_not_found" in msg
+                or "The model" in msg and "does not exist" in msg
+                or "must be verified" in msg
+                or "organisation doit être vérifiée" in msg.lower()
+                or "organization must be verified" in msg.lower()
+            )
+
+            # Si ce n'est pas un problème d'accès modèle, on n'insiste pas sur d'autres modèles.
+            if not model_access_issue:
+                break
+
+            logger.warning("OpenAI: échec avec le modèle %s (%s).", model_name, msg)
+
+    # Échec: on renvoie un message utilisateur propre + trace dans usage.
+    err_txt = str(last_err) if last_err else "unknown_error"
+    logger.error("OpenAI call failed: %s", err_txt)
+    return (
+        "Le service IA rencontre une difficulté technique pour le moment. "
+        "Vous pouvez nous appeler au 04 94 47 94 64 ou écrire à contact@retroworldfrance.com.",
+        {"error": "openai_call_failed", "detail": err_txt, "model": OPENAI_MODEL},
+    )
 
 
 # =========================================================
