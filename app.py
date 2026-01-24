@@ -27,9 +27,15 @@ KB_DIR = os.getenv("KB_DIR", BASE_DIR)
 PORT = int(os.getenv("PORT", "10000"))
 
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip()
+OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-5").strip()
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.4"))
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "900"))
+
+# Historique: on envoie la conversation entière autant que possible (pour cohérence).
+# Si ça devient trop long, on compresse automatiquement la partie la plus ancienne.
+OPENAI_MAX_HISTORY_PAIRS = int(os.getenv("OPENAI_MAX_HISTORY_PAIRS", "120"))
+OPENAI_PROMPT_CHAR_BUDGET = int(os.getenv("OPENAI_PROMPT_CHAR_BUDGET", "32000"))
+OPENAI_HISTORY_MODE = (os.getenv("OPENAI_HISTORY_MODE") or "full").strip().lower()
 
 ADMIN_DASHBOARD_TOKEN = (os.getenv("ADMIN_DASHBOARD_TOKEN") or "").strip()
 USER_HISTORY_TOKEN = (os.getenv("USER_HISTORY_TOKEN") or "").strip()
@@ -37,6 +43,21 @@ USER_HISTORY_TOKEN = (os.getenv("USER_HISTORY_TOKEN") or "").strip()
 LOG_LEVEL = (os.getenv("LOG_LEVEL") or "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger(SERVICE_NAME)
+
+
+def _enforce_min_openai_model(model_name: str) -> str:
+    """Force un modèle minimum GPT-5 (demande utilisateur), sans fallback silencieux vers un modèle plus faible."""
+    m = (model_name or "").strip()
+    if not m:
+        return "gpt-5"
+    # On accepte gpt-5, gpt-5.1, gpt-5-mini, etc. tant que ça commence par "gpt-5".
+    if not re.match(r"^gpt-5(\b|[\.\-])", m):
+        logger.warning("OPENAI_MODEL=%s rejeté (minimum requis: gpt-5). Passage forcé à gpt-5.", m)
+        return "gpt-5"
+    return m
+
+
+OPENAI_MODEL = _enforce_min_openai_model(OPENAI_MODEL)
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
@@ -424,18 +445,77 @@ def list_conversations() -> List[str]:
         return []
 
 
-def prune_messages_for_prompt(messages: List[Dict[str, Any]], max_pairs: int = 12) -> List[Dict[str, str]]:
+def _compact_text(s: str, limit: int = 220) -> str:
+    s = re.sub(r"\s+", " ", (s or "").strip())
+    if len(s) <= limit:
+        return s
+    return s[: max(0, limit - 1)] + "…"
+
+
+def build_history_for_prompt(
+    messages: List[Dict[str, Any]],
+    *,
+    mode: str = "full",
+    max_pairs: int = 120,
+    char_budget: int = 32000,
+) -> List[Dict[str, str]]:
+    """Construit l'historique à envoyer à OpenAI.
+
+    Objectif: envoyer la conversation entière autant que possible pour garantir la cohérence.
+    Sécurité: si l'historique dépasse un budget (caractères), on garde la partie récente
+    et on compresse la partie plus ancienne dans un seul bloc 'system'.
+    """
+
     if not isinstance(messages, list):
         return []
-    clipped = [
-        m for m in messages
-        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content") is not None
-    ]
-    clipped = clipped[-(max_pairs * 2):]
-    out: List[Dict[str, str]] = []
-    for m in clipped:
-        out.append({"role": str(m.get("role")), "content": str(m.get("content") or "")})
-    return out
+
+    cleaned: List[Dict[str, str]] = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        role = str(m.get("role") or "")
+        if role not in ("user", "assistant"):
+            continue
+        content = m.get("content")
+        if content is None:
+            continue
+        cleaned.append({"role": role, "content": str(content)})
+
+    if not cleaned:
+        return []
+
+    # Mode 'recent': compat ...
+    if mode == "recent":
+        cleaned = cleaned[-(max_pairs * 2):]
+        return cleaned
+
+    # Mode 'full': on essaie ...
+    total_chars = sum(len(m["content"]) for m in cleaned)
+    if char_budget <= 0 or total_chars <= char_budget:
+        return cleaned
+
+    # Trop long: on garde un gros bloc récent + on compresse le début.
+    recent = cleaned[-(max_pairs * 2):] if max_pairs > 0 else cleaned[-200:]
+
+    # Les messages non inclus dans 'recent' deviennent un résumé.
+    older_count = max(0, len(cleaned) - len(recent))
+    older = cleaned[:older_count]
+
+    # Résumé heuristique ...
+    lines: List[str] = []
+    for i, m in enumerate(older):
+        role = "U" if m["role"] == "user" else "A"
+        lines.append(f"{role}{i+1}: {_compact_text(m['content'], 200)}")
+        if len(lines) >= 50:  # cap ...
+            break
+
+    summary_block = (
+        "RÉSUMÉ DES ÉCHANGES PRÉCÉDENTS (compression automatique pour rester cohérent):\n"
+        + "\n".join(lines)
+        + ("\n…" if older_count > len(lines) else "")
+    )
+
+    return [{"role": "system", "content": summary_block}] + recent
 
 
 # =========================================================
@@ -580,7 +660,14 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
     # server-side memory
     if conversation_id:
         hist = load_conversation_messages(conversation_id)
-        messages.extend(prune_messages_for_prompt(hist, max_pairs=12))
+        messages.extend(
+            build_history_for_prompt(
+                hist,
+                mode=OPENAI_HISTORY_MODE,
+                max_pairs=OPENAI_MAX_HISTORY_PAIRS,
+                char_budget=OPENAI_PROMPT_CHAR_BUDGET,
+            )
+        )
 
     # user message
     messages.append({"role": "user", "content": user_text})
