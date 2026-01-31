@@ -29,12 +29,14 @@
         <input id="input" type="text" placeholder="Posez votre question (Game Zone, VR, Escape VR, quiz, anniversaire…)">
         <button id="send">Envoyer</button>
       </div>
-      <div class="hint">Ex: “Je veux organiser un anniversaire samedi pour 10 enfants. Quelles options ?”</div>
+      <div class="hint">Ex : “Je veux organiser un anniversaire pour 10 enfants, quelles options ?”</div>
     </div>
   </div>
 
   <script>
-    const API_BASE = location.origin; // si widget servi par le même serveur que l'API
+    const API_BASE = location.origin; // si servi depuis le même serveur que l'API
+    const START_SIGNAL = "__start__";
+
     const $messages = document.getElementById('messages');
     const $input = document.getElementById('input');
     const $send = document.getElementById('send');
@@ -52,11 +54,8 @@
     }
 
     function getParam(name){
-      try {
-        return new URL(location.href).searchParams.get(name) || "";
-      } catch(e){
-        return "";
-      }
+      try { return new URL(location.href).searchParams.get(name) || ""; }
+      catch(e){ return ""; }
     }
 
     function setParam(name, value){
@@ -64,31 +63,23 @@
         const url = new URL(location.href);
         if(value) url.searchParams.set(name, value);
         else url.searchParams.delete(name);
-        history.replaceState({}, "", url.toString()); // ✅ persiste même si storage KO
+        history.replaceState({}, "", url.toString());
       }catch(e){}
     }
 
-    // -------------------------------
-    // BETON IDs (URL -> RAM -> storage)
-    // -------------------------------
     let MEM_UID = "";
     let MEM_CID = "";
 
     function getOrCreateUserId(){
-      // 1) URL
       const fromUrl = getParam("rw_uid");
       if(fromUrl){ MEM_UID = fromUrl; return fromUrl; }
-
-      // 2) RAM
       if(MEM_UID) return MEM_UID;
 
-      // 3) localStorage
       try {
         const v = localStorage.getItem("rw_user_id") || "";
         if(v){ MEM_UID = v; return v; }
       } catch(e){}
 
-      // 4) create
       const v = genId("u");
       MEM_UID = v;
       setParam("rw_uid", v);
@@ -97,14 +88,10 @@
     }
 
     function getConvId(){
-      // 1) URL
       const fromUrl = getParam("rw_cid");
       if(fromUrl){ MEM_CID = fromUrl; return fromUrl; }
-
-      // 2) RAM
       if(MEM_CID) return MEM_CID;
 
-      // 3) localStorage
       try {
         const v = localStorage.getItem("rw_conversation_id") || "";
         if(v){ MEM_CID = v; return v; }
@@ -116,11 +103,44 @@
     function setConvId(v){
       if(!v) return;
       MEM_CID = v;
-      setParam("rw_cid", v); // ✅ clé béton
+      setParam("rw_cid", v);
       try { localStorage.setItem("rw_conversation_id", v); } catch(e){}
     }
 
     const USER_ID = getOrCreateUserId();
+
+    function meta(){
+      return {
+        source: "retroworld_widget",
+        page_url: (document.referrer || location.href)
+      };
+    }
+
+    async function callChat(message){
+      const res = await fetch(API_BASE + '/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          user_id: USER_ID,
+          conversation_id: getConvId(),
+          metadata: meta()
+        })
+      });
+
+      const data = await res.json();
+      if (data && data.conversation_id) setConvId(data.conversation_id);
+      return data;
+    }
+
+    async function init(){
+      try{
+        const data = await callChat(START_SIGNAL);
+        addBubble(data.answer || data.reply || "Bienvenue chez Runningman et Retroworld, comment puis-je vous aider ?", 'bot');
+      }catch(e){
+        addBubble("Bienvenue chez Runningman et Retroworld, comment puis-je vous aider ?", 'bot');
+      }
+    }
 
     async function sendMessage() {
       const msg = $input.value.trim();
@@ -132,22 +152,8 @@
       $send.disabled = true;
 
       try {
-        const res = await fetch(API_BASE + '/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: msg,
-            user_id: USER_ID,
-            conversation_id: getConvId()
-          })
-        });
-
-        const data = await res.json();
-        if (data && data.conversation_id) setConvId(data.conversation_id);
-
-        const answer = data.answer || data.reply || "Désolé, je n'ai pas compris.";
-        addBubble(answer, 'bot');
-
+        const data = await callChat(msg);
+        addBubble(data.answer || data.reply || "Désolé, je n'ai pas compris.", 'bot');
       } catch (e) {
         addBubble("Erreur de connexion. Réessayez.", 'bot');
       } finally {
@@ -156,11 +162,9 @@
     }
 
     $send.addEventListener('click', sendMessage);
-    $input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') sendMessage();
-    });
+    $input.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
 
-    addBubble("Bienvenue chez Runningman et Retroworld 👋\n\nPour vous orienter :\n- Game Zone + salle VR : Runningman\n- Le reste (Escape Game VR, quiz, salle enfant, anniversaires, fidélité) : Retroworld\n\nComment puis-je vous aider ?");
+    init();
   </script>
 </body>
 </html>
