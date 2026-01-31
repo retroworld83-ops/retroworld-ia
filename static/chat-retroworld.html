@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <title>Chat IA Retroworld</title>
+  <title>Chat IA Runningman + Retroworld</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { background:#0b1020; color:#f5f5f5; font-family:system-ui, -apple-system, "Segoe UI", sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
@@ -26,19 +26,19 @@
 <body>
   <div class="chat-card">
     <div class="chat-header">
-      🤖 IA Retroworld
+      🤖 IA Runningman + Retroworld
       <span class="badge">Bêta</span>
     </div>
     <div id="messages" class="chat-messages"></div>
     <div id="typing" class="typing" style="display:none;">L'IA rédige une réponse…</div>
     <form id="chat-form" class="chat-input">
-      <textarea id="input" placeholder="Posez votre question (tarifs, goûter, VR, fidélité...)"></textarea>
+      <textarea id="input" placeholder="Posez votre question (Game Zone, VR, Escape VR, quiz, anniversaire...)"></textarea>
       <button type="submit" id="send-btn">Envoyer</button>
     </form>
   </div>
 
   <script>
-    const API_URL = "/chat/retroworld";
+    const API_URL = "/chat";
     const messagesEl = document.getElementById("messages");
     const typingEl = document.getElementById("typing");
     const inputEl = document.getElementById("input");
@@ -79,9 +79,11 @@
       const bubble = document.createElement("div");
       bubble.className = "bubble " + (from === "user" ? "bubble-user" : "bubble-bot");
       bubble.textContent = text;
+
       const meta = document.createElement("div");
       meta.className = "msg-meta";
-      meta.textContent = from === "user" ? "Vous" : "IA Retroworld";
+      meta.textContent = from === "user" ? "Vous" : "IA Runningman + Retroworld";
+
       wrap.appendChild(bubble);
       wrap.appendChild(meta);
       messagesEl.appendChild(wrap);
@@ -89,17 +91,13 @@
     }
 
     async function sendMessage(text) {
-      if (!text.trim()) return;
-
-      addMessage(text, "user");
-      inputEl.value = "";
       typingEl.style.display = "block";
       sendBtn.disabled = true;
 
       try {
         const res = await fetch(API_URL, {
           method: "POST",
-          headers: {"Content-Type": "application/json"},
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: text,
             user_id: USER_ID,
@@ -110,32 +108,25 @@
         const data = await res.json();
         if (data && data.conversation_id) setConvId(data.conversation_id);
 
-        const answer = data.answer || data.reply || "Désolé, je n'ai pas compris la réponse du serveur.";
-        addMessage(answer, "bot");
-
-      } catch (err) {
-        addMessage("Erreur de connexion au serveur IA.", "bot");
-        console.error(err);
+        addMessage(data.answer || data.reply || "Désolé, je n'ai pas compris.", "bot");
+      } catch (e) {
+        addMessage("Erreur de connexion. Réessayez.", "bot");
       } finally {
         typingEl.style.display = "none";
         sendBtn.disabled = false;
-        inputEl.focus();
       }
     }
 
     formEl.addEventListener("submit", (e) => {
       e.preventDefault();
-      sendMessage(inputEl.value);
+      const text = inputEl.value.trim();
+      if (!text) return;
+      inputEl.value = "";
+      addMessage(text, "user");
+      sendMessage(text);
     });
 
-    inputEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage(inputEl.value);
-      }
-    });
-
-    addMessage("Bonjour, je suis l’assistant Retroworld. Dites-moi ce que vous cherchez (tarifs, réservation, goûter/anniversaire, fidélité…) 😊");
+    addMessage("Bienvenue chez Runningman et Retroworld 👋\n\nPour vous orienter :\n- Game Zone + salle VR : Runningman\n- Le reste (Escape Game VR, quiz, salle enfant, anniversaires, fidélité) : Retroworld\n\nComment puis-je vous aider ?");
   </script>
 </body>
 </html>
