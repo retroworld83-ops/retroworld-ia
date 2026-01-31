@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Chat Retroworld</title>
+  <title>Chat Runningman + Retroworld</title>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0f14; color:#e9eef5; margin:0; }
     .app { max-width: 640px; margin: 0 auto; padding: 16px; }
@@ -23,13 +23,13 @@
 <body>
   <div class="app">
     <div class="card">
-      <div class="title">💬 Assistant Retroworld</div>
+      <div class="title">💬 Assistant Runningman & Retroworld</div>
       <div id="messages" class="messages"></div>
       <div class="row">
-        <input id="input" type="text" placeholder="Posez votre question (tarifs, goûter, réservation…)">
+        <input id="input" type="text" placeholder="Posez votre question (Game Zone, VR, Escape VR, quiz, anniversaire…)">
         <button id="send">Envoyer</button>
       </div>
-      <div class="hint">Ex: “Je veux organiser un goûter samedi, 10 enfants. Combien et comment ça se passe ?”</div>
+      <div class="hint">Ex: “Je veux organiser un anniversaire samedi pour 10 enfants. Quelles options ?”</div>
     </div>
   </div>
 
@@ -160,7 +160,7 @@
       if (e.key === 'Enter') sendMessage();
     });
 
-    addBubble("Bonjour 👋 Je suis l’assistant Retroworld. Dites-moi ce que vous souhaitez organiser (VR, Escape VR, quiz, goûter/anniversaire, fidélité…).");
+    addBubble("Bienvenue chez Runningman et Retroworld 👋\n\nPour vous orienter :\n- Game Zone + salle VR : Runningman\n- Le reste (Escape Game VR, quiz, salle enfant, anniversaires, fidélité) : Retroworld\n\nComment puis-je vous aider ?");
   </script>
 </body>
 </html>
