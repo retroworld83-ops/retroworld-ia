@@ -28,14 +28,14 @@ PORT = int(os.getenv("PORT", "10000"))
 
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
 
-# Default updated to a current flagship model (can be overridden by env)
-OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-5.2").strip()
+# Modèle par défaut : GPT-5.2 (override via Render: OPENAI_MODEL)
+OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-5.2").strip()  # :contentReference[oaicite:1]{index=1}
 
-# GPT-5 family: temperature only supported when reasoning effort is "none".
-OPENAI_REASONING_EFFORT = (os.getenv("OPENAI_REASONING_EFFORT") or "none").strip().lower()
+# GPT-5: temperature seulement si reasoning.effort = "none"
+OPENAI_REASONING_EFFORT = (os.getenv("OPENAI_REASONING_EFFORT") or "none").strip().lower()  # :contentReference[oaicite:2]{index=2}
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
 
-# Responses API uses max_output_tokens; keep backward compatibility with OPENAI_MAX_TOKENS.
+# Responses API uses max_output_tokens; compat avec OPENAI_MAX_TOKENS
 OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS") or os.getenv("OPENAI_MAX_TOKENS") or "900")
 
 # Admin token (legacy alias supported)
@@ -47,7 +47,19 @@ logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
 logger = logging.getLogger(SERVICE_NAME)
 
 app = Flask(__name__, static_folder="static")
-CORS(app)
+
+# -------------------------
+# CORS: utilise ALLOWED_ORIGINS (Render)
+# -------------------------
+allowed = (os.getenv("ALLOWED_ORIGINS") or "").strip()
+if not allowed:
+    CORS(app, supports_credentials=True)
+else:
+    origins = [o.strip() for o in allowed.split(",") if o.strip()]
+    if "*" in origins:
+        CORS(app, supports_credentials=True)
+    else:
+        CORS(app, resources={r"/*": {"origins": origins}}, supports_credentials=True)
 
 # Cookie fallback (peut être bloqué en iframe => on ne dépend PAS de ça)
 CONV_COOKIE_NAME = os.getenv("CONV_COOKIE_NAME", "rw_conv_id")
@@ -61,7 +73,6 @@ _openai_init_error: Optional[str] = None
 try:
     if OPENAI_API_KEY:
         from openai import OpenAI  # type: ignore
-
         _openai_client = OpenAI(api_key=OPENAI_API_KEY)
 except Exception as e:
     _openai_init_error = str(e)
@@ -188,18 +199,13 @@ def _norm(s: str) -> str:
 
 
 def detect_owner_from_text(text: str) -> str:
-    """Retourne 'runningman' ou 'retroworld' selon la demande.
-
-    Règle voulue par vous:
-    - Game Zone / action game / Runningman / salle VR => Runningman
+    """Règle voulue :
+    - Game Zone / Action Game / salle VR / VR classique => Runningman
     - Le reste => Retroworld
-
-    ⚠️ Cas particulier: "escape game VR" (même si VR) est traité comme Retroworld
-    car c'est une activité distincte (et évite les réponses contradictoires).
+    - Escape Game VR => Retroworld
     """
     t = _norm(text)
 
-    # Escape game VR => Retroworld
     if ("escape" in t and "vr" in t) or "escape game vr" in t or "escape vr" in t:
         return "retroworld"
 
@@ -239,7 +245,7 @@ def detect_owner_from_text(text: str) -> str:
     if any(k in t for k in retroworld_keys):
         return "retroworld"
 
-    return "retroworld"  # défaut
+    return "retroworld"
 
 
 def _is_reservation_intent(text: str) -> bool:
@@ -261,58 +267,13 @@ def _is_reservation_intent(text: str) -> bool:
         "mercredi",
         "jeudi",
         "vendredi",
-        "\b\d{1,2}h\b",
-        "\b\d{1,2}h\d{2}\b",
     ]
-    # note: include hour regex via search
-    if any(k in t for k in keys if "\\b" not in k):
+    if any(k in t for k in keys):
         return True
+    # heure type 17h / 17h30
     if re.search(r"\b\d{1,2}h(\d{2})?\b", t):
         return True
     return False
-
-
-def _is_price_intent(text: str) -> bool:
-    t = _norm(text)
-    return any(k in t for k in ["c'est combien", "cest combien", "tarif", "prix", "ça coute", "ca coute", "devis"])
-
-
-def _is_hours_intent(text: str) -> bool:
-    t = _norm(text)
-    return any(k in t for k in ["horaire", "horaires", "ouvert", "ouvre", "ferme", "fermé"])
-
-
-def _is_location_intent(text: str) -> bool:
-    """IMPORTANT:
-    - NE PAS tester "ou" (sans accent), sinon "gouter" contient "ou" => bug adresse.
-    - On accepte "où" uniquement en mot entier + clés explicites.
-    """
-    t = _norm(text)
-    if re.search(r"\boù\b", t):
-        return True
-    keys = [
-        "adresse",
-        "localisation",
-        "venir",
-        "comment venir",
-        "draguignan",
-        "parking",
-        "vous êtes où",
-        "vous etes où",
-        "c'est où",
-        "c est où",
-    ]
-    return any(k in t for k in keys)
-
-
-def _is_gouter_intent(text: str) -> bool:
-    t = _norm(text)
-    return any(k in t for k in ["goûter", "gouter", "anniversaire", "gateau", "gâteau", "formule gouter", "formule goûter"])
-
-
-def _is_fidelity_intent(text: str) -> bool:
-    t = _norm(text)
-    return any(k in t for k in ["fidélité", "fidelite", "points", "qr", "qr code", "récompense", "recompense"])
 
 
 def _is_age_intent(text: str) -> bool:
@@ -340,7 +301,6 @@ def common_orientation_block() -> str:
 
 
 def retroworld_facts_block() -> str:
-    # Version "safe": aucune promesse de créneau
     return (
         "VÉRITÉS OFFICIELLES RETROWORLD (à respecter strictement) :\n"
         "- Horaires (indicatifs) : mardi à dimanche, 11h à 22h\n"
@@ -425,16 +385,12 @@ def kb_snippets_retroworld(kb: Dict[str, Any], limit_lines: int = 80) -> List[st
             if s:
                 out.append(f"Règle: {s}")
 
-    # Keep it bounded
-    if len(out) > limit_lines:
-        out = out[:limit_lines]
-    return out
+    return out[:limit_lines]
 
 
 def kb_snippets_runningman(kb: Dict[str, Any], limit_lines: int = 60) -> List[str]:
     out: List[str] = []
 
-    # Some structured rules to keep model aligned
     root_rules = kb.get("regles_fondamentales_ia", {}) or {}
     if isinstance(root_rules, dict):
         interdits = root_rules.get("interdictions_absolues")
@@ -449,7 +405,6 @@ def kb_snippets_runningman(kb: Dict[str, Any], limit_lines: int = 60) -> List[st
                 if s:
                     out.append(s)
 
-    # Include contact rule if present
     ident = kb.get("identite", {}) or {}
     if isinstance(ident, dict):
         loc = ident.get("localisation", {}) or {}
@@ -458,9 +413,7 @@ def kb_snippets_runningman(kb: Dict[str, Any], limit_lines: int = 60) -> List[st
             if isinstance(rule, str) and rule.strip():
                 out.append(f"Adresse: {rule.strip()}")
 
-    if len(out) > limit_lines:
-        out = out[:limit_lines]
-    return out
+    return out[:limit_lines]
 
 
 # =========================================================
@@ -482,23 +435,19 @@ def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any
         "store": False,
     }
 
-    # Reasoning effort (GPT-5 family)
     if OPENAI_REASONING_EFFORT:
         kwargs["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
 
-    # temperature only allowed when reasoning effort is "none"
     if OPENAI_REASONING_EFFORT == "none":
         kwargs["temperature"] = OPENAI_TEMPERATURE
 
     resp = _openai_client.responses.create(**kwargs)
-
     text = (getattr(resp, "output_text", "") or "").strip()
 
     usage: Dict[str, Any] = {}
     try:
         usage_obj = getattr(resp, "usage", None)
         if usage_obj is not None:
-            # openai-python may expose a dict-like or object
             if hasattr(usage_obj, "model_dump"):
                 usage = usage_obj.model_dump()  # type: ignore
             elif isinstance(usage_obj, dict):
@@ -607,10 +556,7 @@ def prune_messages_for_prompt(messages: List[Dict[str, Any]], max_pairs: int = 1
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content") is not None
     ]
     clipped = clipped[-(max_pairs * 2):]
-    out: List[Dict[str, str]] = []
-    for m in clipped:
-        out.append({"role": str(m.get("role")), "content": str(m.get("content") or "")})
-    return out
+    return [{"role": str(m.get("role")), "content": str(m.get("content") or "")} for m in clipped]
 
 
 # =========================================================
@@ -633,17 +579,15 @@ def _require_user_token(req) -> bool:
 
 
 # =========================================================
-# Payload parsing (support widget: message + user_id + conversation_id)
+# Payload parsing
 # =========================================================
 
 
 def _payload_text(payload: Dict[str, Any]) -> str:
-    # priorité au champ "message"
     msg = payload.get("message")
     if msg is not None:
         return str(msg)
 
-    # fallback: messages[{role:user,content}]
     arr = payload.get("messages")
     if isinstance(arr, list):
         for m in reversed(arr):
@@ -658,12 +602,6 @@ def _payload_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_or_create_conversation_id(payload: Dict[str, Any]) -> Tuple[str, Optional[str]]:
-    """BETON:
-    - on accepte conversation_id envoyé par le widget (root)
-    - sinon, map via user_id
-    - sinon cookie (fallback)
-    - sinon génération
-    """
     conversation_id = str(payload.get("conversation_id") or "").strip()
     user_id = str(payload.get("user_id") or "").strip()
 
@@ -685,9 +623,10 @@ def _get_or_create_conversation_id(payload: Dict[str, Any]) -> Tuple[str, Option
 
 
 # =========================================================
-# Safety: anti-creneaux / anti-confirmation
+# Greeting + Safety
 # =========================================================
 
+START_SIGNAL = "__start__"
 
 _FORBIDDEN_BOOKING_RE = [
     r"\bje (vous )?(confirme|confirme la|confirme votre)\b",
@@ -700,8 +639,17 @@ _FORBIDDEN_BOOKING_RE = [
 ]
 
 
+def common_greeting_text() -> str:
+    return (
+        "Bienvenue chez Runningman et Retroworld, comment puis-je vous aider ?\n\n"
+        "Pour vous orienter rapidement :\n"
+        "- Game Zone + salle VR : Runningman\n"
+        "- Le reste (Escape Game VR, quiz, salle enfant, anniversaires, fidélité) : Retroworld"
+    )
+
+
 def sanitize_booking_reply(reply: str, user_text: str, owner: str) -> str:
-    """Si on parle réservation/créneau et que le texte dérape (confirmations), on remplace par un message sûr."""
+    """Si réservation/créneau + phrases interdites => on remplace par une réponse safe."""
     if not reply:
         return reply
 
@@ -712,7 +660,6 @@ def sanitize_booking_reply(reply: str, user_text: str, owner: str) -> str:
     if not any(re.search(p, low) for p in _FORBIDDEN_BOOKING_RE):
         return reply
 
-    # Contact selon activité
     kb_rm = load_kb("runningman")
     ident_rm = kb_rm.get("identite", {}) or {}
     contact_rm = (ident_rm.get("contact", {}) or {})
@@ -728,26 +675,17 @@ def sanitize_booking_reply(reply: str, user_text: str, owner: str) -> str:
         contact_line = f"Pour confirmer un horaire, merci de contacter Retroworld : {rw_tel} ou {rw_site}."
 
     return (
-        "Je peux bien sûr vous aider à préparer votre demande, mais je ne peux pas confirmer ni bloquer un créneau via le chat.\n"
+        "Je peux vous aider à préparer votre demande, mais je ne peux pas confirmer ni bloquer un créneau via le chat.\n"
         + contact_line
         + "\n\n"
-        "Pour que je vous guide au mieux, pouvez-vous me préciser : l’activité, le nombre de participants et le jour souhaité ?"
+        "Pouvez-vous préciser : l’activité, le nombre de participants et le jour souhaité ?"
     )
 
 
 def maybe_prefix_common_greeting(reply: str, is_first_turn: bool) -> str:
     if not is_first_turn:
         return reply
-
-    prefix = (
-        "Bienvenue chez Runningman et Retroworld, comment puis-je vous aider ?\n"
-        "\n"
-        "Pour vous orienter rapidement :\n"
-        "- Game Zone + salle VR : Runningman\n"
-        "- Le reste (Escape Game VR, quiz, salle enfant, anniversaires, fidélité) : Retroworld\n"
-        "\n"
-    )
-    return prefix + (reply or "")
+    return common_greeting_text() + "\n\n" + (reply or "")
 
 
 # =========================================================
@@ -759,28 +697,11 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
     brand_entry = (brand_entry or "auto").lower().strip()
     user_text = user_text or ""
 
-    # owner/topic
-    if brand_entry in ("retroworld", "runningman"):
-        owner = brand_entry
-    else:
-        owner = detect_owner_from_text(user_text)
+    owner = brand_entry if brand_entry in ("retroworld", "runningman") else detect_owner_from_text(user_text)
 
     kb_rw = load_kb("retroworld")
     kb_rm = load_kb("runningman")
 
-    # Pare-chocs règle d'âge (Runningman) : réponse directe et sûre
-    if owner == "runningman" and _is_age_intent(user_text):
-        ident = kb_rm.get("identite", {}) or {}
-        contact = (ident.get("contact", {}) or {})
-        reply = (
-            "Runningman est accessible dès 7 ans.\n"
-            "Pour les moins de 12 ans, un adulte accompagnateur est requis.\n"
-            "À partir de 12 ans, l’adulte n’est plus obligatoire.\n"
-            f"Pour réserver/valider un horaire : {contact.get('site_web','https://runningmangames.fr')} (ou {contact.get('telephone','04 98 09 30 59')})."
-        )
-        return reply, {"mode": "rule_based_age"}, owner
-
-    # System prompt commun
     system = (
         "Vous êtes l’assistant COMMUN de Runningman Game Zone et de Retroworld France (même bâtiment à Draguignan).\n"
         "Votre mission est d’aider la clientèle sans créer de problème : vous êtes prudent, fiable et orienté solution.\n\n"
@@ -804,7 +725,6 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
         + runningman_facts_block(kb_rm)
     )
 
-    # Ajout KB (résumée)
     kb_lines: List[str] = []
     kb_lines.extend(kb_snippets_retroworld(kb_rw))
     kb_lines.extend(kb_snippets_runningman(kb_rm))
@@ -816,32 +736,21 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
 
     messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
 
-    # server-side memory
     if conversation_id:
         hist = load_conversation_messages(conversation_id)
         messages.extend(prune_messages_for_prompt(hist, max_pairs=12))
 
-    # user message
     messages.append({"role": "user", "content": user_text})
 
-    # soft hints
     hints: List[str] = []
     if _is_just_question_mark(user_text):
-        hints.append(
-            "L'utilisateur a envoyé seulement '?'. Demandez ce qu'il souhaite: Game Zone/VR (Runningman) ou Escape VR/quiz/salle enfant/fidélité (Retroworld)."
-        )
-
+        hints.append("L'utilisateur a envoyé seulement '?'. Demandez si c'est Runningman (Game Zone/VR) ou Retroworld (Escape VR/quiz/salle enfant/fidélité).")
     if _is_reservation_intent(user_text):
-        hints.append(
-            "Réservation/Créneau: ne jamais confirmer ni dire 'disponible'. Collecter activité + nombre + jour souhaité, puis orienter vers téléphone/site pour validation."
-        )
-
+        hints.append("Réservation/Créneau: ne jamais confirmer ni dire 'disponible'. Collecter activité + nombre + jour souhaité, puis orienter vers téléphone/site.")
     if hints:
         messages.append({"role": "system", "content": "GUIDE DE RÉPONSE:\n- " + "\n- ".join(hints)})
 
     reply, usage = call_openai_chat(messages)
-
-    # pare-chocs anti-confirmation
     reply = sanitize_booking_reply(reply, user_text=user_text, owner=owner)
 
     return reply, usage, owner
@@ -862,7 +771,6 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 
-# --- FAQ (fichiers static) ---
 @app.route("/faq/retroworld", methods=["GET"])
 def faq_retroworld():
     path = os.path.join(app.static_folder, "faq_retroworld.json")
@@ -881,7 +789,6 @@ def faq_runningman():
     return jsonify(data), 200
 
 
-# --- Compat route: /chat (owner auto) ---
 @app.route("/chat", methods=["POST"])
 def chat_auto():
     try:
@@ -890,13 +797,29 @@ def chat_auto():
         return jsonify({"error": "invalid_json"}), 400
 
     user_text = _payload_text(payload).strip()
-    if not user_text:
-        return jsonify({"error": "missing_message"}), 400
-
     metadata = _payload_metadata(payload)
     conversation_id, user_id = _get_or_create_conversation_id(payload)
 
-    # check first turn BEFORE generating (avoid greeting duplicates)
+    # ✅ Start handshake: message commun affiché une seule fois
+    if user_text == START_SIGNAL:
+        greeting = common_greeting_text()
+        append_conversation_turn(
+            conversation_id=conversation_id,
+            brand_effective="auto",
+            user_text="",
+            assistant_reply=greeting,
+            extra={"metadata": metadata, "brand_effective": "auto", "openai_usage": {"mode": "start"}, "user_id": user_id},
+        )
+        resp = make_response(
+            jsonify({"reply": greeting, "answer": greeting, "brand_effective": "auto", "brand_entry": "auto", "conversation_id": conversation_id}),
+            200,
+        )
+        resp.set_cookie(CONV_COOKIE_NAME, conversation_id, max_age=60 * 60 * 24 * 30, samesite="Lax")
+        return resp
+
+    if not user_text:
+        return jsonify({"error": "missing_message"}), 400
+
     is_first_turn = len(load_conversation_messages(conversation_id)) == 0
 
     reply, usage, owner = process_chat("auto", user_text, conversation_id)
@@ -907,31 +830,17 @@ def chat_auto():
         brand_effective=owner,
         user_text=user_text,
         assistant_reply=reply,
-        extra={
-            "metadata": metadata,
-            "brand_effective": owner,
-            "openai_usage": usage,
-            "user_id": user_id,
-        },
+        extra={"metadata": metadata, "brand_effective": owner, "openai_usage": usage, "user_id": user_id},
     )
 
     resp = make_response(
-        jsonify(
-            {
-                "reply": reply,
-                "answer": reply,
-                "brand_effective": owner,
-                "brand_entry": "auto",
-                "conversation_id": conversation_id,
-            }
-        ),
+        jsonify({"reply": reply, "answer": reply, "brand_effective": owner, "brand_entry": "auto", "conversation_id": conversation_id}),
         200,
     )
     resp.set_cookie(CONV_COOKIE_NAME, conversation_id, max_age=60 * 60 * 24 * 30, samesite="Lax")
     return resp
 
 
-# --- Owner route: /chat/<brand> (compat) ---
 @app.route("/chat/<brand>", methods=["POST"])
 def chat_brand(brand: str):
     try:
@@ -940,11 +849,27 @@ def chat_brand(brand: str):
         return jsonify({"error": "invalid_json"}), 400
 
     user_text = _payload_text(payload).strip()
-    if not user_text:
-        return jsonify({"error": "missing_message"}), 400
-
     metadata = _payload_metadata(payload)
     conversation_id, user_id = _get_or_create_conversation_id(payload)
+
+    if user_text == START_SIGNAL:
+        greeting = common_greeting_text()
+        append_conversation_turn(
+            conversation_id=conversation_id,
+            brand_effective=brand,
+            user_text="",
+            assistant_reply=greeting,
+            extra={"metadata": metadata, "brand_entry": brand, "brand_effective": brand, "openai_usage": {"mode": "start"}, "user_id": user_id},
+        )
+        resp = make_response(
+            jsonify({"reply": greeting, "answer": greeting, "brand_effective": brand, "brand_entry": brand, "conversation_id": conversation_id}),
+            200,
+        )
+        resp.set_cookie(CONV_COOKIE_NAME, conversation_id, max_age=60 * 60 * 24 * 30, samesite="Lax")
+        return resp
+
+    if not user_text:
+        return jsonify({"error": "missing_message"}), 400
 
     is_first_turn = len(load_conversation_messages(conversation_id)) == 0
 
@@ -956,32 +881,17 @@ def chat_brand(brand: str):
         brand_effective=owner,
         user_text=user_text,
         assistant_reply=reply,
-        extra={
-            "metadata": metadata,
-            "brand_entry": brand,
-            "brand_effective": owner,
-            "openai_usage": usage,
-            "user_id": user_id,
-        },
+        extra={"metadata": metadata, "brand_entry": brand, "brand_effective": owner, "openai_usage": usage, "user_id": user_id},
     )
 
     resp = make_response(
-        jsonify(
-            {
-                "reply": reply,
-                "answer": reply,
-                "brand_effective": owner,
-                "brand_entry": brand,
-                "conversation_id": conversation_id,
-            }
-        ),
+        jsonify({"reply": reply, "answer": reply, "brand_effective": owner, "brand_entry": brand, "conversation_id": conversation_id}),
         200,
     )
     resp.set_cookie(CONV_COOKIE_NAME, conversation_id, max_age=60 * 60 * 24 * 30, samesite="Lax")
     return resp
 
 
-# --- User history (option token) ---
 @app.route("/user/api/history", methods=["GET"])
 def user_api_history():
     if USER_HISTORY_TOKEN and not _require_user_token(request):
@@ -1003,7 +913,6 @@ def user_api_history():
     return jsonify({"conversation_id": conversation_id, "conversation": obj}), 200
 
 
-# --- KB endpoints ---
 @app.route("/kb/<brand>", methods=["GET"])
 def kb_get(brand: str):
     kb = load_kb(brand)
@@ -1022,7 +931,6 @@ def kb_upsert(brand: str):
 
     kb = load_kb(brand)
 
-    # Compat: accept "items" field, but keep full KB dict otherwise
     new_items = payload.get("items")
     if isinstance(new_items, list):
         kb["items"] = new_items
@@ -1031,7 +939,6 @@ def kb_upsert(brand: str):
     return jsonify({"ok": ok, "brand": brand}), 200
 
 
-# --- Admin API ---
 @app.route("/admin/api/conversations", methods=["GET"])
 def admin_api_conversations():
     if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
@@ -1060,15 +967,7 @@ def admin_api_conversations():
             if len(preview) > 120:
                 preview = preview[:117] + "..."
 
-        items.append(
-            {
-                "id": cid,
-                "brand": brand_eff,
-                "preview": preview,
-                "timestamp": timestamp,
-                "user_id": obj.get("user_id"),
-            }
-        )
+        items.append({"id": cid, "brand": brand_eff, "preview": preview, "timestamp": timestamp, "user_id": obj.get("user_id")})
 
     return jsonify(items), 200
 
@@ -1122,7 +1021,6 @@ def admin_api_diag():
     ), 200
 
 
-# --- Pages / static ---
 @app.route("/admin", methods=["GET"])
 def admin_page():
     return send_from_directory(app.static_folder, "admin.html")
