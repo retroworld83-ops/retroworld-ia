@@ -27,11 +27,19 @@ KB_DIR = os.getenv("KB_DIR", BASE_DIR)
 PORT = int(os.getenv("PORT", "10000"))
 
 OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip()
-OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.4"))
-OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "900"))
 
-ADMIN_DASHBOARD_TOKEN = (os.getenv("ADMIN_DASHBOARD_TOKEN") or "").strip()
+# Default updated to a current flagship model (can be overridden by env)
+OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-5.2").strip()
+
+# GPT-5 family: temperature only supported when reasoning effort is "none".
+OPENAI_REASONING_EFFORT = (os.getenv("OPENAI_REASONING_EFFORT") or "none").strip().lower()
+OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
+
+# Responses API uses max_output_tokens; keep backward compatibility with OPENAI_MAX_TOKENS.
+OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS") or os.getenv("OPENAI_MAX_TOKENS") or "900")
+
+# Admin token (legacy alias supported)
+ADMIN_DASHBOARD_TOKEN = (os.getenv("ADMIN_DASHBOARD_TOKEN") or os.getenv("ADMIN_API_TOKEN") or "").strip()
 USER_HISTORY_TOKEN = (os.getenv("USER_HISTORY_TOKEN") or "").strip()
 
 LOG_LEVEL = (os.getenv("LOG_LEVEL") or "INFO").upper()
@@ -125,6 +133,7 @@ def get_user_conversation(user_id: str) -> Optional[str]:
 # KB cache
 # =========================================================
 
+
 @dataclass
 class _KBCacheEntry:
     ts: float
@@ -147,9 +156,9 @@ def load_kb(brand: str) -> Dict[str, Any]:
 
     filename = f"kb_{brand}.json"
     path = os.path.join(KB_DIR, filename)
-    kb = _safe_read_json(path, {"brand": brand, "items": []})
+    kb = _safe_read_json(path, {"brand": brand})
     if not isinstance(kb, dict):
-        kb = {"brand": brand, "items": []}
+        kb = {"brand": brand}
 
     _KB_CACHE[brand] = _KBCacheEntry(ts=now, kb=kb)
     return kb
@@ -168,8 +177,9 @@ def save_kb(brand: str, kb: Dict[str, Any]) -> bool:
 
 
 # =========================================================
-# Text utils + intents (avec FIX "gouter" => pas adresse)
+# Text utils + intents
 # =========================================================
+
 
 def _norm(s: str) -> str:
     s = (s or "").strip().lower()
@@ -177,25 +187,94 @@ def _norm(s: str) -> str:
     return s
 
 
-def detect_brand_from_text(text: str) -> str:
+def detect_owner_from_text(text: str) -> str:
+    """Retourne 'runningman' ou 'retroworld' selon la demande.
+
+    Règle voulue par vous:
+    - Game Zone / action game / Runningman / salle VR => Runningman
+    - Le reste => Retroworld
+
+    ⚠️ Cas particulier: "escape game VR" (même si VR) est traité comme Retroworld
+    car c'est une activité distincte (et évite les réponses contradictoires).
+    """
     t = _norm(text)
-    if "runningman" in t or "running man" in t or "action game" in t:
+
+    # Escape game VR => Retroworld
+    if ("escape" in t and "vr" in t) or "escape game vr" in t or "escape vr" in t:
+        return "retroworld"
+
+    running_keys = [
+        "runningman",
+        "running man",
+        "action game",
+        "game zone",
+        "gamezone",
+        "mini-jeux",
+        "mini jeux",
+        "défis",
+        "defis",
+        "salle vr",
+        "vr classique",
+        "partie vr",
+        "jeux vr",
+        "jeu vr",
+    ]
+    if any(k in t for k in running_keys):
         return "runningman"
-    return "retroworld"
+
+    retroworld_keys = [
+        "retroworld",
+        "quiz",
+        "anniversaire",
+        "goûter",
+        "gouter",
+        "salle enfant",
+        "fidelite",
+        "fidélité",
+        "points",
+        "carte fidelite",
+        "carte fidélité",
+        "escape",
+    ]
+    if any(k in t for k in retroworld_keys):
+        return "retroworld"
+
+    return "retroworld"  # défaut
 
 
 def _is_reservation_intent(text: str) -> bool:
     t = _norm(text)
     keys = [
-        "réserver", "reservation", "réservation", "dispo", "disponible",
-        "créneau", "creneau", "aujourd", "demain", "samedi", "dimanche"
+        "réserver",
+        "reservation",
+        "réservation",
+        "dispo",
+        "disponible",
+        "créneau",
+        "creneau",
+        "aujourd",
+        "demain",
+        "samedi",
+        "dimanche",
+        "lundi",
+        "mardi",
+        "mercredi",
+        "jeudi",
+        "vendredi",
+        "\b\d{1,2}h\b",
+        "\b\d{1,2}h\d{2}\b",
     ]
-    return any(k in t for k in keys)
+    # note: include hour regex via search
+    if any(k in t for k in keys if "\\b" not in k):
+        return True
+    if re.search(r"\b\d{1,2}h(\d{2})?\b", t):
+        return True
+    return False
 
 
 def _is_price_intent(text: str) -> bool:
     t = _norm(text)
-    return any(k in t for k in ["c'est combien", "cest combien", "tarif", "prix", "ça coute", "ca coute"])
+    return any(k in t for k in ["c'est combien", "cest combien", "tarif", "prix", "ça coute", "ca coute", "devis"])
 
 
 def _is_hours_intent(text: str) -> bool:
@@ -204,8 +283,7 @@ def _is_hours_intent(text: str) -> bool:
 
 
 def _is_location_intent(text: str) -> bool:
-    """
-    IMPORTANT:
+    """IMPORTANT:
     - NE PAS tester "ou" (sans accent), sinon "gouter" contient "ou" => bug adresse.
     - On accepte "où" uniquement en mot entier + clés explicites.
     """
@@ -213,8 +291,16 @@ def _is_location_intent(text: str) -> bool:
     if re.search(r"\boù\b", t):
         return True
     keys = [
-        "adresse", "localisation", "venir", "comment venir", "draguignan",
-        "parking", "vous êtes où", "vous etes où", "c'est où", "c est où",
+        "adresse",
+        "localisation",
+        "venir",
+        "comment venir",
+        "draguignan",
+        "parking",
+        "vous êtes où",
+        "vous etes où",
+        "c'est où",
+        "c est où",
     ]
     return any(k in t for k in keys)
 
@@ -240,22 +326,30 @@ def _is_just_question_mark(text: str) -> bool:
 
 
 # =========================================================
-# Retroworld facts (source fiable) + Runningman facts
+# Facts blocks (fiables)
 # =========================================================
 
+
+def common_orientation_block() -> str:
+    return (
+        "RÉPARTITION (pour orienter sans créer de confusion) :\n"
+        "- Runningman gère : Game Zone / Action Game + Salle VR (jeux VR classiques).\n"
+        "- Retroworld gère : le reste (Escape Game VR, quiz interactifs, salle enfant, anniversaires/événements, fidélité).\n"
+        "- Même bâtiment : 815 avenue Pierre Brossolette, 83300 Draguignan.\n"
+    )
+
+
 def retroworld_facts_block() -> str:
+    # Version "safe": aucune promesse de créneau
     return (
         "VÉRITÉS OFFICIELLES RETROWORLD (à respecter strictement) :\n"
-        "- Tarifs:\n"
-        "  - VR : 15 € / joueur (jusqu’à 5 joueurs)\n"
-        "  - Escape Game VR : 30 € / joueur\n"
-        "  - Quiz interactifs : 8 € (30 min), 15 € (60 min), 20 € (90 min), jusqu’à 12 joueurs\n"
-        "  - Salle enfant : 50 € / heure, puis 20 € / demi-heure supplémentaire\n"
-        "- Horaires : mardi à dimanche, 11h à 22h\n"
+        "- Horaires (indicatifs) : mardi à dimanche, 11h à 22h\n"
         "- Adresse : 815 avenue Pierre Brossolette, 83300 Draguignan\n"
         "- Contact : 04 94 47 94 64 / contact@retroworldfrance.com\n"
-        "- Réservation : toujours répondre 'disponible' puis demander date + heure + nombre de personnes + activité.\n"
-        "- Goûter/anniversaire : salle enfant possible, stockage goûter possible (selon place), demander date + nb enfants + activité.\n"
+        "- Site : https://www.retroworldfrance.com\n"
+        "- Activités : Escape Game VR, quiz interactifs, salle enfant, anniversaires, fidélité\n"
+        "- RÈGLE CRÉNEAUX : le chat ne confirme ni ne bloque jamais un créneau.\n"
+        "  Il peut préparer une demande/devis, mais la validation se fait par l'équipe.\n"
         "IMPORTANT : ne jamais dire 'allez voir sur le site' sauf si l'utilisateur demande explicitement un lien.\n"
     )
 
@@ -281,7 +375,9 @@ def runningman_facts_block(kb: Dict[str, Any]) -> str:
         f"- Âge minimum : {age_min} ans.\n"
         f"- Moins de 12 ans : {acc.get('moins_de_12_ans', 'Un adulte accompagnateur est requis.')}\n"
         f"- À partir de 12 ans : {acc.get('a_partir_de_12_ans', 'Il n’est plus nécessaire d’avoir un adulte accompagnateur.')}\n"
-        f"- Tarifs action game (session 60 min, confirmés) :\n"
+        "- RÈGLE CRÉNEAUX : le chat ne confirme ni ne bloque jamais un créneau.\n"
+        "  Pour réserver/valider un horaire : site officiel ou téléphone.\n"
+        f"- Tarifs action game (session 60 min) :\n"
         f"  - Enfant (-12 ans) : {enfant.get('prix', '?')} {enfant.get('unite', '')}\n"
         f"  - Adulte accompagnateur : {adulte.get('prix', '?')} {adulte.get('unite', '')}\n"
         + (f"- Capacité : {cap_msg}\n" if cap_msg else "")
@@ -291,51 +387,130 @@ def runningman_facts_block(kb: Dict[str, Any]) -> str:
     )
 
 
-def kb_to_items(brand: str, kb: Dict[str, Any]) -> List[Any]:
-    """Normalise différentes structures KB vers une liste exploitable dans le prompt."""
-    brand = (brand or "").lower().strip()
-    items = kb.get("items")
-    if isinstance(items, list) and items:
-        return items
+# =========================================================
+# KB to prompt snippets
+# =========================================================
 
-    if brand == "runningman":
-        out: List[Any] = []
-        for k in ["instructions_generales", "anti_erreurs"]:
-            arr = kb.get(k)
-            if isinstance(arr, list):
-                out.extend([str(x) for x in arr if str(x).strip()])
-        return out
 
-    return []
+def kb_snippets_retroworld(kb: Dict[str, Any], limit_lines: int = 80) -> List[str]:
+    out: List[str] = []
+
+    ident = kb.get("identite", {}) or {}
+    if isinstance(ident, dict):
+        name = ident.get("nom")
+        role = ident.get("role")
+        if name:
+            out.append(f"Identité: {name}")
+        if role:
+            out.append(f"Mission: {role}")
+
+    prompt = kb.get("prompt", {}) or {}
+    if isinstance(prompt, dict):
+        for k in [
+            "reservation_non_confirmee",
+            "gestion_liens_reservation",
+            "etape_5_devis",
+            "fidelite",
+            "redirection_runningman",
+            "redirection_enigmaniac",
+        ]:
+            v = prompt.get(k)
+            if isinstance(v, str) and v.strip():
+                out.append(f"{k}: {v.strip()}")
+
+    inst = kb.get("instructions_generales")
+    if isinstance(inst, list):
+        for it in inst:
+            s = str(it).strip()
+            if s:
+                out.append(f"Règle: {s}")
+
+    # Keep it bounded
+    if len(out) > limit_lines:
+        out = out[:limit_lines]
+    return out
+
+
+def kb_snippets_runningman(kb: Dict[str, Any], limit_lines: int = 60) -> List[str]:
+    out: List[str] = []
+
+    # Some structured rules to keep model aligned
+    root_rules = kb.get("regles_fondamentales_ia", {}) or {}
+    if isinstance(root_rules, dict):
+        interdits = root_rules.get("interdictions_absolues")
+        if isinstance(interdits, list) and interdits:
+            out.append("Interdictions: " + ", ".join([str(x) for x in interdits[:10]]))
+
+    for k in ["instructions_generales", "anti_erreurs"]:
+        arr = kb.get(k)
+        if isinstance(arr, list):
+            for it in arr:
+                s = str(it).strip()
+                if s:
+                    out.append(s)
+
+    # Include contact rule if present
+    ident = kb.get("identite", {}) or {}
+    if isinstance(ident, dict):
+        loc = ident.get("localisation", {}) or {}
+        if isinstance(loc, dict):
+            rule = loc.get("regle_bot")
+            if isinstance(rule, str) and rule.strip():
+                out.append(f"Adresse: {rule.strip()}")
+
+    if len(out) > limit_lines:
+        out = out[:limit_lines]
+    return out
+
+
+# =========================================================
+# OpenAI call (Responses API)
+# =========================================================
 
 
 def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any]]:
     if not _openai_client:
         return (
-            "Le service IA est indisponible pour le moment. Vous pouvez nous appeler au 04 94 47 94 64 ou écrire à contact@retroworldfrance.com.",
+            "Le service IA est indisponible pour le moment. Vous pouvez nous appeler au 04 94 47 94 64 (Retroworld) ou au 04 98 09 30 59 (Runningman).",
             {"error": "openai_not_ready"},
         )
 
-    resp = _openai_client.chat.completions.create(
-        model=OPENAI_MODEL,
-        messages=messages,
-        temperature=OPENAI_TEMPERATURE,
-        max_tokens=OPENAI_MAX_TOKENS,
-    )
-    text = (resp.choices[0].message.content or "").strip()
+    kwargs: Dict[str, Any] = {
+        "model": OPENAI_MODEL,
+        "input": messages,
+        "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
+        "store": False,
+    }
+
+    # Reasoning effort (GPT-5 family)
+    if OPENAI_REASONING_EFFORT:
+        kwargs["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
+
+    # temperature only allowed when reasoning effort is "none"
+    if OPENAI_REASONING_EFFORT == "none":
+        kwargs["temperature"] = OPENAI_TEMPERATURE
+
+    resp = _openai_client.responses.create(**kwargs)
+
+    text = (getattr(resp, "output_text", "") or "").strip()
 
     usage: Dict[str, Any] = {}
     try:
-        usage = resp.usage.model_dump()  # type: ignore
+        usage_obj = getattr(resp, "usage", None)
+        if usage_obj is not None:
+            # openai-python may expose a dict-like or object
+            if hasattr(usage_obj, "model_dump"):
+                usage = usage_obj.model_dump()  # type: ignore
+            elif isinstance(usage_obj, dict):
+                usage = usage_obj
+            else:
+                usage = {
+                    "input_tokens": getattr(usage_obj, "input_tokens", None),
+                    "output_tokens": getattr(usage_obj, "output_tokens", None),
+                    "total_tokens": getattr(usage_obj, "total_tokens", None),
+                }
     except Exception:
-        try:
-            usage = {
-                "prompt_tokens": getattr(resp.usage, "prompt_tokens", None),
-                "completion_tokens": getattr(resp.usage, "completion_tokens", None),
-                "total_tokens": getattr(resp.usage, "total_tokens", None),
-            }
-        except Exception:
-            usage = {}
+        usage = {}
 
     return text, usage
 
@@ -442,6 +617,7 @@ def prune_messages_for_prompt(messages: List[Dict[str, Any]], max_pairs: int = 1
 # Tokens
 # =========================================================
 
+
 def _require_admin_token(req) -> bool:
     tok = (req.args.get("token") or "").strip()
     if not tok:
@@ -459,6 +635,7 @@ def _require_user_token(req) -> bool:
 # =========================================================
 # Payload parsing (support widget: message + user_id + conversation_id)
 # =========================================================
+
 
 def _payload_text(payload: Dict[str, Any]) -> str:
     # priorité au champ "message"
@@ -481,8 +658,7 @@ def _payload_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_or_create_conversation_id(payload: Dict[str, Any]) -> Tuple[str, Optional[str]]:
-    """
-    BETON:
+    """BETON:
     - on accepte conversation_id envoyé par le widget (root)
     - sinon, map via user_id
     - sinon cookie (fallback)
@@ -509,71 +685,134 @@ def _get_or_create_conversation_id(payload: Dict[str, Any]) -> Tuple[str, Option
 
 
 # =========================================================
-# Core pipeline (analyse toute la question, pas FAQ-bot)
+# Safety: anti-creneaux / anti-confirmation
 # =========================================================
+
+
+_FORBIDDEN_BOOKING_RE = [
+    r"\bje (vous )?(confirme|confirme la|confirme votre)\b",
+    r"\b(réservation|reservation) (est )?(confirmée|confirmee|validée|validee)\b",
+    r"\bje (bloque|bloque donc|bloque votre|réserve|reserve)\b",
+    r"\b(nous|on) vous attend(ons)?\b",
+    r"\b(c['’]?est|c est) (disponible|ok|bon)\b",
+    r"\bdisponible pour\b",
+    r"\bcréneau confirmé\b",
+]
+
+
+def sanitize_booking_reply(reply: str, user_text: str, owner: str) -> str:
+    """Si on parle réservation/créneau et que le texte dérape (confirmations), on remplace par un message sûr."""
+    if not reply:
+        return reply
+
+    if not _is_reservation_intent(user_text):
+        return reply
+
+    low = _norm(reply)
+    if not any(re.search(p, low) for p in _FORBIDDEN_BOOKING_RE):
+        return reply
+
+    # Contact selon activité
+    kb_rm = load_kb("runningman")
+    ident_rm = kb_rm.get("identite", {}) or {}
+    contact_rm = (ident_rm.get("contact", {}) or {})
+    rm_tel = contact_rm.get("telephone", "04 98 09 30 59")
+    rm_site = contact_rm.get("site_web", "https://runningmangames.fr")
+
+    rw_tel = "04 94 47 94 64"
+    rw_site = "https://www.retroworldfrance.com"
+
+    if owner == "runningman":
+        contact_line = f"Pour confirmer un horaire, merci de contacter Runningman : {rm_tel} ou {rm_site}."
+    else:
+        contact_line = f"Pour confirmer un horaire, merci de contacter Retroworld : {rw_tel} ou {rw_site}."
+
+    return (
+        "Je peux bien sûr vous aider à préparer votre demande, mais je ne peux pas confirmer ni bloquer un créneau via le chat.\n"
+        + contact_line
+        + "\n\n"
+        "Pour que je vous guide au mieux, pouvez-vous me préciser : l’activité, le nombre de participants et le jour souhaité ?"
+    )
+
+
+def maybe_prefix_common_greeting(reply: str, is_first_turn: bool) -> str:
+    if not is_first_turn:
+        return reply
+
+    prefix = (
+        "Bienvenue chez Runningman et Retroworld, comment puis-je vous aider ?\n"
+        "\n"
+        "Pour vous orienter rapidement :\n"
+        "- Game Zone + salle VR : Runningman\n"
+        "- Le reste (Escape Game VR, quiz, salle enfant, anniversaires, fidélité) : Retroworld\n"
+        "\n"
+    )
+    return prefix + (reply or "")
+
+
+# =========================================================
+# Core pipeline
+# =========================================================
+
 
 def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tuple[str, Dict[str, Any], str]:
     brand_entry = (brand_entry or "auto").lower().strip()
     user_text = user_text or ""
 
-    # brand effective
-    if brand_entry == "auto":
-        brand_effective = detect_brand_from_text(user_text)
+    # owner/topic
+    if brand_entry in ("retroworld", "runningman"):
+        owner = brand_entry
     else:
-        brand_effective = "runningman" if brand_entry == "runningman" else "retroworld"
+        owner = detect_owner_from_text(user_text)
 
-    kb = load_kb(brand_effective)
-    kb_items = kb_to_items(brand_effective, kb)
+    kb_rw = load_kb("retroworld")
+    kb_rm = load_kb("runningman")
 
-    # Pare-chocs anti-hallucination Runningman (âge)
-    if brand_effective == "runningman" and _is_age_intent(user_text):
-        ident = kb.get("identite", {}) or {}
+    # Pare-chocs règle d'âge (Runningman) : réponse directe et sûre
+    if owner == "runningman" and _is_age_intent(user_text):
+        ident = kb_rm.get("identite", {}) or {}
         contact = (ident.get("contact", {}) or {})
         reply = (
             "Runningman est accessible dès 7 ans.\n"
             "Pour les moins de 12 ans, un adulte accompagnateur est requis.\n"
             "À partir de 12 ans, l’adulte n’est plus obligatoire.\n"
-            f"Pour réserver : {contact.get('site_web','https://runningmangames.fr')} (ou {contact.get('telephone','04 98 09 30 59')})."
+            f"Pour réserver/valider un horaire : {contact.get('site_web','https://runningmangames.fr')} (ou {contact.get('telephone','04 98 09 30 59')})."
         )
-        return reply, {"mode": "rule_based_age"}, brand_effective
+        return reply, {"mode": "rule_based_age"}, owner
 
-    if brand_effective == "retroworld":
-        system = (
-            "Vous êtes l’assistant officiel du site Retroworld France.\n"
-            "Objectif: aider immédiatement avec une réponse naturelle et utile (pas un bot FAQ).\n"
-            "Règles:\n"
-            "1) Vous lisez et analysez la demande complète avant de répondre.\n"
-            "2) Réponse claire et actionnable. Maximum 2 questions si nécessaire.\n"
-            "3) Ne jamais dire 'allez voir sur le site' sauf si l’utilisateur demande un lien.\n"
-            "4) Ne pas inventer. Respecter les vérités officielles.\n"
-            "5) Si demande de réservation: répondre 'disponible' puis demander date+heure+nb+activité.\n\n"
-            + retroworld_facts_block() +
-            "\nStyle: professionnel, vouvoiement, clair.\n"
-        )
-    else:
-        system = (
-            "Vous êtes l’assistant officiel de Runningman Game Zone (action game) à Draguignan.\\n"
-            "Objectif: répondre immédiatement et de façon fiable, sans inventer.\\n"
-            "Règles:\\n"
-            "1) Vous lisez et analysez la demande complète avant de répondre.\\n"
-            "2) Interdiction totale d’inventer un chiffre, une règle, une promotion ou une disponibilité.\\n"
-            "3) Si la demande concerne une réservation/disponibilité: vous orientez vers le site officiel et le téléphone (vous ne confirmez jamais un créneau).\\n"
-            "4) Si la demande concerne l’âge: ne jamais confondre 'à partir de 12 ans (sans adulte)' avec l’âge minimum.\\n"
-            "5) Si la demande concerne VR/quiz Retroworld: rediriger vers Retroworld.\\n\\n"
-            + runningman_facts_block(kb) +
-            "\\nStyle: professionnel, vouvoiement, clair, réponses courtes.\\n"
-        )
+    # System prompt commun
+    system = (
+        "Vous êtes l’assistant COMMUN de Runningman Game Zone et de Retroworld France (même bâtiment à Draguignan).\n"
+        "Votre mission est d’aider la clientèle sans créer de problème : vous êtes prudent, fiable et orienté solution.\n\n"
+        "RÈGLES DE SÉCURITÉ (ABSOLUES) :\n"
+        "- Le chat ne confirme JAMAIS un créneau et ne dit jamais qu’un horaire est 'disponible'.\n"
+        "- Le chat ne bloque jamais une réservation, ne dit jamais 'réservation confirmée', ne dit jamais 'nous vous attendons'.\n"
+        "- Vous pouvez préparer une demande ou un devis, mais la validation finale se fait par l’équipe (téléphone/site).\n"
+        "- Si vous n’êtes pas sûr (info absente), vous le dites et vous proposez le contact humain.\n\n"
+        "RÈGLE DE RÉPARTITION :\n"
+        "- Runningman : Game Zone / Action Game + Salle VR (jeux VR classiques).\n"
+        "- Retroworld : le reste (Escape Game VR, quiz interactifs, salle enfant, anniversaires/événements, fidélité).\n"
+        "- Si c’est ambigu, posez 1 seule question de clarification (Runningman ou Retroworld).\n\n"
+        "LIENS :\n"
+        "- Ne donnez un lien que si l’utilisateur le demande explicitement (ex: 'donnez-moi le lien').\n"
+        "- Sinon, donnez plutôt le téléphone/site en canal de confirmation.\n\n"
+        "STYLE : vouvoiement, clair, 3 à 10 lignes. Listes à puces si utile.\n\n"
+        + common_orientation_block()
+        + "\n"
+        + retroworld_facts_block()
+        + "\n"
+        + runningman_facts_block(kb_rm)
+    )
 
-    if kb_items:
-        system += "\nConnaissances (KB):\n"
-        for it in kb_items[:160]:
-            if isinstance(it, str):
-                system += f"- {it}\n"
-            elif isinstance(it, dict):
-                title = it.get("title") or it.get("name") or ""
-                content = it.get("content") or it.get("text") or it.get("value") or ""
-                if title or content:
-                    system += f"- {title}: {content}\n" if title else f"- {content}\n"
+    # Ajout KB (résumée)
+    kb_lines: List[str] = []
+    kb_lines.extend(kb_snippets_retroworld(kb_rw))
+    kb_lines.extend(kb_snippets_runningman(kb_rm))
+
+    if kb_lines:
+        system += "\nConnaissances (KB résumée) :\n"
+        for line in kb_lines[:160]:
+            system += f"- {line}\n"
 
     messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
 
@@ -585,39 +824,33 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
     # user message
     messages.append({"role": "user", "content": user_text})
 
-    # soft hints (guidage sans bypass)
-    t = user_text
+    # soft hints
     hints: List[str] = []
-    if _is_just_question_mark(t):
-        hints.append("L'utilisateur a envoyé seulement '?'. Demandez ce qu'il souhaite: tarifs, horaires, réservation, goûter/anniversaire, fidélité.")
-    if brand_effective == "retroworld":
-        if _is_price_intent(t):
-            hints.append("Demande de prix: donnez les tarifs officiels clairement, puis demandez l'activité/nb si utile.")
-        if _is_hours_intent(t):
-            hints.append("Demande d'horaires: mardi à dimanche 11h-22h.")
-        if _is_location_intent(t):
-            hints.append("Demande d'adresse: 815 avenue Pierre Brossolette, 83300 Draguignan.")
-        if _is_gouter_intent(t):
-            hints.append("Demande goûter/anniversaire: expliquez salle enfant + stockage possible selon place + demandez date + nb enfants + activité.")
-        if _is_fidelity_intent(t):
-            hints.append("Fidélité: VR=1 point, Escape VR=2 points, pas de points sur formules anniversaire. 10 points=VR offerte, 20=Escape VR offert. Présenter QR code ou prévenir l'équipe avant de jouer.")
-        if _is_reservation_intent(t):
-            hints.append("Réservation: commencez par 'disponible' puis demandez date+heure+nombre de personnes+activité.")
-    if brand_effective == "runningman":
-        if _is_age_intent(t):
-            hints.append("Âge Runningman: dès 7 ans. Moins de 12 ans: adulte accompagnateur requis. Dès 12 ans: adulte non obligatoire (ceci n'est pas l'âge minimum).")
-        if _is_reservation_intent(t):
-            hints.append("Runningman: ne jamais confirmer un créneau. Donnez le site officiel https://runningmangames.fr et le téléphone 04 98 09 30 59.")
+    if _is_just_question_mark(user_text):
+        hints.append(
+            "L'utilisateur a envoyé seulement '?'. Demandez ce qu'il souhaite: Game Zone/VR (Runningman) ou Escape VR/quiz/salle enfant/fidélité (Retroworld)."
+        )
+
+    if _is_reservation_intent(user_text):
+        hints.append(
+            "Réservation/Créneau: ne jamais confirmer ni dire 'disponible'. Collecter activité + nombre + jour souhaité, puis orienter vers téléphone/site pour validation."
+        )
+
     if hints:
         messages.append({"role": "system", "content": "GUIDE DE RÉPONSE:\n- " + "\n- ".join(hints)})
 
     reply, usage = call_openai_chat(messages)
-    return reply, usage, brand_effective
+
+    # pare-chocs anti-confirmation
+    reply = sanitize_booking_reply(reply, user_text=user_text, owner=owner)
+
+    return reply, usage, owner
 
 
 # =========================================================
 # Routes
 # =========================================================
+
 
 @app.route("/", methods=["GET"])
 def root():
@@ -629,7 +862,7 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 
-# --- FAQ séparée (fichier static/faq_retroworld.json) ---
+# --- FAQ (fichiers static) ---
 @app.route("/faq/retroworld", methods=["GET"])
 def faq_retroworld():
     path = os.path.join(app.static_folder, "faq_retroworld.json")
@@ -648,7 +881,7 @@ def faq_runningman():
     return jsonify(data), 200
 
 
-# --- Compat route: /chat  (brand auto) ---
+# --- Compat route: /chat (owner auto) ---
 @app.route("/chat", methods=["POST"])
 def chat_auto():
     try:
@@ -663,18 +896,20 @@ def chat_auto():
     metadata = _payload_metadata(payload)
     conversation_id, user_id = _get_or_create_conversation_id(payload)
 
-    # réponse
-    reply, usage, brand_effective = process_chat("auto", user_text, conversation_id)
+    # check first turn BEFORE generating (avoid greeting duplicates)
+    is_first_turn = len(load_conversation_messages(conversation_id)) == 0
 
-    # save turn
+    reply, usage, owner = process_chat("auto", user_text, conversation_id)
+    reply = maybe_prefix_common_greeting(reply, is_first_turn=is_first_turn)
+
     append_conversation_turn(
         conversation_id=conversation_id,
-        brand_effective=brand_effective,
+        brand_effective=owner,
         user_text=user_text,
         assistant_reply=reply,
         extra={
             "metadata": metadata,
-            "brand_effective": brand_effective,
+            "brand_effective": owner,
             "openai_usage": usage,
             "user_id": user_id,
         },
@@ -685,7 +920,7 @@ def chat_auto():
             {
                 "reply": reply,
                 "answer": reply,
-                "brand_effective": brand_effective,
+                "brand_effective": owner,
                 "brand_entry": "auto",
                 "conversation_id": conversation_id,
             }
@@ -696,7 +931,7 @@ def chat_auto():
     return resp
 
 
-# --- Brand route: /chat/<brand> ---
+# --- Owner route: /chat/<brand> (compat) ---
 @app.route("/chat/<brand>", methods=["POST"])
 def chat_brand(brand: str):
     try:
@@ -711,17 +946,20 @@ def chat_brand(brand: str):
     metadata = _payload_metadata(payload)
     conversation_id, user_id = _get_or_create_conversation_id(payload)
 
-    reply, usage, brand_effective = process_chat(brand, user_text, conversation_id)
+    is_first_turn = len(load_conversation_messages(conversation_id)) == 0
+
+    reply, usage, owner = process_chat(brand, user_text, conversation_id)
+    reply = maybe_prefix_common_greeting(reply, is_first_turn=is_first_turn)
 
     append_conversation_turn(
         conversation_id=conversation_id,
-        brand_effective=brand_effective,
+        brand_effective=owner,
         user_text=user_text,
         assistant_reply=reply,
         extra={
             "metadata": metadata,
             "brand_entry": brand,
-            "brand_effective": brand_effective,
+            "brand_effective": owner,
             "openai_usage": usage,
             "user_id": user_id,
         },
@@ -732,7 +970,7 @@ def chat_brand(brand: str):
             {
                 "reply": reply,
                 "answer": reply,
-                "brand_effective": brand_effective,
+                "brand_effective": owner,
                 "brand_entry": brand,
                 "conversation_id": conversation_id,
             }
@@ -783,17 +1021,14 @@ def kb_upsert(brand: str):
         return jsonify({"error": "invalid_json"}), 400
 
     kb = load_kb(brand)
-    items = kb.get("items") or []
-    if not isinstance(items, list):
-        items = []
 
+    # Compat: accept "items" field, but keep full KB dict otherwise
     new_items = payload.get("items")
     if isinstance(new_items, list):
-        items = new_items
+        kb["items"] = new_items
 
-    kb["items"] = items
     ok = save_kb(brand, kb)
-    return jsonify({"ok": ok, "brand": brand, "count": len(items)}), 200
+    return jsonify({"ok": ok, "brand": brand}), 200
 
 
 # --- Admin API ---
@@ -860,12 +1095,7 @@ def admin_api_diag():
         exists = os.path.exists(path)
         data = _safe_read_json(path, None) if exists else None
         load_ok = isinstance(data, dict)
-        items_count = 0
-        if isinstance(data, dict):
-            items = data.get("items")
-            if isinstance(items, list):
-                items_count = len(items)
-        return {"exists": exists, "file": fname, "path": path, "load_ok": load_ok, "items_count": items_count}
+        return {"exists": exists, "file": fname, "path": path, "load_ok": load_ok}
 
     try:
         conv_files = len([f for f in os.listdir(CONV_DIR) if f.endswith(".json")])
@@ -885,6 +1115,7 @@ def admin_api_diag():
                 "client_ready": bool(_openai_client),
                 "key_present": bool(OPENAI_API_KEY),
                 "model": OPENAI_MODEL,
+                "reasoning_effort": OPENAI_REASONING_EFFORT,
                 "init_error": _openai_init_error,
             },
         }
