@@ -26,15 +26,15 @@
       <div class="title">💬 Assistant Runningman & Retroworld</div>
       <div id="messages" class="messages"></div>
       <div class="row">
-        <input id="input" type="text" placeholder="Posez votre question (Game Zone, VR, Escape VR, quiz, anniversaire…)">
+        <input id="input" type="text" placeholder="Posez votre question (VR, Escape VR, quiz, Game Zone, salle enfant…)">
         <button id="send">Envoyer</button>
       </div>
-      <div class="hint">Ex : “Je veux organiser un anniversaire pour 10 enfants, quelles options ?”</div>
+      <div class="hint">Ex : “Je veux faire de la VR pour 4 personnes” ou “Je veux une salle enfant”</div>
     </div>
   </div>
 
   <script>
-    const API_BASE = location.origin; // si servi depuis le même serveur que l'API
+    const API_BASE = location.origin;
     const START_SIGNAL = "__start__";
 
     const $messages = document.getElementById('messages');
