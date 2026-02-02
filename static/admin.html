@@ -14,10 +14,9 @@
       --text:#e9eef5;
       --muted:#9fb1ca;
       --accent:#3b82f6;
-      --ok:#22c55e;
+      --accent2:#22c55e;
       --warn:#f59e0b;
       --bad:#ef4444;
-      --chip:#111827;
       --shadow:0 10px 30px rgba(0,0,0,.35);
       --radius:16px;
       --radius2:12px;
@@ -28,9 +27,10 @@
     body{
       margin:0;
       font-family:var(--sans);
-      background: radial-gradient(1000px 600px at 20% 0%, rgba(59,130,246,.16), transparent 60%),
-                  radial-gradient(900px 600px at 90% 20%, rgba(245,158,11,.10), transparent 60%),
-                  var(--bg);
+      background:
+        radial-gradient(1000px 600px at 20% 0%, rgba(59,130,246,.16), transparent 60%),
+        radial-gradient(900px 600px at 90% 20%, rgba(245,158,11,.10), transparent 60%),
+        var(--bg);
       color:var(--text);
     }
     a{color:inherit}
@@ -70,20 +70,31 @@
       padding:10px 12px;
       border-radius:12px;
       cursor:pointer;
-      font-weight:700;
+      font-weight:800;
       box-shadow: 0 10px 24px rgba(59,130,246,.22);
+      transition: transform .08s ease, filter .12s ease;
     }
+    .btn:hover{ transform: translateY(-1px); filter: brightness(1.05); }
+    .btn:active{ transform: translateY(0px); }
+
     .btn.secondary{
       background:#1e293b;
       border:1px solid rgba(255,255,255,.08);
       box-shadow:none;
       color:var(--text);
+      font-weight:800;
     }
     .btn.ghost{
       background: transparent;
       border:1px solid rgba(255,255,255,.12);
       box-shadow:none;
       color:var(--text);
+      font-weight:800;
+    }
+    .btn.green{
+      background: rgba(34,197,94,.95);
+      color:#052013;
+      box-shadow: 0 10px 24px rgba(34,197,94,.18);
     }
     .btn:disabled{opacity:.6; cursor:not-allowed}
     .pill{
@@ -96,7 +107,7 @@
       color: var(--muted);
       white-space:nowrap;
     }
-    .pill strong{color:var(--text); font-weight:800}
+    .pill strong{color:var(--text); font-weight:900}
     .wrap{
       max-width:1200px;
       margin:0 auto;
@@ -123,8 +134,8 @@
       display:flex; align-items:center; justify-content:space-between; gap:10px;
     }
     .card-title{
-      font-weight:900;
-      font-size:13px;
+      font-weight:1000;
+      font-size:12px;
       letter-spacing:.3px;
       text-transform:uppercase;
       color: var(--muted);
@@ -166,6 +177,10 @@
       font-family: var(--mono);
       font-size:11px;
       color: var(--muted);
+      overflow:hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 240px;
     }
     .chip{
       display:inline-flex; align-items:center; gap:6px;
@@ -176,6 +191,7 @@
       border:1px solid rgba(255,255,255,.08);
       color: var(--muted);
       white-space:nowrap;
+      font-weight:900;
     }
     .chip.retroworld{color:#dbeafe; border-color: rgba(59,130,246,.35); background: rgba(59,130,246,.12)}
     .chip.runningman{color:#fde68a; border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.12)}
@@ -183,7 +199,7 @@
       color: var(--text);
       opacity:.92;
       font-size:12px;
-      line-height:1.25;
+      line-height:1.35;
       display:-webkit-box;
       -webkit-line-clamp:2;
       -webkit-box-orient: vertical;
@@ -224,6 +240,7 @@
       padding:18px;
       color: var(--muted);
       background: rgba(13,19,31,.35);
+      line-height:1.35;
     }
     .thread{
       display:flex;
@@ -237,7 +254,7 @@
       max-width: 88%;
       padding:10px 12px;
       border-radius: 14px;
-      line-height: 1.35;
+      line-height: 1.45;
       font-size: 13px;
       border: 1px solid rgba(255,255,255,.08);
       background: rgba(17,24,39,.55);
@@ -306,6 +323,7 @@
       display:none;
       max-width: 420px;
       font-size: 12px;
+      line-height:1.3;
     }
     .toast.show{display:block}
     .kbd{
@@ -331,14 +349,15 @@
       <div class="brand">
         <div class="logo" aria-hidden="true"></div>
         <div>
-          <div style="font-size:14px; font-weight:900;">Admin Retroworld IA</div>
-          <div class="small">Conversations en 1 seul fil (format v2)</div>
+          <div style="font-size:14px; font-weight:1000;">Admin Retroworld IA</div>
+          <div class="small">Conversations stockées (format v2) + export ZIP</div>
         </div>
       </div>
 
       <div class="controls">
         <span class="pill" id="pillStatus">Statut: <strong id="statusText">…</strong></span>
         <span class="pill">Serveur: <strong id="originText"></strong></span>
+        <button class="btn ghost" id="btnExportZip">Exporter ZIP</button>
         <button class="btn secondary" id="btnDiag">Diag</button>
         <button class="btn" id="btnRefresh">Rafraîchir</button>
       </div>
@@ -355,7 +374,7 @@
         </div>
 
         <div class="search">
-          <input id="searchInput" placeholder="Rechercher (id, user_id, preview)…" />
+          <input id="searchInput" placeholder="Rechercher (id, user_id, preview, brand)…" />
           <button class="btn ghost" id="btnClear">Effacer</button>
         </div>
 
@@ -376,7 +395,7 @@
           <div class="empty" id="emptyState">
             Sélectionnez une conversation à gauche.
             <div style="margin-top:10px" class="small">
-              Astuce: si le token admin n’est pas en URL, vous pouvez le mettre via le champ en bas, puis <span class="kbd">Rafraîchir</span>.
+              Astuce : si le token admin n’est pas en URL, colle-le en bas puis clique <span class="kbd">Rafraîchir</span>.
             </div>
           </div>
 
@@ -385,13 +404,14 @@
 
         <div class="toolbar">
           <div class="field" title="Token admin (X-Admin-Token / ?token=...)">
-            <span style="opacity:.8;">🔑</span>
+            <span style="opacity:.85;">🔑</span>
             <input id="tokenInput" placeholder="ADMIN_DASHBOARD_TOKEN (optionnel si déjà en URL)" />
           </div>
 
           <button class="btn secondary" id="btnCopyId">Copier conv_id</button>
           <button class="btn secondary" id="btnCopyJson">Copier JSON</button>
-          <button class="btn" id="btnReload">Recharger la conversation</button>
+          <button class="btn green" id="btnExportZip2">Exporter ZIP</button>
+          <button class="btn" id="btnReload">Recharger</button>
         </div>
       </div>
     </div>
@@ -409,7 +429,7 @@
       const t = $("toast");
       t.textContent = msg;
       t.classList.add("show");
-      setTimeout(() => t.classList.remove("show"), 2200);
+      setTimeout(() => t.classList.remove("show"), 2400);
     }
 
     function qs(name){
@@ -429,7 +449,6 @@
 
     function fmtTs(ts){
       if(!ts) return "";
-      // keep ISO, short
       try{
         const d = new Date(ts);
         if(isNaN(d.getTime())) return String(ts);
@@ -438,6 +457,15 @@
       }catch(e){
         return String(ts);
       }
+    }
+
+    function escapeHtml(str){
+      return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
     }
 
     // -------------------------------------------------------
@@ -454,7 +482,6 @@
 
     $("originText").textContent = location.origin;
 
-    // Load token from URL, else from localStorage
     const URL_TOKEN = qs("token") || "";
     const LS_KEY = "rw_admin_token";
     const LS_TOKEN = localStorage.getItem(LS_KEY) || "";
@@ -469,7 +496,6 @@
       const token = (state.adminToken || "").trim();
       const url = new URL(location.origin + path);
 
-      // Prefer query param token (matches backend _require_admin_token)
       if(token){
         url.searchParams.set("token", token);
       }
@@ -490,13 +516,42 @@
       return data;
     }
 
+    function syncTokenFromUI(){
+      state.adminToken = ($("tokenInput").value || "").trim();
+      if(state.adminToken){
+        localStorage.setItem(LS_KEY, state.adminToken);
+        setQs("token", state.adminToken);
+      } else {
+        localStorage.removeItem(LS_KEY);
+        setQs("token", "");
+      }
+    }
+
+    function downloadZip(){
+      syncTokenFromUI();
+      const token = (state.adminToken || "").trim();
+      const url = new URL(location.origin + "/admin/api/export/conversations.zip");
+      if(token) url.searchParams.set("token", token);
+
+      // Téléchargement sans popup: lien temporaire
+      const a = document.createElement("a");
+      a.href = url.toString();
+      a.download = ""; // le serveur fournit le nom via Content-Disposition
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast("Export ZIP lancé");
+    }
+
     async function loadDiag(){
       const d = await apiGet("/admin/api/diag");
       const ok = d && d.openai && d.openai.client_ready;
       $("statusText").textContent = ok ? "OK" : "Dégradé";
       $("pillStatus").style.borderColor = ok ? "rgba(34,197,94,.35)" : "rgba(245,158,11,.35)";
       $("pillStatus").style.background = ok ? "rgba(34,197,94,.10)" : "rgba(245,158,11,.10)";
-      toast("Diag chargé");
+      const model = d && d.openai ? (d.openai.model || "—") : "—";
+      const convCount = d && d.logs ? (d.logs.conversations_files_count || 0) : 0;
+      toast(`Diag: modèle ${model} | conversations: ${convCount}`);
       return d;
     }
 
@@ -507,7 +562,6 @@
       renderList();
       $("countChip").textContent = String(state.filtered.length);
       $("statusText").textContent = "OK";
-      toast("Conversations chargées");
     }
 
     async function loadConversationDetail(convId){
@@ -563,7 +617,7 @@
 
         div.innerHTML = `
           <div class="conv-top">
-            <div class="conv-id">${escapeHtml(c.id || "")}</div>
+            <div class="conv-id" title="${escapeHtml(c.id || "")}">${escapeHtml(c.id || "")}</div>
             <span class="${chipClass}">${escapeHtml(brand)}</span>
           </div>
           <div class="preview">${escapeHtml(c.preview || "")}</div>
@@ -574,7 +628,6 @@
         `;
 
         div.addEventListener("click", async () => {
-          // highlight immediately
           state.activeId = c.id;
           renderList();
           $("emptyState").style.display = "none";
@@ -636,38 +689,21 @@
         thread.appendChild(wrap);
       }
 
-      // scroll to bottom
       thread.scrollTop = thread.scrollHeight;
-    }
-
-    function escapeHtml(str){
-      return String(str)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
     }
 
     // -------------------------------------------------------
     // Events
     // -------------------------------------------------------
     $("btnRefresh").addEventListener("click", async () => {
-      state.adminToken = ($("tokenInput").value || "").trim();
-      if(state.adminToken){
-        localStorage.setItem(LS_KEY, state.adminToken);
-        setQs("token", state.adminToken); // keep it in URL (handy on Render)
-      } else {
-        localStorage.removeItem(LS_KEY);
-        setQs("token", "");
-      }
-
+      syncTokenFromUI();
       $("statusText").textContent = "…";
       try{
         await loadConversations();
         if(state.activeId){
           await loadConversationDetail(state.activeId);
         }
+        toast("Rafraîchi");
       }catch(e){
         $("statusText").textContent = "Erreur";
         toast("Erreur: " + (e.message || e));
@@ -675,22 +711,17 @@
     });
 
     $("btnDiag").addEventListener("click", async () => {
-      state.adminToken = ($("tokenInput").value || "").trim();
-      if(state.adminToken){
-        localStorage.setItem(LS_KEY, state.adminToken);
-        setQs("token", state.adminToken);
-      }
+      syncTokenFromUI();
       try{
-        const d = await loadDiag();
-        // Small extra toast info
-        const kbR = d && d.kb && d.kb.retroworld ? d.kb.retroworld.items_count : "?";
-        const kbRM = d && d.kb && d.kb.runningman ? d.kb.runningman.items_count : "?";
-        toast(`KB retroworld: ${kbR} | KB runningman: ${kbRM}`);
+        await loadDiag();
       }catch(e){
         toast("Diag erreur: " + (e.message || e));
         $("statusText").textContent = "Erreur";
       }
     });
+
+    $("btnExportZip").addEventListener("click", downloadZip);
+    $("btnExportZip2").addEventListener("click", downloadZip);
 
     $("btnClear").addEventListener("click", () => {
       $("searchInput").value = "";
@@ -730,7 +761,7 @@
       try{
         const payload = JSON.stringify(state.activeObj, null, 2);
         await navigator.clipboard.writeText(payload);
-        toast("JSON conversation copié");
+        toast("JSON copié");
       }catch(e){
         toast("Impossible de copier");
       }
@@ -743,13 +774,13 @@
       $("statusText").textContent = "…";
       try{
         await loadConversations();
-        // Auto-open by conv param if provided
         const conv = qs("conv");
         if(conv){
           state.activeId = conv;
           await loadConversationDetail(conv);
           renderList();
         }
+        toast("Admin prêt");
       }catch(e){
         $("statusText").textContent = "Erreur";
         toast("Erreur chargement: " + (e.message || e));
