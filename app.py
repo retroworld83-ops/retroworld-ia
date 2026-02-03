@@ -8,7 +8,7 @@ import re
 import time
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, jsonify, request, send_from_directory, make_response, send_file
@@ -41,6 +41,9 @@ OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS") or os.geten
 
 ADMIN_DASHBOARD_TOKEN = (os.getenv("ADMIN_DASHBOARD_TOKEN") or os.getenv("ADMIN_API_TOKEN") or "").strip()
 USER_HISTORY_TOKEN = (os.getenv("USER_HISTORY_TOKEN") or "").strip()
+
+# Lien de réservation Retroworld (Qweekle) si tu l’as dans Render env
+QWEEKLE_BOOKING_URL = (os.getenv("QWEEKLE_BOOKING_URL") or "").strip()
 
 LOG_LEVEL = (os.getenv("LOG_LEVEL") or "INFO").upper()
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
@@ -121,11 +124,12 @@ def _norm(s: str) -> str:
 
 
 def strip_markdown_simple(s: str) -> str:
+    # ✅ FIX: il faut passer "s" à re.sub(...)
     s = str(s or "")
-    s = re.sub(r"\*\*(.*?)\*\*", r"\1")       # **gras**
-    s = re.sub(r"`([^`]*)`", r"\1")           # `code`
-    s = re.sub(r"^\s*-\s+", "• ", s, flags=re.M) # - liste
-    s = re.sub(r"^\s*\*\s+", "• ", s, flags=re.M)
+    s = re.sub(r"\*\*(.*?)\*\*", r"\1", s)        # **gras**
+    s = re.sub(r"`([^`]*)`", r"\1", s)            # `code`
+    s = re.sub(r"^\s*-\s+", "• ", s, flags=re.M)  # - liste
+    s = re.sub(r"^\s*\*\s+", "• ", s, flags=re.M) # * liste
     return s
 
 
@@ -225,6 +229,15 @@ def _is_price_intent(text: str) -> bool:
     return any(k in t for k in triggers)
 
 
+def _is_link_request(text: str) -> bool:
+    t = _norm(text)
+    if "lien" in t and any(k in t for k in ["reservation", "réservation", "réserver", "reserver", "en ligne", "booking"]):
+        return True
+    if "donne moi le lien" in t or "donnez moi le lien" in t or "donnez-moi le lien" in t:
+        return True
+    return False
+
+
 def _contains_date_word(text: str) -> bool:
     t = _norm(text)
     if any(k in t for k in ["aujourd", "demain", "après-demain", "apres-demain", "apres demain", "ce soir", "cet aprem", "cette aprem"]):
@@ -293,6 +306,11 @@ def _is_just_question_mark(text: str) -> bool:
 
 
 def detect_owner_from_text(text: str) -> str:
+    """
+    RÉPARTITION OFFICIELLE :
+    - Retroworld : VR, Escape VR, Quiz, Goûter à volonté + gâteau, Anniversaire, Fidélité/points
+    - Runningman : Game Zone, Escape game NON-VR, Salle enfant
+    """
     t = _norm(text)
 
     if "retroworld" in t:
@@ -915,8 +933,10 @@ def build_booking_reply(owner: str, user_text: str, history: List[Dict[str, Any]
 
     if owner == "runningman":
         contact_lines = f"Runningman : {rm_tel}\nSite : {rm_site}"
+        booking_hint = "Pour réserver en ligne, passez par le site Runningman."
     else:
         contact_lines = f"Retroworld : {rw_tel}\nEmail : {rw_mail}\nSite : {rw_site}"
+        booking_hint = "Pour réserver en ligne, dites « Donnez-moi le lien »."
 
     msg = (
         estimate
@@ -938,9 +958,25 @@ def build_booking_reply(owner: str, user_text: str, history: List[Dict[str, Any]
         "- nombre de participants (+ âges si enfants)\n"
         "- jour souhaité + fourchette horaire\n"
         "- nom + téléphone (ou email)\n"
-        "\nOption réservation en ligne : si vous le souhaitez, dites « Donnez-moi le lien » et je vous l’enverrai.\n"
+        "\n"
+        + booking_hint
+        + "\n"
     )
     return msg.strip()
+
+
+def build_booking_link_reply(owner: str) -> str:
+    if owner == "runningman":
+        return (
+            "Voici le lien/site pour réserver côté Runningman : https://runningmangames.fr\n"
+            "Je ne peux pas confirmer ni bloquer un créneau via le chat. Pour valider rapidement : 04 98 09 30 59."
+        )
+
+    link = QWEEKLE_BOOKING_URL or "https://www.retroworldfrance.com"
+    return (
+        f"Voici le lien de réservation Retroworld : {link}\n"
+        "Je ne peux pas confirmer ni bloquer un créneau via le chat. Si besoin : 04 94 47 94 64."
+    )
 
 
 # =========================================================
@@ -998,13 +1034,22 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
 
     hist = load_conversation_messages(conversation_id) if conversation_id else []
 
-    if _is_reservation_intent(user_text, history=hist):
-        return build_booking_reply(owner if owner != "auto" else "retroworld", user_text, hist), {"mode": "booking_guard"}, owner
+    # 0) Si l’utilisateur demande explicitement un LIEN
+    if _is_link_request(user_text):
+        eff_owner = owner if owner != "auto" else "retroworld"
+        return build_booking_link_reply(eff_owner), {"mode": "link_reply"}, eff_owner
 
+    # 1) Si réservation (date/jour/heure)
+    if _is_reservation_intent(user_text, history=hist):
+        eff_owner = owner if owner != "auto" else "retroworld"
+        return build_booking_reply(eff_owner, user_text, hist), {"mode": "booking_guard"}, eff_owner
+
+    # 2) Réponse tarifaire générale courte
     gen = rule_based_general_pricing_reply_if_needed(user_text)
     if gen:
         return gen, {"mode": "rule_based_general_pricing"}, owner
 
+    # 3) Prix Retroworld déterministe
     if owner == "retroworld":
         rb = rule_based_retroworld_estimate_reply(user_text, hist)
         if rb:
@@ -1019,7 +1064,7 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
         "RÈGLES ABSOLUES :\n"
         "- Ne jamais confirmer ni bloquer un créneau.\n"
         "- Ne jamais dire qu’un horaire est 'disponible'.\n"
-        "- Réponses en texte simple, sans markdown.\n"
+        "- Réponses en texte simple.\n"
         "- Si info incertaine : 1 question courte, sinon proposer téléphone.\n\n"
         + common_orientation_block()
         + "\n"
@@ -1052,7 +1097,7 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
     reply, usage = call_openai_chat(messages)
     reply = strip_markdown_simple(reply)
 
-    reply = sanitize_booking_reply(reply, user_text=user_text, owner=owner, history=hist)
+    reply = sanitize_booking_reply(reply, user_text=user_text, owner=(owner if owner != "auto" else "retroworld"), history=hist)
 
     return reply, usage, owner
 
@@ -1240,7 +1285,7 @@ def kb_upsert(brand: str):
 
 
 # =========================================================
-# ✅ ADMIN API (manquantes) - nécessaires pour admin.html
+# ADMIN API (pour admin.html)
 # =========================================================
 
 @app.route("/admin/api/conversations", methods=["GET"])
