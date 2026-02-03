@@ -122,8 +122,8 @@ def _norm(s: str) -> str:
 
 def strip_markdown_simple(s: str) -> str:
     s = str(s or "")
-    s = re.sub(r"\*\*(.*?)\*\*", r"\1", s)       # **gras**
-    s = re.sub(r"`([^`]*)`", r"\1", s)           # `code`
+    s = re.sub(r"\*\*(.*?)\*\*", r"\1")       # **gras**
+    s = re.sub(r"`([^`]*)`", r"\1")           # `code`
     s = re.sub(r"^\s*-\s+", "• ", s, flags=re.M) # - liste
     s = re.sub(r"^\s*\*\s+", "• ", s, flags=re.M)
     return s
@@ -261,13 +261,6 @@ def _extract_time(text: str) -> Optional[Tuple[int, int]]:
 
 
 def _is_reservation_intent(text: str, history: Optional[List[Dict[str, Any]]] = None) -> bool:
-    """
-    On déclenche "réservation" si:
-    - mots explicites (réserver, dispo, créneau, etc)
-    - OU date/jour détecté
-    - OU heure + date/jour (ex: "demain 17h")
-    - OU heure seule mais conversation récente parlait déjà de réservation
-    """
     t = _norm(text)
 
     explicit = any(k in t for k in ["réserver", "reservation", "réservation", "dispo", "disponible", "créneau", "creneau", "bloquer", "confirmer", "rdv", "rendez-vous", "venir à"])
@@ -279,7 +272,6 @@ def _is_reservation_intent(text: str, history: Optional[List[Dict[str, Any]]] = 
     if has_time and has_date:
         return True
 
-    # Si l'utilisateur répond juste "17h30" dans un fil déjà "resa"
     if has_time and history:
         recent = []
         for m in reversed(history):
@@ -301,11 +293,6 @@ def _is_just_question_mark(text: str) -> bool:
 
 
 def detect_owner_from_text(text: str) -> str:
-    """
-    RÉPARTITION OFFICIELLE :
-    - Retroworld : VR, Escape VR, Quiz, Goûter à volonté + gâteau, Anniversaire, Fidélité/points
-    - Runningman : Game Zone, Escape game NON-VR, Salle enfant
-    """
     t = _norm(text)
 
     if "retroworld" in t:
@@ -808,15 +795,12 @@ def _detect_retroworld_activity(user_text: str, hist_ctx: Dict[str, Any]) -> Opt
 
 
 def _retroworld_price_per_player(activity: str, majorated: bool, quiz_duration: Optional[int]) -> int:
-    # Escape VR
     if activity == "escape_vr":
         return 35 if majorated else 30
 
-    # Jeux VR / Arcade VR (30 min)
     if activity == "jeux_vr":
         return 20 if majorated else 15
 
-    # Quiz
     if activity == "quiz":
         d = quiz_duration or 60
         if d == 30:
@@ -920,7 +904,6 @@ def build_booking_reply(owner: str, user_text: str, history: List[Dict[str, Any]
     rw_mail = "contact@retroworldfrance.com"
     rw_site = "https://www.retroworldfrance.com"
 
-    # Estimation prix si Retroworld et possible (optionnel mais utile)
     estimate = ""
     if owner == "retroworld":
         est = rule_based_retroworld_estimate_reply(user_text, history)
@@ -932,10 +915,8 @@ def build_booking_reply(owner: str, user_text: str, history: List[Dict[str, Any]
 
     if owner == "runningman":
         contact_lines = f"Runningman : {rm_tel}\nSite : {rm_site}"
-        mail_line = ""
     else:
         contact_lines = f"Retroworld : {rw_tel}\nEmail : {rw_mail}\nSite : {rw_site}"
-        mail_line = ""
 
     msg = (
         estimate
@@ -991,16 +972,11 @@ def common_greeting_text() -> str:
 
 
 def sanitize_booking_reply(reply: str, user_text: str, owner: str, history: List[Dict[str, Any]]) -> str:
-    """
-    Pare-chocs: si OpenAI sort un truc interdit, on remplace par le message standard.
-    """
     if not reply:
         return reply
-
     low = _norm(reply)
     if any(re.search(p, low) for p in _FORBIDDEN_BOOKING_RE):
         return build_booking_reply(owner, user_text, history)
-
     return reply
 
 
@@ -1022,16 +998,13 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
 
     hist = load_conversation_messages(conversation_id) if conversation_id else []
 
-    # 0) Si réservation (au sens "date/jour" ou "réserver/dispo"), on renvoie direct le message standard
     if _is_reservation_intent(user_text, history=hist):
         return build_booking_reply(owner if owner != "auto" else "retroworld", user_text, hist), {"mode": "booking_guard"}, owner
 
-    # 1) Réponse tarifaire générale courte si besoin
     gen = rule_based_general_pricing_reply_if_needed(user_text)
     if gen:
         return gen, {"mode": "rule_based_general_pricing"}, owner
 
-    # 2) Prix Retroworld déterministe
     if owner == "retroworld":
         rb = rule_based_retroworld_estimate_reply(user_text, hist)
         if rb:
@@ -1079,7 +1052,6 @@ def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tupl
     reply, usage = call_openai_chat(messages)
     reply = strip_markdown_simple(reply)
 
-    # Pare-chocs anti-resa
     reply = sanitize_booking_reply(reply, user_text=user_text, owner=owner, history=hist)
 
     return reply, usage, owner
@@ -1266,6 +1238,107 @@ def kb_upsert(brand: str):
     ok = save_kb(brand, kb)
     return jsonify({"ok": ok, "brand": brand}), 200
 
+
+# =========================================================
+# ✅ ADMIN API (manquantes) - nécessaires pour admin.html
+# =========================================================
+
+@app.route("/admin/api/conversations", methods=["GET"])
+def admin_api_conversations():
+    if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
+        return jsonify({"error": "forbidden"}), 403
+
+    conv_ids = list_conversations()
+    items: List[Dict[str, Any]] = []
+
+    for cid in conv_ids:
+        obj = load_conversation_obj(cid)
+        msgs = obj.get("messages") or []
+        brand_eff = str(obj.get("brand_last") or "unknown")
+
+        preview = ""
+        timestamp = None
+
+        if isinstance(msgs, list) and msgs:
+            lastm = msgs[-1] if isinstance(msgs[-1], dict) else {}
+            timestamp = lastm.get("ts")
+
+            last_user = ""
+            for m in reversed(msgs):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    last_user = str(m.get("content") or "")
+                    break
+
+            preview = (last_user or str(lastm.get("content") or "")).strip()
+            preview = re.sub(r"\s+", " ", preview)
+            if len(preview) > 120:
+                preview = preview[:117] + "..."
+
+        items.append(
+            {
+                "id": cid,
+                "brand": brand_eff,
+                "preview": preview,
+                "timestamp": timestamp,
+                "user_id": obj.get("user_id"),
+            }
+        )
+
+    return jsonify(items), 200
+
+
+@app.route("/admin/api/conversation/<conversation_id>", methods=["GET"])
+def admin_api_conversation_detail(conversation_id: str):
+    if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
+        return jsonify({"error": "forbidden"}), 403
+
+    obj = load_conversation_obj(conversation_id)
+    msgs: List[Dict[str, Any]] = obj.get("messages") or []
+    simple = [{"role": m.get("role"), "content": m.get("content"), "ts": m.get("ts")} for m in msgs if isinstance(m, dict)]
+    return jsonify({"conversation_id": conversation_id, "messages": simple, "conversation": obj, "brand_final": obj.get("brand_last")}), 200
+
+
+@app.route("/admin/api/diag", methods=["GET"])
+def admin_api_diag():
+    if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
+        return jsonify({"error": "forbidden"}), 403
+
+    def kb_diag(brand: str) -> Dict[str, Any]:
+        fname = f"kb_{brand}.json"
+        path = os.path.join(KB_DIR, fname)
+        exists = os.path.exists(path)
+        data = _safe_read_json(path, None) if exists else None
+        load_ok = isinstance(data, dict)
+        return {"exists": exists, "file": fname, "path": path, "load_ok": load_ok}
+
+    try:
+        conv_files = len([f for f in os.listdir(CONV_DIR) if f.endswith(".json")])
+    except Exception:
+        conv_files = 0
+
+    return jsonify(
+        {
+            "service": SERVICE_NAME,
+            "port": PORT,
+            "has_admin_token": bool(ADMIN_DASHBOARD_TOKEN),
+            "has_user_history_token": bool(USER_HISTORY_TOKEN),
+            "paths": {"kb_dir": KB_DIR, "data_dir": DATA_DIR, "conv_dir": CONV_DIR},
+            "kb": {"retroworld": kb_diag("retroworld"), "runningman": kb_diag("runningman")},
+            "logs": {"conversations_files_count": conv_files},
+            "openai": {
+                "client_ready": bool(_openai_client),
+                "key_present": bool(OPENAI_API_KEY),
+                "model": OPENAI_MODEL,
+                "reasoning_effort": OPENAI_REASONING_EFFORT,
+                "init_error": _openai_init_error,
+            },
+        }
+    ), 200
+
+
+# =========================================================
+# Export ZIP conversations
+# =========================================================
 
 @app.route("/admin/api/export/conversations.zip", methods=["GET"])
 def admin_export_conversations_zip():
