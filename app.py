@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from flask import Flask, jsonify, request, send_from_directory, make_response, send_file
 from flask_cors import CORS
 
+import bt_service
+
 try:
     from zoneinfo import ZoneInfo
 except Exception:
@@ -63,6 +65,19 @@ else:
 
 CONV_COOKIE_NAME = os.getenv("CONV_COOKIE_NAME", "rw_conv_id")
 START_SIGNAL = "__start__"
+
+# =========================================================
+# BT (assistant interne) - CONFIG
+# =========================================================
+
+BT_API_TOKEN = (os.getenv("BT_API_TOKEN") or "").strip()
+BT_PROFILE_PATH = (os.getenv("BT_PROFILE_PATH") or os.path.join(BASE_DIR, "config", "bt_profile.yaml")).strip()
+BT_MAX_OUTPUT_TOKENS = int(os.getenv("BT_MAX_OUTPUT_TOKENS") or "400")
+BT_MAX_REPLY_CHARS = int(os.getenv("BT_MAX_REPLY_CHARS") or "500")
+BT_CONV_DIR = os.path.join(DATA_DIR, "bt_conversations")
+_bt_store = bt_service.BTStore(BT_CONV_DIR)
+_bt_profile_cache: Dict[str, Any] = {}
+_bt_profile_cache_ts: float = 0.0
 
 # =========================================================
 # OpenAI client
@@ -656,6 +671,35 @@ def _require_user_token(req) -> bool:
     return bool(tok) and tok == USER_HISTORY_TOKEN
 
 
+def _require_bt_token(req) -> bool:
+    """BT est un endpoint interne: verrouillé par défaut."""
+    expected = (BT_API_TOKEN or ADMIN_DASHBOARD_TOKEN or "").strip()
+    if not expected:
+        return False
+    tok = (req.args.get("token") or "").strip()
+    if not tok:
+        tok = (req.headers.get("X-BT-Token") or "").strip()
+    if not tok:
+        auth = (req.headers.get("Authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            tok = auth[7:].strip()
+    return bool(tok) and tok == expected
+
+
+def _bt_profile() -> Dict[str, Any]:
+    """Recharge léger du profil BT (utile si tu modifies le YAML sans redeploy)."""
+    global _bt_profile_cache, _bt_profile_cache_ts
+    now = time.time()
+    if _bt_profile_cache and (now - _bt_profile_cache_ts) < 5.0:
+        return _bt_profile_cache
+    prof = bt_service.load_bt_profile(BT_PROFILE_PATH) or {}
+    if not isinstance(prof, dict):
+        prof = {}
+    _bt_profile_cache = prof
+    _bt_profile_cache_ts = now
+    return _bt_profile_cache
+
+
 # =========================================================
 # Payload parsing
 # =========================================================
@@ -1231,6 +1275,77 @@ def root():
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
+
+
+@app.route("/bt/health", methods=["GET"])
+def bt_health():
+    if not _require_bt_token(request):
+        return jsonify({"error": "forbidden"}), 403
+    return jsonify({"status": "ok", "bt": "ok"}), 200
+
+
+@app.route("/bt/profile", methods=["GET"])
+def bt_profile():
+    if not _require_bt_token(request):
+        return jsonify({"error": "forbidden"}), 403
+    prof = _bt_profile()
+    # Pas de secrets attendus ici: c'est un fichier de comportement.
+    return jsonify({"profile": prof, "profile_path": BT_PROFILE_PATH}), 200
+
+
+@app.route("/bt/chat", methods=["POST"])
+def bt_chat():
+    if not _require_bt_token(request):
+        return jsonify({"error": "forbidden"}), 403
+
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid_json"}), 400
+
+    # garde-fou: si un appel est marqué comme "public", on ignore.
+    source = str(payload.get("source") or payload.get("audience") or "team").strip().lower()
+    if source in ("public", "visitor", "client"):
+        return ("", 204)
+
+    user_text = str(
+        payload.get("text")
+        or payload.get("message")
+        or payload.get("input")
+        or _payload_text(payload)
+        or ""
+    ).strip()
+    if not user_text:
+        return jsonify({"error": "missing_message"}), 400
+
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    if not conversation_id:
+        conversation_id = "bt_" + datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+
+    # nettoyage opportuniste
+    _bt_store.prune_old()
+
+    prof = _bt_profile()
+    system_prompt = bt_service.bt_system_prompt(prof)
+    history = _bt_store.prompt_messages(conversation_id, max_pairs=8)
+
+    reply, usage = bt_service.call_openai_bt(
+        openai_client=_openai_client,
+        model=OPENAI_MODEL,
+        reasoning_effort=OPENAI_REASONING_EFFORT,
+        temperature=OPENAI_TEMPERATURE,
+        max_output_tokens=BT_MAX_OUTPUT_TOKENS,
+        system_prompt=system_prompt,
+        history=history,
+        user_text=user_text,
+    )
+
+    reply = bt_service.sanitize_bt_reply(reply, max_chars=BT_MAX_REPLY_CHARS)
+
+    _bt_store.append(conversation_id, "user", user_text)
+    _bt_store.append(conversation_id, "assistant", reply, extra={"openai_usage": usage})
+
+    return jsonify({"reply": reply, "answer": reply, "conversation_id": conversation_id, "usage": usage}), 200
 
 
 @app.route("/faq/retroworld", methods=["GET"])
