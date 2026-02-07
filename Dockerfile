@@ -7,11 +7,13 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY app.py /app/
+COPY bt_service.py /app/
 COPY kb_retroworld.json /app/
 COPY kb_runningman.json /app/
+COPY config /app/config
 COPY static /app/static
 
-RUN pip install --no-cache-dir flask flask-cors openai gunicorn
+RUN pip install --no-cache-dir flask flask-cors openai gunicorn pyyaml
 
 ENV PYTHONUNBUFFERED=1
 
