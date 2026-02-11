@@ -304,6 +304,12 @@ def _is_reservation_intent(text: str, history: Optional[List[Dict[str, Any]]] = 
     has_date = _contains_date_word(t)
     has_time = _extract_time(t) is not None
 
+
+    # Garde-fou : demandes de conseils / catalogue ne doivent pas être traitées comme une réservation
+    if not explicit and not has_date and not (has_time and has_date):
+        if any(k in t for k in ["jeu", "jeux", "scénario", "scenario", "catalogue", "conseille", "recommande", "recommander"]):
+            return False
+
     if explicit or has_date:
         return True
     if has_time and has_date:
@@ -416,28 +422,39 @@ def infer_owner_from_history(history: List[Dict[str, Any]]) -> str:
     return "auto"
 
 
-def detect_owner(brand_entry: str, user_text: str, history: List[Dict[str, Any]]) -> str:
-    """
-    Combine brand_entry + texte + historique.
+def detect_owner(brand_entry: str, user_text: str, history: Optional[List[Dict[str, Any]]] = None) -> str:
+    """Détermine à qui répondre (Retroworld / Runningman).
+
+    Règle importante : même si la page d'entrée est /chat/retroworld, l'utilisateur peut demander
+    une activité Runningman (ex: "gamezone"). Dans ce cas, le contenu du message PRIME.
     """
     be = (brand_entry or "auto").lower().strip()
+    if be not in ("retroworld", "runningman", "auto"):
+        be = "auto"
+
+    # 1) Le texte de l'utilisateur (si explicite) prime toujours.
+    owner_from_text = detect_owner_from_text(user_text)
+    if owner_from_text in ("retroworld", "runningman"):
+        return owner_from_text
+
+    # 2) Réponses ultra-courtes (ex: "3", "17h30") : on suit le contexte récent.
+    if _is_number_only(user_text) is not None or _is_time_only(user_text):
+        hist_owner = infer_owner_from_history(history or [])
+        if hist_owner in ("retroworld", "runningman"):
+            return hist_owner
+        # sinon, on retombe sur la page d'entrée si elle est explicite
+        if be in ("retroworld", "runningman"):
+            return be
+        return "auto"
+
+    # 3) Sinon, si la page d'entrée est explicite, on l'utilise comme défaut.
     if be in ("retroworld", "runningman"):
         return be
 
-    # 1) texte
-    o = detect_owner_from_text(user_text)
-    if o != "auto":
-        return o
+    # 4) Dernier recours : contexte historique.
+    hist_owner = infer_owner_from_history(history or [])
+    return hist_owner if hist_owner in ("retroworld", "runningman") else "auto"
 
-    # 2) message minimaliste (ex: "3" ou "17h") => owner du contexte
-    if _is_number_only(user_text) is not None or _is_time_only(user_text):
-        o2 = infer_owner_from_history(history)
-        if o2 != "auto":
-            return o2
-
-    # 3) fallback historique
-    o2 = infer_owner_from_history(history)
-    return o2
 
 
 # =========================================================
@@ -511,6 +528,250 @@ def kb_snippets_runningman(kb: Dict[str, Any], limit_lines: int = 40) -> List[st
                 if s:
                     out.append(s)
     return out[:limit_lines]
+
+# =========================================================
+# Catalogue Retroworld : recherche + recommandations (déterministe)
+# =========================================================
+
+def _extract_all_ints(text: str) -> List[int]:
+    return [int(x) for x in re.findall(r"\b\d{1,2}\b", _norm(text))]
+
+
+def _extract_players_and_ages_loose(text: str, history: Optional[List[Dict[str, Any]]] = None) -> Tuple[Optional[int], List[int]]:
+    """Extrait un nombre de joueurs et éventuellement des âges.
+    Exemples :
+    - "3" -> joueurs=3
+    - "3 personnes" -> joueurs=3
+    - "3 16 17 19 ans" -> joueurs=3, ages=[16,17,19]
+    """
+    p = _extract_players(text)
+    ages: List[int] = []
+
+    t = _norm(text)
+    nums = _extract_all_ints(text)
+
+    # format "3 16 17 19 ans"
+    if "ans" in t and len(nums) >= 2:
+        if p is None and 1 <= nums[0] <= 20:
+            p = nums[0]
+            ages = [n for n in nums[1:] if 1 <= n <= 99]
+        elif p is not None:
+            ages = [n for n in nums if 1 <= n <= 99 and n != p]
+
+    # message ultra court "3"
+    if p is None:
+        n_only = _is_number_only(text)
+        if n_only is not None and 1 <= n_only <= 50:
+            p = n_only
+
+    # fallback : historique (si l'utilisateur répond juste "3")
+    if p is None and history and _is_number_only(text) is not None:
+        for m in reversed(history[-10:]):
+            if isinstance(m, dict) and m.get("role") == "user":
+                n = _is_number_only(str(m.get("content") or ""))
+                if n is not None and 1 <= n <= 50:
+                    p = n
+                    break
+
+    return p, ages
+
+
+def _looks_like_catalog_request(text: str) -> bool:
+    t = _norm(text)
+    triggers = [
+        "conseille", "conseiller", "recommande", "recommander",
+        "quel jeu", "quels jeux", "quoi comme", "liste", "catalogue",
+        "scénario", "scenario", "scenarios", "scénarios",
+        "y a quoi", "vous avez quoi", "beaucoup de jeux", "combien de jeux",
+    ]
+    return any(k in t for k in triggers)
+
+
+def _wants_escape_catalog(text: str, history: Optional[List[Dict[str, Any]]] = None) -> bool:
+    t = _norm(text)
+    if "escape" in t or "scénario" in t or "scenario" in t:
+        return True
+    if history:
+        for m in reversed(history[-8:]):
+            if isinstance(m, dict) and m.get("role") == "user":
+                ut = _norm(str(m.get("content") or ""))
+                if "escape" in ut or "scénario" in ut or "scenario" in ut:
+                    return True
+    return False
+
+
+def _wants_vr_games_catalog(text: str, history: Optional[List[Dict[str, Any]]] = None) -> bool:
+    t = _norm(text)
+    if "jeu" in t or "jeux" in t or "arcade" in t:
+        return True
+    if history:
+        for m in reversed(history[-8:]):
+            if isinstance(m, dict) and m.get("role") == "user":
+                ut = _norm(str(m.get("content") or ""))
+                if "jeu" in ut or "jeux" in ut or "arcade" in ut:
+                    return True
+    return False
+
+
+def _has_motion_sickness_concern(text: str, history: Optional[List[Dict[str, Any]]] = None) -> bool:
+    t = _norm(text)
+    keys = ["naus", "malade", "mal de vr", "vom", "vertige", "motion"]
+    if any(k in t for k in keys):
+        return True
+    if history:
+        for m in reversed(history[-8:]):
+            if isinstance(m, dict) and m.get("role") == "user":
+                ut = _norm(str(m.get("content") or ""))
+                if any(k in ut for k in keys):
+                    return True
+    return False
+
+
+def _has_horror_preference(text: str, history: Optional[List[Dict[str, Any]]] = None) -> bool:
+    t = _norm(text)
+    keys = ["horreur", "peur", "frisson", "jumpscare", "jump scare"]
+    if any(k in t for k in keys):
+        return True
+    if history:
+        for m in reversed(history[-8:]):
+            if isinstance(m, dict) and m.get("role") == "user":
+                ut = _norm(str(m.get("content") or ""))
+                if any(k in ut for k in keys):
+                    return True
+    return False
+
+
+def _filter_items_by_players(items: List[Dict[str, Any]], players: Optional[int]) -> List[Dict[str, Any]]:
+    if not players:
+        return items
+    out = []
+    for it in items:
+        try:
+            mn = int(it.get("joueurs_min") or 1)
+            mx = int(it.get("joueurs_max") or mn)
+            if mn <= players <= mx:
+                out.append(it)
+        except Exception:
+            out.append(it)
+    return out
+
+
+def _fmt_range(mn: Any, mx: Any) -> str:
+    try:
+        mn_i = int(mn or 1)
+        mx_i = int(mx or mn_i)
+        return f"{mn_i}-{mx_i}"
+    except Exception:
+        return "—"
+
+
+def _format_game_line(it: Dict[str, Any]) -> str:
+    name = str(it.get("nom") or "").strip()
+    rng = _fmt_range(it.get("joueurs_min"), it.get("joueurs_max"))
+    genres = it.get("genres") or []
+    if isinstance(genres, list):
+        gtxt = "/".join([str(x) for x in genres if x]) or "—"
+    else:
+        gtxt = str(genres or "—")
+    diff = str(it.get("difficulte") or "—")
+    return f"• {name} ({rng} joueurs) | {gtxt} | {diff}".strip()
+
+
+def recommend_retroworld_from_catalog(user_text: str, history: List[Dict[str, Any]], kb_rw: Dict[str, Any]) -> Optional[str]:
+    """Retourne une recommandation / liste à partir du catalogue Retroworld, sinon None."""
+    if not _looks_like_catalog_request(user_text):
+        return None
+    # On évite de voler la main aux demandes de prix/réservation
+    if _is_price_intent(user_text) or _is_reservation_intent(user_text, history=history):
+        return None
+
+    vr_games = kb_rw.get("catalogue_jeux_vr") or []
+    esc_vr = kb_rw.get("catalogue_escape_vr") or []
+    if not isinstance(vr_games, list):
+        vr_games = []
+    if not isinstance(esc_vr, list):
+        esc_vr = []
+
+    players, ages = _extract_players_and_ages_loose(user_text, history=history)
+    wants_escape = _wants_escape_catalog(user_text, history) and not _wants_vr_games_catalog(user_text, history)
+    prefers_horror = _has_horror_preference(user_text, history)
+    motion_safe = _has_motion_sickness_concern(user_text, history)
+
+    # Question "combien/beaucoup"
+    t = _norm(user_text)
+    if ("combien" in t or "beaucoup" in t) and ("jeu" in t or "jeux" in t or "scénario" in t or "scenario" in t):
+        parts = []
+        parts.append(f"Catalogue Retroworld : {len(vr_games)} jeux VR (arcade) + {len(esc_vr)} scénarios d’Escape VR.")
+        if motion_safe:
+            parts.append("Tous nos jeux VR se jouent en téléportation (pas de déplacement au joystick), ce qui aide beaucoup à éviter le mal de VR.")
+        parts.append("Dites-moi : vous cherchez plutôt un jeu VR (session 30 min) ou un Escape VR (scénario 60 min) ?")
+        return "\n".join(parts).strip()
+
+    if wants_escape:
+        items = [it for it in esc_vr if isinstance(it, dict)]
+        if prefers_horror:
+            items_h = []
+            for it in items:
+                gens = it.get("genres") or []
+                if any(_norm(str(g)) == "horreur" for g in gens):
+                    items_h.append(it)
+            if items_h:
+                items = items_h
+
+        items = _filter_items_by_players(items, players)
+        if not items:
+            items = _filter_items_by_players([it for it in esc_vr if isinstance(it, dict)], players)
+
+        lines = [_format_game_line(it) for it in items[:6]]
+
+        header = "Idées de scénarios Escape VR" + (" (horreur)" if prefers_horror else "") + " :"
+        if players:
+            header = header.replace(" :", f" pour {players} joueur(s) :")
+        msg = header + "\n" + "\n".join(lines) if lines else "Je peux vous proposer des scénarios d’Escape VR. Vous seriez combien de joueurs ?"
+
+        tail = []
+        if ages:
+            tail.append(f"Âges notés : {', '.join(str(a) for a in ages)} ans.")
+        if motion_safe:
+            tail.append("Tous nos Escape VR se jouent en téléportation (pas de déplacement au joystick), donc généralement très confort.")
+        if tail:
+            msg += "\n\n" + "\n".join(tail)
+
+        msg += "\n\nVous voulez plutôt : frissons (tension) ou horreur plus action/jumpscares ?"
+        return msg.strip()
+
+    # Sinon: jeux VR (arcade)
+    items = [it for it in vr_games if isinstance(it, dict)]
+    items = _filter_items_by_players(items, players)
+
+    if motion_safe:
+        avoid = {"tir", "horreur", "survie"}
+        safe = []
+        for it in items:
+            genres = [_norm(str(g)) for g in (it.get("genres") or [])]
+            if not any(g in avoid for g in genres):
+                safe.append(it)
+        if safe:
+            items = safe
+
+    lines = [_format_game_line(it) for it in items[:7]]
+    if not lines:
+        return None
+
+    header = "Jeux VR conseillés" + (" (confort, anti-nausée)" if motion_safe else "") + " :"
+    if players:
+        header = header.replace(" :", f" pour {players} joueur(s) :")
+    msg = header + "\n" + "\n".join(lines)
+
+    extra = []
+    if motion_safe:
+        extra.append("Tous nos jeux VR se jouent en téléportation (pas de déplacement au joystick).")
+        extra.append("Astuce confort : démarrez par 30 min, faites une pause dès les premiers signes, et évitez les jeux très 'speed' si besoin.")
+    if extra:
+        msg += "\n\n" + "\n".join(extra)
+
+    msg += "\n\nVous préférez plutôt 'aventure/découverte', 'musique', ou quelque chose de plus 'action' ?"
+    return msg.strip()
 
 
 # =========================================================
