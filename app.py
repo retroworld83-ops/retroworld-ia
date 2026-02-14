@@ -5,9 +5,9 @@ import uuid
 import logging
 import importlib.util
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify, make_response, send_from_directory
 from flask_cors import CORS
 from openai import OpenAI
 
@@ -29,7 +29,6 @@ logging.basicConfig(level=log_level, format="%(asctime)s - %(levelname)s - %(mes
 logger = logging.getLogger(__name__)
 
 SERVICE_NAME = os.environ.get("SERVICE_NAME", "retroworld-ia").strip()
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # -------------------------
@@ -44,17 +43,34 @@ os.makedirs(CONV_DIR, exist_ok=True)
 CONV_COOKIE_NAME = os.environ.get("CONV_COOKIE_NAME", "rw_conv_id").strip()
 
 # -------------------------
-# ADMIN
+# ADMIN (token)
 # -------------------------
 ADMIN_DASHBOARD_TOKEN = (os.environ.get("ADMIN_DASHBOARD_TOKEN") or os.environ.get("ADMIN_API_TOKEN") or "").strip()
+
+def _extract_admin_token(req) -> str:
+    # 1) Authorization: Bearer xxx
+    token = (req.headers.get("Authorization") or "").strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    if token:
+        return token
+
+    # 2) X-Admin-Token: xxx
+    token = (req.headers.get("X-Admin-Token") or "").strip()
+    if token:
+        return token
+
+    # 3) ?token=xxx
+    token = (req.args.get("token") or "").strip()
+    if token:
+        return token
+
+    return ""
 
 def _require_admin(req) -> bool:
     if not ADMIN_DASHBOARD_TOKEN:
         return False
-    token = (req.headers.get("Authorization") or "").strip()
-    if token.lower().startswith("bearer "):
-        token = token[7:].strip()
-    return token == ADMIN_DASHBOARD_TOKEN
+    return _extract_admin_token(req) == ADMIN_DASHBOARD_TOKEN
 
 # -------------------------
 # OPENAI
@@ -79,12 +95,21 @@ if not OPENAI_API_KEY:
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # -------------------------
-# SYSTEM PROMPT (chargé par chemin, robuste Render)
+# SYSTEM PROMPT (robuste)
+# 1) src/data/system_data.py si présent
+# 2) sinon fallback: kb_retroworld.json + kb_runningman.json
 # -------------------------
+def _read_json_file(path: str) -> Optional[dict]:
+    try:
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
 def load_system_prompt() -> str:
-    """
-    Charge SYSTEM_PROMPT depuis /app/src/data/system_data.py sans dépendre de packages Python.
-    """
+    # 1) system_data.py si présent
     candidates = [
         os.path.join(BASE_DIR, "src", "data", "system_data.py"),
         os.path.join("/app", "src", "data", "system_data.py"),
@@ -102,28 +127,91 @@ def load_system_prompt() -> str:
                         return prompt
             except Exception as e:
                 logger.critical("Import SYSTEM_PROMPT échoué (%s): %s", path, str(e))
-    logger.critical("SYSTEM_PROMPT introuvable (vérifiez que src/data/system_data.py est bien déployé).")
-    return "Erreur configuration : Base de connaissance introuvable."
+
+    # 2) fallback KB JSON (ce que tu as dans ton ZIP)
+    kb_retro = _read_json_file(os.path.join(BASE_DIR, "kb_retroworld.json")) or {}
+    kb_run = _read_json_file(os.path.join(BASE_DIR, "kb_runningman.json")) or {}
+
+    if not kb_retro and not kb_run:
+        logger.critical("Aucune base KB trouvée (kb_retroworld.json / kb_runningman.json).")
+        return "Erreur configuration : Base de connaissance introuvable."
+
+    parts: List[str] = []
+    parts.append("Vous êtes l'assistant IA officiel du Pôle Loisirs à Draguignan.")
+    parts.append("Règles générales : vouvoiement, réponses précises, pas d'invention, rester prudent sur les disponibilités.")
+    parts.append("Adresse Retroworld : 815 avenue Pierre Brossolette, 83300 Draguignan. Horaires : mardi à dimanche 11h-22h.")
+
+    # Retroworld KB
+    if kb_retro:
+        identite = kb_retro.get("identite", {})
+        prompt = kb_retro.get("prompt", {})
+        instr = kb_retro.get("instructions_generales", [])
+        parts.append("\n--- RETROWORLD (VR / Escape VR / Quiz / Salle enfant / Anniversaires / Fidélité) ---")
+        if isinstance(identite, dict):
+            parts.append(f"Nom: {identite.get('nom','Retroworld France')}")
+            parts.append(str(identite.get("role","")).strip())
+        if isinstance(instr, list) and instr:
+            parts.append("Règles Retroworld :")
+            for line in instr:
+                parts.append(f"- {line}")
+        if isinstance(prompt, dict):
+            # On met les sections clés du prompt existant dans ton JSON
+            for k in [
+                "role_general",
+                "schema_universel",
+                "etape_4_anniversaires",
+                "etape_5_devis",
+                "reservation_non_confirmee",
+                "gestion_liens_reservation",
+                "style_reponses_jeux",
+                "fidelite",
+                "redirection_runningman",
+                "redirection_enigmaniac",
+                "catalogue_logic",
+                "tonalite",
+            ]:
+                v = prompt.get(k)
+                if isinstance(v, str) and v.strip():
+                    parts.append(f"\n[{k}]\n{v.strip()}")
+
+        # Injecter directement les blocs de tarifs/activités si présents
+        activites = kb_retro.get("activites")
+        if activites is not None:
+            parts.append("\n[Activités & tarifs Retroworld - source KB JSON]")
+            parts.append(json.dumps(activites, ensure_ascii=False, indent=2))
+
+        # Catalogue jeux si présent
+        for key in ["catalogue_jeux_vr", "catalogue_escape_vr"]:
+            if key in kb_retro:
+                parts.append(f"\n[{key}]\n{json.dumps(kb_retro[key], ensure_ascii=False)}")
+
+    # Runningman KB
+    if kb_run:
+        parts.append("\n--- RUNNINGMAN (Action Game / Kids Zone / extras) ---")
+        parts.append("Règle : pour l’action game, les clients doivent contacter Runningman directement.")
+        parts.append("Contact Runningman : 04 98 09 30 59 | Site : https://www.runningmangames.fr")
+        parts.append(json.dumps(kb_run, ensure_ascii=False, indent=2))
+
+    final_prompt = "\n".join([p for p in parts if p.strip()])
+    logger.info("SYSTEM_PROMPT généré depuis KB JSON (fallback).")
+    return final_prompt
 
 SYSTEM_PROMPT = load_system_prompt()
 
 # -------------------------
-# FLASK + CORS
+# FLASK + CORS + STATIC
 # -------------------------
-app = Flask(__name__)
+app = Flask(__name__, static_folder="static")
 
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
 if allowed_origins:
     origins_list = [o.strip() for o in allowed_origins.split(",") if o.strip()]
     if "*" in origins_list:
         CORS(app, supports_credentials=True)
-        logger.info("CORS: wildcard (*) autorisé")
     else:
         CORS(app, resources={r"/*": {"origins": origins_list}}, supports_credentials=True)
-        logger.info("CORS: origines autorisées = %s", origins_list)
 else:
     CORS(app, supports_credentials=True)
-    logger.warning("CORS: ALLOWED_ORIGINS vide -> accès ouvert (à éviter en prod)")
 
 # -------------------------
 # HELPERS CONV
@@ -164,8 +252,11 @@ def _get_conv_id() -> str:
         return cid
     return _new_conv_id()
 
+def _load_conv_doc(conv_id: str) -> Dict[str, Any]:
+    return _safe_read_json(_conv_path(conv_id), {"created_at": _now_iso(), "messages": []}) or {"created_at": _now_iso(), "messages": []}
+
 def _load_history(conv_id: str) -> List[Dict[str, Any]]:
-    doc = _safe_read_json(_conv_path(conv_id), {"messages": []}) or {"messages": []}
+    doc = _load_conv_doc(conv_id)
     msgs = doc.get("messages", [])
     return msgs if isinstance(msgs, list) else []
 
@@ -177,7 +268,7 @@ def _append_history(conv_id: str, role: str, content: str) -> None:
         return
 
     doc_path = _conv_path(conv_id)
-    doc = _safe_read_json(doc_path, {"created_at": _now_iso(), "messages": []}) or {"created_at": _now_iso(), "messages": []}
+    doc = _load_conv_doc(conv_id)
     if "created_at" not in doc:
         doc["created_at"] = _now_iso()
 
@@ -194,7 +285,50 @@ def _append_history(conv_id: str, role: str, content: str) -> None:
     _safe_write_json(doc_path, doc)
 
 # -------------------------
-# ROUTES
+# ADMIN helpers (listing + preview)
+# -------------------------
+def _infer_brand(messages: List[Dict[str, Any]]) -> str:
+    text = " ".join([(m.get("content") or "") for m in messages[-10:] if isinstance(m, dict)])
+    t = text.lower()
+    if "runningman" in t or "action game" in t or "kids zone" in t:
+        return "runningman"
+    return "retroworld"
+
+def _last_preview(messages: List[Dict[str, Any]]) -> str:
+    # preview = dernier message user si possible
+    for m in reversed(messages):
+        if m.get("role") == "user" and isinstance(m.get("content"), str) and m["content"].strip():
+            return m["content"].strip()[:180]
+    # sinon dernier message tout court
+    for m in reversed(messages):
+        if isinstance(m.get("content"), str) and m["content"].strip():
+            return m["content"].strip()[:180]
+    return ""
+
+def _list_conversations(limit: int = 300) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    try:
+        files = [f for f in os.listdir(CONV_DIR) if f.endswith(".json")]
+        files.sort(reverse=True)
+        for f in files[:limit]:
+            conv_id = f[:-5]
+            doc = _safe_read_json(os.path.join(CONV_DIR, f), {}) or {}
+            msgs = doc.get("messages", [])
+            msgs_list = msgs if isinstance(msgs, list) else []
+            items.append({
+                "conv_id": conv_id,
+                "created_at": doc.get("created_at"),
+                "updated_at": doc.get("updated_at"),
+                "count": len(msgs_list),
+                "brand": _infer_brand(msgs_list),
+                "preview": _last_preview(msgs_list),
+            })
+    except Exception as e:
+        logger.error("List conversations failed: %s", str(e))
+    return items
+
+# -------------------------
+# ROUTES PUBLIC
 # -------------------------
 @app.route("/", methods=["GET"])
 def index():
@@ -202,7 +336,7 @@ def index():
         "status": "online",
         "service": SERVICE_NAME,
         "model": OPENAI_MODEL,
-        "version": "3.3-storage-importfix"
+        "version": "3.5-admin-compatible",
     })
 
 @app.route("/health", methods=["GET"])
@@ -270,16 +404,63 @@ def chat():
         resp.set_cookie(CONV_COOKIE_NAME, conv_id, max_age=60 * 60 * 24 * 30, httponly=False, samesite="Lax")
         return resp
 
-# --- ADMIN ---
-@app.route("/admin/history/<conv_id>", methods=["GET"])
-def admin_history(conv_id: str):
+# -------------------------
+# ADMIN UI (sert static/admin.html)
+# -------------------------
+@app.route("/admin", methods=["GET"])
+def admin_page():
+    if not _require_admin(request):
+        return "Unauthorized", 401
+    return send_from_directory(app.static_folder, "admin.html")
+
+# -------------------------
+# ADMIN API (compat avec ton static/admin.html)
+# -------------------------
+@app.route("/admin/api/diag", methods=["GET"])
+def admin_diag():
     if not _require_admin(request):
         return jsonify({"error": "Unauthorized"}), 401
-    msgs = _load_history(conv_id)
-    return jsonify({"conv_id": conv_id, "messages": msgs})
 
-@app.route("/admin/reset/<conv_id>", methods=["POST"])
-def admin_reset(conv_id: str):
+    count_files = 0
+    try:
+        count_files = len([f for f in os.listdir(CONV_DIR) if f.endswith(".json")])
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "service": SERVICE_NAME,
+        "version": "3.5-admin-compatible",
+        "model": OPENAI_MODEL,
+        "conv_dir": CONV_DIR,
+        "conversations": count_files,
+        "has_system_prompt": bool(SYSTEM_PROMPT and "Erreur configuration" not in SYSTEM_PROMPT),
+    })
+
+@app.route("/admin/api/conversations", methods=["GET"])
+def admin_conversations():
+    if not _require_admin(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify(_list_conversations(limit=300))
+
+@app.route("/admin/api/conversation/<conv_id>", methods=["GET"])
+def admin_conversation(conv_id: str):
+    if not _require_admin(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    doc = _load_conv_doc(conv_id)
+    msgs = doc.get("messages", [])
+    msgs_list = msgs if isinstance(msgs, list) else []
+    return jsonify({
+        "conv_id": conv_id,
+        "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at"),
+        "count": len(msgs_list),
+        "brand": _infer_brand(msgs_list),
+        "messages": msgs_list,
+    })
+
+@app.route("/admin/api/delete/<conv_id>", methods=["POST"])
+def admin_delete(conv_id: str):
     if not _require_admin(request):
         return jsonify({"error": "Unauthorized"}), 401
     path = _conv_path(conv_id)
