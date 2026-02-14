@@ -1,1316 +1,167 @@
-from __future__ import annotations
-
-import io
-import json
-import logging
 import os
-import re
-import time
-import zipfile
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
-
-from flask import Flask, jsonify, request, send_from_directory, make_response, send_file
+import logging
+from flask import Flask, request, jsonify
 from flask_cors import CORS
+from openai import OpenAI
+from dotenv import load_dotenv
 
-try:
-    from zoneinfo import ZoneInfo
-except Exception:
-    ZoneInfo = None  # type: ignore
+# --- 1) CONFIG ---
+# Charge .env en local (sur Render, vos variables sont déjà présentes)
+load_dotenv()
 
-# =========================================================
-# CONFIG
-# =========================================================
+# Logs : pilotés par DEBUG_LOGS=true/false
+debug_logs = os.environ.get("DEBUG_LOGS", "false").strip().lower() == "true"
+log_level = logging.DEBUG if debug_logs else logging.INFO
+logging.basicConfig(level=log_level, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
-SERVICE_NAME = os.getenv("SERVICE_NAME", "retroworld-ia")
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Flask
+app = Flask(__name__)
 
-DATA_DIR = os.getenv("DATA_DIR", os.path.join(BASE_DIR, "data"))
-os.makedirs(DATA_DIR, exist_ok=True)
-
-KB_DIR = os.getenv("KB_DIR", BASE_DIR)
-
-PORT = int(os.getenv("PORT", "10000"))
-
-OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()
-OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "gpt-5.2").strip()
-OPENAI_REASONING_EFFORT = (os.getenv("OPENAI_REASONING_EFFORT") or "none").strip().lower()
-OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
-OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS") or os.getenv("OPENAI_MAX_TOKENS") or "900")
-
-ADMIN_DASHBOARD_TOKEN = (os.getenv("ADMIN_DASHBOARD_TOKEN") or os.getenv("ADMIN_API_TOKEN") or "").strip()
-USER_HISTORY_TOKEN = (os.getenv("USER_HISTORY_TOKEN") or "").strip()
-
-LOG_LEVEL = (os.getenv("LOG_LEVEL") or "INFO").upper()
-logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
-logger = logging.getLogger(SERVICE_NAME)
-
-app = Flask(__name__, static_folder="static")
-
-# -------------------------
-# CORS: utilise ALLOWED_ORIGINS (Render)
-# -------------------------
-allowed = (os.getenv("ALLOWED_ORIGINS") or "").strip()
-if not allowed:
-    CORS(app, supports_credentials=True)
-else:
-    origins = [o.strip() for o in allowed.split(",") if o.strip()]
-    if "*" in origins:
+# CORS : restreint si ALLOWED_ORIGINS est fourni (recommandé)
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
+if allowed_origins:
+    origins_list = [o.strip() for o in allowed_origins.split(",") if o.strip()]
+    if "*" in origins_list:
         CORS(app, supports_credentials=True)
+        logger.info("CORS: wildcard (*) autorisé")
     else:
-        CORS(app, resources={r"/*": {"origins": origins}}, supports_credentials=True)
+        CORS(app, resources={r"/*": {"origins": origins_list}}, supports_credentials=True)
+        logger.info("CORS: origines autorisées = %s", origins_list)
+else:
+    CORS(app, supports_credentials=True)
+    logger.warning("CORS: ALLOWED_ORIGINS vide -> accès ouvert (à éviter en prod)")
 
-CONV_COOKIE_NAME = os.getenv("CONV_COOKIE_NAME", "rw_conv_id")
-START_SIGNAL = "__start__"
-
-# =========================================================
-# OpenAI client
-# =========================================================
-
-_openai_client = None
-_openai_init_error: Optional[str] = None
+# --- 2) IMPORT DU PROMPT SYSTEME ---
+# IMPORTANT : le fichier est dans src/data/system_data.py
+# Pour éviter les erreurs d'import selon l'arborescence, on ajoute /app/src au path si nécessaire.
+# (Sur Render, votre app est généralement sous /app)
 try:
-    if OPENAI_API_KEY:
-        from openai import OpenAI  # type: ignore
-
-        _openai_client = OpenAI(api_key=OPENAI_API_KEY)
-except Exception as e:
-    _openai_init_error = str(e)
-    logger.warning("OpenAI client init failed: %s", e)
-    _openai_client = None
-
-# =========================================================
-# Helpers
-# =========================================================
-
-
-def _utc_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
-
-
-def _new_conversation_id() -> str:
-    return "conv_" + datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-
-
-def _safe_read_json(path: str, default: Any) -> Any:
+    # Essai direct (si vous lancez depuis la racine et que src est dans PYTHONPATH)
+    from src.data.system_data import SYSTEM_PROMPT
+except Exception:
     try:
-        if not os.path.exists(path):
-            return default
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
-
-
-def _safe_write_json(path: str, data: Any) -> bool:
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return True
+        # Fallback: on ajoute explicitement le dossier "src"
+        import sys
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        src_dir = os.path.join(base_dir, "src")
+        if src_dir not in sys.path:
+            sys.path.insert(0, src_dir)
+        from data.system_data import SYSTEM_PROMPT  # type: ignore
     except Exception as e:
-        logger.warning("write json failed (%s): %s", path, e)
-        return False
-
-
-def _norm(s: str) -> str:
-    s = (s or "").strip().lower()
-    s = re.sub(r"\s+", " ", s)
-    return s
-
-
-def strip_markdown_simple(s: str) -> str:
-    s = str(s or "")
-    s = re.sub(r"\*\*(.*?)\*\*", r"\1", s)       # **gras**
-    s = re.sub(r"`([^`]*)`", r"\1", s)           # `code`
-    s = re.sub(r"^\s*-\s+", "• ", s, flags=re.M) # - liste
-    s = re.sub(r"^\s*\*\s+", "• ", s, flags=re.M)
-    return s
-
-
-def _now_local() -> datetime:
-    tz = (os.getenv("TZ") or "Europe/Paris").strip()
-    if ZoneInfo:
-        try:
-            return datetime.now(ZoneInfo(tz))
-        except Exception:
-            pass
-    return datetime.utcnow()
-
-
-# =========================================================
-# User index: user_id -> conversation_id
-# =========================================================
-
-USER_INDEX_PATH = os.path.join(DATA_DIR, "user_index.json")
-
-
-def get_user_index() -> Dict[str, str]:
-    data = _safe_read_json(USER_INDEX_PATH, {}) or {}
-    return data if isinstance(data, dict) else {}
-
-
-def set_user_conversation(user_id: str, conversation_id: str) -> None:
-    if not user_id or not conversation_id:
-        return
-    idx = get_user_index()
-    idx[str(user_id)] = str(conversation_id)
-    _safe_write_json(USER_INDEX_PATH, idx)
-
-
-def get_user_conversation(user_id: str) -> Optional[str]:
-    if not user_id:
-        return None
-    idx = get_user_index()
-    return idx.get(str(user_id))
-
-
-# =========================================================
-# KB cache
-# =========================================================
-
-@dataclass
-class _KBCacheEntry:
-    ts: float
-    kb: Dict[str, Any]
-
-
-_KB_CACHE: Dict[str, _KBCacheEntry] = {}
-_KB_CACHE_TTL_SEC = 30.0
-
-
-def load_kb(brand: str) -> Dict[str, Any]:
-    brand = (brand or "").lower().strip()
-    if brand not in ("retroworld", "runningman"):
-        brand = "retroworld"
-
-    now = time.time()
-    entry = _KB_CACHE.get(brand)
-    if entry and (now - entry.ts) < _KB_CACHE_TTL_SEC:
-        return entry.kb
-
-    filename = f"kb_{brand}.json"
-    path = os.path.join(KB_DIR, filename)
-    kb = _safe_read_json(path, {"brand": brand})
-    if not isinstance(kb, dict):
-        kb = {"brand": brand}
-
-    _KB_CACHE[brand] = _KBCacheEntry(ts=now, kb=kb)
-    return kb
-
-
-def save_kb(brand: str, kb: Dict[str, Any]) -> bool:
-    brand = (brand or "").lower().strip()
-    if brand not in ("retroworld", "runningman"):
-        brand = "retroworld"
-    filename = f"kb_{brand}.json"
-    path = os.path.join(KB_DIR, filename)
-    ok = _safe_write_json(path, kb)
-    if ok:
-        _KB_CACHE[brand] = _KBCacheEntry(ts=time.time(), kb=kb)
-    return ok
-
-
-# =========================================================
-# Intents + routing
-# =========================================================
-
-def _is_price_intent(text: str) -> bool:
-    t = _norm(text)
-    triggers = [
-        "prix", "tarif", "tarifs", "combien", "estimation", "devis",
-        "ça coûte", "ca coute", "coute", "coût", "cout"
-    ]
-    return any(k in t for k in triggers)
-
-
-def _contains_date_word(text: str) -> bool:
-    t = _norm(text)
-    if any(k in t for k in ["aujourd", "demain", "après-demain", "apres-demain", "apres demain", "ce soir", "cet aprem", "cette aprem"]):
-        return True
-    for wd in ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]:
-        if re.search(rf"\b{wd}\b", t):
-            return True
-    if re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", t):  # yyyy-mm-dd
-        return True
-    if re.search(r"\b(\d{1,2})/(\d{1,2})(/(20\d{2}))?\b", t):  # dd/mm[/yyyy]
-        return True
-    if re.search(r"\bdans\s+\d{1,2}\s+jour", t):
-        return True
-    return False
-
-
-def _extract_time(text: str) -> Optional[Tuple[int, int]]:
-    t = _norm(text)
-    m = re.search(r"\b(\d{1,2})\s*h\s*(\d{2})?\b", t)
-    if m:
-        hh = int(m.group(1))
-        mm = int(m.group(2) or "0")
-        if 0 <= hh <= 23 and 0 <= mm <= 59:
-            return (hh, mm)
-
-    m = re.search(r"\b(\d{1,2})\s*:\s*(\d{2})\b", t)
-    if m:
-        hh = int(m.group(1))
-        mm = int(m.group(2))
-        if 0 <= hh <= 23 and 0 <= mm <= 59:
-            return (hh, mm)
-
-    return None
-
-
-def _is_reservation_intent(text: str, history: Optional[List[Dict[str, Any]]] = None) -> bool:
-    """
-    On déclenche "réservation" si:
-    - mots explicites (réserver, dispo, créneau, etc)
-    - OU date/jour détecté
-    - OU heure + date/jour (ex: "demain 17h")
-    - OU heure seule mais conversation récente parlait déjà de réservation
-    """
-    t = _norm(text)
-
-    explicit = any(k in t for k in ["réserver", "reservation", "réservation", "dispo", "disponible", "créneau", "creneau", "bloquer", "confirmer", "rdv", "rendez-vous", "venir à"])
-    has_date = _contains_date_word(t)
-    has_time = _extract_time(t) is not None
-
-    if explicit or has_date:
-        return True
-    if has_time and has_date:
-        return True
-
-    # Si l'utilisateur répond juste "17h30" dans un fil déjà "resa"
-    if has_time and history:
-        recent = []
-        for m in reversed(history):
-            if isinstance(m, dict) and m.get("role") == "user":
-                recent.append(str(m.get("content") or ""))
-            if len(recent) >= 6:
-                break
-        for ut in recent:
-            ut_n = _norm(ut)
-            if any(k in ut_n for k in ["réserver", "reservation", "réservation", "dispo", "créneau", "creneau", "aujourd", "demain", "samedi", "dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi"]):
-                return True
-
-    return False
-
-
-def _is_just_question_mark(text: str) -> bool:
-    t = (text or "").strip()
-    return t in ["?", "??", "???"]
-
-
-def detect_owner_from_text(text: str) -> str:
-    """
-    RÉPARTITION OFFICIELLE :
-    - Retroworld : VR, Escape VR, Quiz, Goûter à volonté + gâteau, Anniversaire, Fidélité/points
-    - Runningman : Game Zone, Escape game NON-VR, Salle enfant
-    """
-    t = _norm(text)
-
-    if "retroworld" in t:
-        return "retroworld"
-    if "runningman" in t or "running man" in t:
-        return "runningman"
-
-    if "escape" in t and "vr" in t:
-        return "retroworld"
-
-    if "vr" in t or "casque" in t or "meta quest" in t or "quest" in t:
-        return "retroworld"
-
-    if "quiz" in t:
-        return "retroworld"
-
-    if "goûter" in t or "gouter" in t or "gâteau" in t or "gateau" in t or "anniversaire" in t:
-        return "retroworld"
-
-    if "fidélité" in t or "fidelite" in t or "points" in t or "qr" in t:
-        return "retroworld"
-
-    if "salle enfant" in t or "salle enfants" in t or ("salle" in t and "enfant" in t):
-        return "runningman"
-
-    if "game zone" in t or "gamezone" in t or "action game" in t:
-        return "runningman"
-
-    if "escape" in t and "vr" not in t:
-        return "runningman"
-
-    return "auto"
-
-
-# =========================================================
-# Facts blocks (fiables)
-# =========================================================
-
-def common_orientation_block() -> str:
-    return (
-        "RÉPARTITION (OFFICIELLE) :\n"
-        "- Retroworld : VR, Escape VR, quiz, goûter à volonté + gâteau (anniversaires), fidélité/points.\n"
-        "- Runningman : Game Zone, Escape game non-VR, Salle enfant.\n"
-        "- Même bâtiment : 815 avenue Pierre Brossolette, 83300 Draguignan.\n"
-    )
-
-
-def retroworld_facts_block() -> str:
-    return (
-        "RETROWORLD (règles fiables) :\n"
-        "- Adresse : 815 avenue Pierre Brossolette, 83300 Draguignan\n"
-        "- Téléphone : 04 94 47 94 64\n"
-        "- Email : contact@retroworldfrance.com\n"
-        "- Site : https://www.retroworldfrance.com\n"
-        "- RÈGLE CRÉNEAUX : le chat ne confirme ni ne bloque jamais un créneau.\n"
-        "- Tarifs (normal 11h00–20h00 / majoré avant 11h ou après 20h) :\n"
-        "  - Escape VR : 30€ normal / 35€ majoré (par joueur)\n"
-        "  - Jeux VR / Arcade VR (30 min) : 15€ normal / 20€ majoré (par joueur)\n"
-        "  - Quiz 30 min : 8€ normal / 12€ majoré (par joueur)\n"
-        "  - Quiz 60 min : 15€ normal / 20€ majoré (par joueur)\n"
-        "  - Quiz 90 min : 20€ normal / 25€ majoré (par joueur)\n"
-        "IMPORTANT : ne donner un lien que si l'utilisateur le demande explicitement.\n"
-    )
-
-
-def runningman_facts_block(kb: Dict[str, Any]) -> str:
-    ident = kb.get("identite", {}) or {}
-    loc = (ident.get("localisation", {}) or {})
-    contact = (ident.get("contact", {}) or {})
-
-    tarif = ((kb.get("tarification", {}) or {}).get("action_game", {}) or {})
-    enfant = (tarif.get("enfant", {}) or {})
-    adulte = (tarif.get("adulte_accompagnateur", {}) or {})
-
-    return (
-        "RUNNINGMAN (règles fiables) :\n"
-        "- Activités : Game Zone, Escape game non-VR, Salle enfant\n"
-        f"- Adresse : {loc.get('adresse_complete', '815 avenue Pierre Brossolette, 83300 Draguignan, France')}\n"
-        f"- Contact : {contact.get('telephone', '04 98 09 30 59')} / {contact.get('site_web', 'https://runningmangames.fr')}\n"
-        f"- Tarifs Action Game (si demandé) : enfant (-12) {enfant.get('prix','15')}€ / adulte {adulte.get('prix','20')}€\n"
-        "- RÈGLE CRÉNEAUX : le chat ne confirme ni ne bloque jamais un créneau.\n"
-    )
-
-
-def kb_snippets_retroworld(kb: Dict[str, Any], limit_lines: int = 60) -> List[str]:
-    out: List[str] = []
-    inst = kb.get("instructions_generales")
-    if isinstance(inst, list):
-        for it in inst:
-            s = str(it).strip()
-            if s:
-                out.append(f"Règle: {s}")
-    return out[:limit_lines]
-
-
-def kb_snippets_runningman(kb: Dict[str, Any], limit_lines: int = 40) -> List[str]:
-    out: List[str] = []
-    for k in ["instructions_generales", "anti_erreurs"]:
-        arr = kb.get(k)
-        if isinstance(arr, list):
-            for it in arr:
-                s = str(it).strip()
-                if s:
-                    out.append(s)
-    return out[:limit_lines]
-
-
-# =========================================================
-# OpenAI call (Responses API)
-# =========================================================
-
-def call_openai_chat(messages: List[Dict[str, str]]) -> Tuple[str, Dict[str, Any]]:
-    if not _openai_client:
-        return (
-            "Le service IA est indisponible pour le moment. Vous pouvez contacter Retroworld au 04 94 47 94 64 ou Runningman au 04 98 09 30 59.",
-            {"error": "openai_not_ready"},
-        )
-
-    kwargs: Dict[str, Any] = {
-        "model": OPENAI_MODEL,
-        "input": messages,
-        "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
-        "store": False,
-    }
-
-    if OPENAI_REASONING_EFFORT:
-        kwargs["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
-
-    if OPENAI_REASONING_EFFORT == "none":
-        kwargs["temperature"] = OPENAI_TEMPERATURE
-
-    resp = _openai_client.responses.create(**kwargs)
-    text = (getattr(resp, "output_text", "") or "").strip()
-
-    usage: Dict[str, Any] = {}
-    try:
-        usage_obj = getattr(resp, "usage", None)
-        if usage_obj is not None:
-            if hasattr(usage_obj, "model_dump"):
-                usage = usage_obj.model_dump()  # type: ignore
-            elif isinstance(usage_obj, dict):
-                usage = usage_obj
-    except Exception:
-        usage = {}
-
-    return text, usage
-
-
-# =========================================================
-# Conversation storage
-# =========================================================
-
-CONV_DIR = os.path.join(DATA_DIR, "conversations")
-os.makedirs(CONV_DIR, exist_ok=True)
-
-
-def _conversation_path(conversation_id: str) -> str:
-    conversation_id = re.sub(r"[^a-zA-Z0-9_\-]", "", conversation_id or "")
-    if not conversation_id:
-        conversation_id = _new_conversation_id()
-    return os.path.join(CONV_DIR, f"{conversation_id}.json")
-
-
-def load_conversation_obj(conversation_id: str) -> Dict[str, Any]:
-    path = _conversation_path(conversation_id)
-    data = _safe_read_json(path, {})
-    if isinstance(data, dict) and isinstance(data.get("messages"), list):
-        data.setdefault("version", 2)
-        data.setdefault("id", conversation_id)
-        data.setdefault("created", data.get("created") or _utc_iso())
-        data.setdefault("messages", [])
-        return data
-    return {"version": 2, "id": conversation_id, "created": _utc_iso(), "user_id": None, "brand_last": None, "messages": []}
-
-
-def save_conversation_obj(conversation_id: str, obj: Dict[str, Any]) -> None:
-    path = _conversation_path(conversation_id)
-    _safe_write_json(path, obj)
-
-
-def load_conversation_messages(conversation_id: str) -> List[Dict[str, Any]]:
-    obj = load_conversation_obj(conversation_id)
-    msgs = obj.get("messages") or []
-    return msgs if isinstance(msgs, list) else []
-
-
-def append_conversation_turn(
-    conversation_id: str,
-    brand_effective: str,
-    user_text: str,
-    assistant_reply: str,
-    extra: Optional[Dict[str, Any]] = None,
-) -> None:
-    obj = load_conversation_obj(conversation_id)
-    msgs = obj.get("messages")
-    if not isinstance(msgs, list):
-        msgs = []
-    ts = _utc_iso()
-
-    if (user_text or "").strip():
-        msgs.append({"role": "user", "content": user_text, "ts": ts})
-    msgs.append({"role": "assistant", "content": str(assistant_reply or ""), "ts": ts})
-
-    obj["version"] = 2
-    obj["id"] = conversation_id
-    obj.setdefault("created", obj.get("created") or ts)
-    obj["brand_last"] = str(brand_effective or "")
-
-    if extra and isinstance(extra, dict):
-        obj["extra_last"] = extra
-        uid = extra.get("user_id")
-        if uid:
-            obj["user_id"] = uid
-
-    obj["messages"] = msgs
-    save_conversation_obj(conversation_id, obj)
-
-
-def list_conversations() -> List[str]:
-    try:
-        files = [f for f in os.listdir(CONV_DIR) if f.endswith(".json")]
-        files.sort(reverse=True)
-        return [os.path.splitext(f)[0] for f in files]
-    except Exception:
-        return []
-
-
-def prune_messages_for_prompt(messages: List[Dict[str, Any]], max_pairs: int = 10) -> List[Dict[str, str]]:
-    if not isinstance(messages, list):
-        return []
-    clipped = [m for m in messages if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content") is not None]
-    clipped = clipped[-(max_pairs * 2):]
-    return [{"role": str(m.get("role")), "content": str(m.get("content") or "")} for m in clipped]
-
-
-# =========================================================
-# Tokens
-# =========================================================
-
-def _require_admin_token(req) -> bool:
-    tok = (req.args.get("token") or "").strip()
-    if not tok:
-        tok = (req.headers.get("X-Admin-Token") or "").strip()
-    return bool(tok) and bool(ADMIN_DASHBOARD_TOKEN) and tok == ADMIN_DASHBOARD_TOKEN
-
-
-def _require_user_token(req) -> bool:
-    tok = (req.args.get("token") or "").strip()
-    if not tok:
-        tok = (req.headers.get("X-User-Token") or "").strip()
-    return bool(tok) and bool(USER_HISTORY_TOKEN) and tok == USER_HISTORY_TOKEN
-
-
-# =========================================================
-# Payload parsing
-# =========================================================
-
-def _payload_text(payload: Dict[str, Any]) -> str:
-    msg = payload.get("message")
-    if msg is not None:
-        return str(msg)
-    arr = payload.get("messages")
-    if isinstance(arr, list):
-        for m in reversed(arr):
-            if isinstance(m, dict) and m.get("role") == "user":
-                return str(m.get("content") or "")
-    return ""
-
-
-def _payload_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
-    meta = payload.get("metadata") or {}
-    return meta if isinstance(meta, dict) else {}
-
-
-def _get_or_create_conversation_id(payload: Dict[str, Any]) -> Tuple[str, Optional[str]]:
-    conversation_id = str(payload.get("conversation_id") or "").strip()
-    user_id = str(payload.get("user_id") or "").strip()
-
-    if not conversation_id and user_id:
-        conversation_id = get_user_conversation(user_id) or ""
-
-    if not conversation_id:
-        cookie_val = (request.cookies.get(CONV_COOKIE_NAME) or "").strip()
-        if cookie_val:
-            conversation_id = cookie_val
-
-    if not conversation_id:
-        conversation_id = _new_conversation_id()
-
-    if user_id:
-        set_user_conversation(user_id, conversation_id)
-
-    return conversation_id, (user_id or None)
-
-
-# =========================================================
-# Date logic for "devis <= 3 jours"
-# =========================================================
-
-def _parse_explicit_date(text: str) -> Optional[datetime]:
-    t = _norm(text)
-
-    m = re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", t)  # YYYY-MM-DD
-    if m:
-        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        try:
-            return datetime(y, mo, d)
-        except Exception:
-            return None
-
-    m = re.search(r"\b(\d{1,2})/(\d{1,2})/(20\d{2})\b", t)  # DD/MM/YYYY
-    if m:
-        d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        try:
-            return datetime(y, mo, d)
-        except Exception:
-            return None
-
-    m = re.search(r"\b(\d{1,2})/(\d{1,2})\b", t)  # DD/MM
-    if m:
-        d, mo = int(m.group(1)), int(m.group(2))
-        now = _now_local()
-        y = now.year
-        try:
-            dt = datetime(y, mo, d)
-        except Exception:
-            return None
-        if dt.date() < now.date():
-            try:
-                dt = datetime(y + 1, mo, d)
-            except Exception:
-                return None
-        return dt
-
-    return None
-
-
-def _days_until_requested_date(user_text: str) -> Optional[int]:
-    t = _norm(user_text)
-    now = _now_local().date()
-
-    if "aujourd" in t:
-        return 0
-    if "demain" in t:
-        return 1
-    if "après-demain" in t or "apres-demain" in t or "apres demain" in t:
-        return 2
-
-    m = re.search(r"\bdans\s+(\d{1,2})\s+jour", t)
-    if m:
-        try:
-            return max(0, int(m.group(1)))
-        except Exception:
-            pass
-
-    dt = _parse_explicit_date(t)
-    if dt:
-        return (dt.date() - now).days
-
-    weekdays = {"lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3, "vendredi": 4, "samedi": 5, "dimanche": 6}
-    for name, idx in weekdays.items():
-        if re.search(rf"\b{name}\b", t):
-            delta = (idx - now.weekday()) % 7
-            return delta
-
-    return None
-
-
-# =========================================================
-# Pricing Retroworld (déterministe)
-# =========================================================
-
-def _extract_players(text: str) -> Optional[int]:
-    t = _norm(text)
-
-    m = re.search(r"\b(\d{1,2})\s*(personne|personnes|joueur|joueurs)\b", t)
-    if m:
-        n = int(m.group(1))
-        if 1 <= n <= 50:
-            return n
-
-    m = re.search(r"\bnous\s+sommes\s+(\d{1,2})\b", t)
-    if m:
-        n = int(m.group(1))
-        if 1 <= n <= 50:
-            return n
-
-    return None
-
-
-def _extract_quiz_duration(text: str) -> Optional[int]:
-    t = _norm(text)
-
-    if "90" in t and ("min" in t or "mn" in t):
-        return 90
-    if "1h30" in t or "1 h 30" in t or "une heure trente" in t:
-        return 90
-
-    if ("60" in t and ("min" in t or "mn" in t)) or re.search(r"\b1h\b", t) or "1 h" in t or "une heure" in t:
-        return 60
-
-    if ("30" in t and ("min" in t or "mn" in t)) or "30min" in t or "30 mn" in t or "demi-heure" in t or "demi heure" in t:
-        return 30
-
-    return None
-
-
-def _is_normal_slot_from_text(text: str) -> Optional[bool]:
-    t = _norm(text)
-    if "entre 11h" in t and "20h" in t:
-        return True
-    if "11h" in t and "20h" in t and "entre" in t:
-        return True
-    if "avant 11h" in t or "avant 11 h" in t:
-        return False
-    if "après 20h" in t or "apres 20h" in t or "après 20 h" in t or "apres 20 h" in t:
-        return False
-    return None
-
-
-def _is_majorated_time(hh: int, mm: int) -> bool:
-    if hh < 11:
-        return True
-    if hh > 20:
-        return True
-    if hh == 20 and mm > 0:
-        return True
-    return False
-
-
-def _infer_from_history(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    ctx = {"players": None, "time": None, "activity": None, "saw_vr": False, "quiz_duration": None, "recent_price": False}
-
-    recent_user_msgs = []
-    for m in reversed(messages or []):
-        if isinstance(m, dict) and m.get("role") == "user":
-            recent_user_msgs.append(str(m.get("content") or ""))
-        if len(recent_user_msgs) >= 6:
-            break
-    for ut in recent_user_msgs:
-        if _is_price_intent(ut) or "estimation" in _norm(ut) or "donne moi" in _norm(ut):
-            ctx["recent_price"] = True
-            break
-
-    for m in reversed(messages or []):
-        if not isinstance(m, dict) or m.get("role") != "user":
-            continue
-
-        txt = str(m.get("content") or "")
-        t = _norm(txt)
-
-        if "vr" in t or "casque" in t or "quest" in t or "meta quest" in t:
-            ctx["saw_vr"] = True
-
-        if ctx["players"] is None:
-            p = _extract_players(txt)
-            if p is not None:
-                ctx["players"] = p
-
-        if ctx["time"] is None:
-            tm = _extract_time(txt)
-            if tm is not None:
-                ctx["time"] = tm
-
-        if ctx["quiz_duration"] is None and "quiz" in t:
-            d = _extract_quiz_duration(txt)
-            if d is not None:
-                ctx["quiz_duration"] = d
-
-        if ctx["activity"] is None:
-            if "quiz" in t:
-                ctx["activity"] = "quiz"
-            elif "escape" in t and ("vr" in t or ctx["saw_vr"]):
-                ctx["activity"] = "escape_vr"
-            elif ("jeux vr" in t) or ("arcade vr" in t) or ("mini-jeux" in t) or ("mini jeux" in t) or ("vr" in t and "escape" not in t):
-                ctx["activity"] = "jeux_vr"
-
-        if ctx["players"] and (ctx["time"] or ctx["quiz_duration"]) and ctx["activity"]:
-            break
-
-    return ctx
-
-
-def _detect_retroworld_activity(user_text: str, hist_ctx: Dict[str, Any]) -> Optional[str]:
-    t = _norm(user_text)
-
-    if "quiz" in t:
-        return "quiz"
-
-    if "escape" in t and ("vr" in t or hist_ctx.get("saw_vr")):
-        return "escape_vr"
-
-    if ("jeux vr" in t) or ("arcade vr" in t) or ("mini-jeux" in t) or ("mini jeux" in t) or ("vr" in t and "escape" not in t):
-        return "jeux_vr"
-
-    if hist_ctx.get("activity") in ("quiz", "escape_vr", "jeux_vr"):
-        return hist_ctx["activity"]
-
-    return None
-
-
-def _retroworld_price_per_player(activity: str, majorated: bool, quiz_duration: Optional[int]) -> int:
-    # Escape VR
-    if activity == "escape_vr":
-        return 35 if majorated else 30
-
-    # Jeux VR / Arcade VR (30 min)
-    if activity == "jeux_vr":
-        return 20 if majorated else 15
-
-    # Quiz
-    if activity == "quiz":
-        d = quiz_duration or 60
-        if d == 30:
-            return 12 if majorated else 8
-        if d == 90:
-            return 25 if majorated else 20
-        return 20 if majorated else 15
-
-    return 0
-
-
-def rule_based_retroworld_estimate_reply(user_text: str, history: List[Dict[str, Any]]) -> Optional[str]:
-    hist_ctx = _infer_from_history(history)
-    wants_price = _is_price_intent(user_text) or ("donne moi une estimation" in _norm(user_text)) or hist_ctx.get("recent_price", False)
-    if not wants_price:
-        return None
-
-    activity = _detect_retroworld_activity(user_text, hist_ctx)
-    players = _extract_players(user_text) or hist_ctx.get("players")
-
-    slot_hint = _is_normal_slot_from_text(user_text)
-    tm = _extract_time(user_text) or hist_ctx.get("time")
-
-    quiz_duration = _extract_quiz_duration(user_text) or hist_ctx.get("quiz_duration")
-
-    if not activity:
-        return (
-            "Pour une estimation Retroworld, vous voulez plutôt :\n"
-            "• Escape VR\n"
-            "• Jeux VR / Arcade VR (30 min)\n"
-            "• Quiz (30 / 60 / 90 min)\n"
-            "Et vous serez combien de joueurs ?"
-        )
-
-    if activity == "quiz" and quiz_duration is None:
-        return "Pour le quiz, vous voulez quelle durée : 30 min, 60 min ou 90 min ?"
-
-    if not players:
-        return "D’accord. Vous serez combien de joueurs ? (ex : 3 personnes)"
-
-    majorated: Optional[bool] = None
-    if slot_hint is not None:
-        majorated = (not slot_hint)
-    elif tm is not None:
-        majorated = _is_majorated_time(tm[0], tm[1])
-
-    if majorated is None:
-        p_norm = _retroworld_price_per_player(activity, majorated=False, quiz_duration=quiz_duration)
-        p_maj = _retroworld_price_per_player(activity, majorated=True, quiz_duration=quiz_duration)
-
-        label_act = "Escape VR" if activity == "escape_vr" else ("Jeux VR (30 min)" if activity == "jeux_vr" else f"Quiz {quiz_duration} min")
-        return (
-            f"Estimation Retroworld pour {label_act} ({players} joueur(s)) :\n"
-            f"• Normal (11h00–20h00) : {players} × {p_norm}€ = {players*p_norm}€\n"
-            f"• Majoré (avant 11h ou après 20h) : {players} × {p_maj}€ = {players*p_maj}€\n"
-            "Si vous me donnez l’heure approximative, je vous donne le total exact."
-        )
-
-    ppp = _retroworld_price_per_player(activity, majorated=majorated, quiz_duration=quiz_duration)
-    total = players * ppp
-
-    label = "majoré" if majorated else "normal"
-    label_act = "Escape VR" if activity == "escape_vr" else ("Jeux VR (30 min)" if activity == "jeux_vr" else f"Quiz {quiz_duration} min")
-    if tm is not None:
-        hh, mm = tm
-        hhmm = f"{hh:02d}h{mm:02d}"
-        return f"Estimation Retroworld ({label}) à {hhmm} pour {label_act} : {players} × {ppp}€ = {total}€."
-
-    return f"Estimation Retroworld ({label}) pour {label_act} : {players} × {ppp}€ = {total}€."
-
-
-def rule_based_general_pricing_reply_if_needed(user_text: str) -> Optional[str]:
-    if not _is_price_intent(user_text):
-        return None
-    t = _norm(user_text)
-    if len(t) > 80:
-        return None
-    if any(k in t for k in ["vos tarifs", "tarifs", "prix", "c'est combien", "cest combien", "combien ça coûte", "combien ca coute"]):
-        return (
-            "Tarifs Retroworld (par joueur) :\n"
-            "• Escape VR : 30€ (11h–20h) / 35€ (majoré)\n"
-            "• Jeux VR / Arcade VR (30 min) : 15€ / 20€\n"
-            "• Quiz 30 min : 8€ / 12€ | 60 min : 15€ / 20€ | 90 min : 20€ / 25€\n"
-            "Dites-moi l’activité, le nombre de joueurs et l’heure, je calcule le total."
-        )
-    return None
-
-
-# =========================================================
-# Booking reply (message standard + règle "pas de devis <= 3j")
-# =========================================================
-
-def build_booking_reply(owner: str, user_text: str, history: List[Dict[str, Any]]) -> str:
-    kb_rm = load_kb("runningman")
-    ident_rm = kb_rm.get("identite", {}) or {}
-    contact_rm = (ident_rm.get("contact", {}) or {})
-    rm_tel = contact_rm.get("telephone", "04 98 09 30 59")
-    rm_site = contact_rm.get("site_web", "https://runningmangames.fr")
-
-    rw_tel = "04 94 47 94 64"
-    rw_mail = "contact@retroworldfrance.com"
-    rw_site = "https://www.retroworldfrance.com"
-
-    # Estimation prix si Retroworld et possible (optionnel mais utile)
-    estimate = ""
-    if owner == "retroworld":
-        est = rule_based_retroworld_estimate_reply(user_text, history)
-        if est:
-            estimate = est.strip() + "\n\n"
-
-    days = _days_until_requested_date(user_text)
-    too_soon_for_quote = (days is not None and days <= 3)
-
-    if owner == "runningman":
-        contact_lines = f"Runningman : {rm_tel}\nSite : {rm_site}"
-    else:
-        contact_lines = f"Retroworld : {rw_tel}\nEmail : {rw_mail}\nSite : {rw_site}"
-
-    msg = (
-        estimate
-        + "Je ne peux pas confirmer ni bloquer un créneau via le chat.\n"
-        + "Vous pouvez toutefois avancer tout de suite :\n"
-        + f"- {contact_lines}\n"
-    )
-
-    if too_soon_for_quote:
-        msg += (
-            "\nLa date demandée est trop proche pour garantir l’envoi d’un devis avant cette date.\n"
-            "Le plus simple est d’appeler pour valider rapidement.\n"
-        )
-        return msg.strip()
-
-    msg += (
-        "\nOption devis : laissez-moi ces infos et je prépare la demande pour l’équipe :\n"
-        "- activité\n"
-        "- nombre de participants (+ âges si enfants)\n"
-        "- jour souhaité + fourchette horaire\n"
-        "- nom + téléphone (ou email)\n"
-        "\nOption réservation en ligne : si vous le souhaitez, dites « Donnez-moi le lien » et je vous l’enverrai.\n"
-    )
-    return msg.strip()
-
-
-# =========================================================
-# Safety: anti-confirmation
-# =========================================================
-
-_FORBIDDEN_BOOKING_RE = [
-    r"\bje (vous )?(confirme|confirme la|confirme votre)\b",
-    r"\b(réservation|reservation) (est )?(confirmée|confirmee|validée|validee)\b",
-    r"\bje (bloque|bloque donc|bloque votre|réserve|reserve)\b",
-    r"\b(nous|on) vous attend(ons)?\b",
-    r"\b(c['’]?est|c est) (disponible|ok|bon)\b",
-    r"\bdisponible pour\b",
-    r"\bcréneau confirmé\b",
-    r"\bje vous le bloque\b",
-    r"\bje vous le reserve\b",
-    r"\bje vous le réserve\b",
-    r"\bje vous note\b.*\b\d{1,2}h\b",
-]
-
-
-def common_greeting_text() -> str:
-    return (
-        "Bienvenue chez Runningman et Retroworld, comment puis-je vous aider ?\n\n"
-        "Pour vous orienter rapidement :\n"
-        "- Retroworld : VR, Escape VR, quiz, goûter à volonté + gâteau\n"
-        "- Runningman : Game Zone, Escape game non-VR, Salle enfant"
-    )
-
-
-def sanitize_booking_reply(reply: str, user_text: str, owner: str, history: List[Dict[str, Any]]) -> str:
-    """
-    Pare-chocs: si OpenAI sort un truc interdit, on remplace par le message standard.
-    """
-    if not reply:
-        return reply
-
-    low = _norm(reply)
-    if any(re.search(p, low) for p in _FORBIDDEN_BOOKING_RE):
-        return build_booking_reply(owner, user_text, history)
-
-    return reply
-
-
-def maybe_prefix_common_greeting(reply: str, is_first_turn: bool) -> str:
-    if not is_first_turn:
-        return reply
-    return common_greeting_text() + "\n\n" + (reply or "")
-
-
-# =========================================================
-# Core pipeline
-# =========================================================
-
-def process_chat(brand_entry: str, user_text: str, conversation_id: str) -> Tuple[str, Dict[str, Any], str]:
-    brand_entry = (brand_entry or "auto").lower().strip()
-    user_text = user_text or ""
-
-    owner = brand_entry if brand_entry in ("retroworld", "runningman") else detect_owner_from_text(user_text)
-
-    hist = load_conversation_messages(conversation_id) if conversation_id else []
-
-    # 0) Si réservation (au sens "date/jour" ou "réserver/dispo"), on renvoie direct le message standard
-    if _is_reservation_intent(user_text, history=hist):
-        return build_booking_reply(owner if owner != "auto" else "retroworld", user_text, hist), {"mode": "booking_guard"}, owner
-
-    # 1) Réponse tarifaire générale courte si besoin
-    gen = rule_based_general_pricing_reply_if_needed(user_text)
-    if gen:
-        return gen, {"mode": "rule_based_general_pricing"}, owner
-
-    # 2) Prix Retroworld déterministe
-    if owner == "retroworld":
-        rb = rule_based_retroworld_estimate_reply(user_text, hist)
-        if rb:
-            return rb, {"mode": "rule_based_retroworld_pricing"}, owner
-
-    kb_rw = load_kb("retroworld")
-    kb_rm = load_kb("runningman")
-
-    system = (
-        "Vous êtes l’assistant COMMUN de Runningman et de Retroworld (même bâtiment à Draguignan).\n"
-        "Votre mission : aider la clientèle sans créer de problème.\n\n"
-        "RÈGLES ABSOLUES :\n"
-        "- Ne jamais confirmer ni bloquer un créneau.\n"
-        "- Ne jamais dire qu’un horaire est 'disponible'.\n"
-        "- Réponses en texte simple, sans markdown.\n"
-        "- Si info incertaine : 1 question courte, sinon proposer téléphone.\n\n"
-        + common_orientation_block()
-        + "\n"
-        + retroworld_facts_block()
-        + "\n"
-        + runningman_facts_block(kb_rm)
-    )
-
-    kb_lines: List[str] = []
-    kb_lines.extend(kb_snippets_retroworld(kb_rw))
-    kb_lines.extend(kb_snippets_runningman(kb_rm))
-    if kb_lines:
-        system += "\nKB (résumé) :\n"
-        for line in kb_lines[:120]:
-            system += f"- {line}\n"
-
-    messages: List[Dict[str, str]] = [{"role": "system", "content": system}]
-    if hist:
-        messages.extend(prune_messages_for_prompt(hist, max_pairs=10))
-    messages.append({"role": "user", "content": user_text})
-
-    hints: List[str] = []
-    if owner == "auto":
-        hints.append("C'est ambigu: demandez si c'est Retroworld (VR/Escape VR/quiz/goûter) ou Runningman (Game Zone/Escape non-VR/Salle enfant).")
-    if _is_just_question_mark(user_text):
-        hints.append("L'utilisateur a envoyé seulement '?'. Demandez ce qu'il souhaite.")
-    if hints:
-        messages.append({"role": "system", "content": "GUIDE:\n- " + "\n- ".join(hints)})
-
-    reply, usage = call_openai_chat(messages)
-    reply = strip_markdown_simple(reply)
-
-    # Pare-chocs anti-resa
-    reply = sanitize_booking_reply(reply, user_text=user_text, owner=owner, history=hist)
-
-    return reply, usage, owner
-
-
-# =========================================================
-# Routes
-# =========================================================
+        logger.critical("ERREUR : Impossible d'importer SYSTEM_PROMPT (%s)", str(e))
+        SYSTEM_PROMPT = "Erreur configuration : Base de connaissance introuvable."
+
+# --- 3) OPENAI CLIENT ---
+api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+if not api_key:
+    logger.warning("ATTENTION : OPENAI_API_KEY manquante !")
+
+client = OpenAI(api_key=api_key)
+
+# Paramètres IA (depuis vos variables Render)
+MODEL_NAME = os.environ.get("OPENAI_MODEL", "gpt-4o").strip()  # vous avez gpt-5.2
+REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "").strip().lower()  # optionnel
+try:
+    TEMPERATURE = float(os.environ.get("OPENAI_TEMPERATURE", "0.7"))
+except ValueError:
+    TEMPERATURE = 0.7
+
+try:
+    MAX_OUTPUT_TOKENS = int(os.environ.get("OPENAI_MAX_OUTPUT_TOKENS", "600"))
+except ValueError:
+    MAX_OUTPUT_TOKENS = 600
+
+# --- 4) ROUTES ---
 
 @app.route("/", methods=["GET"])
-def root():
-    return jsonify({"service": SERVICE_NAME, "status": "ok", "time_utc": _utc_iso()}), 200
-
+def index():
+    return jsonify({
+        "status": "online",
+        "service": "Pôle Loisirs AI (Retroworld / Runningman / Enigmaniac)",
+        "public_base_url": os.environ.get("PUBLIC_BASE_URL", "").strip(),
+        "model": MODEL_NAME,
+        "version": "3.1"
+    })
 
 @app.route("/health", methods=["GET"])
-def health():
+def health_check():
     return jsonify({"status": "ok"}), 200
 
-
-@app.route("/faq/retroworld", methods=["GET"])
-def faq_retroworld():
-    path = os.path.join(app.static_folder, "faq_retroworld.json")
-    data = _safe_read_json(path, {"items": []})
-    if not isinstance(data, dict):
-        data = {"items": []}
-    return jsonify(data), 200
-
-
-@app.route("/faq/runningman", methods=["GET"])
-def faq_runningman():
-    path = os.path.join(app.static_folder, "faq_runningman.json")
-    data = _safe_read_json(path, {"items": []})
-    if not isinstance(data, dict):
-        data = {"items": []}
-    return jsonify(data), 200
-
-
 @app.route("/chat", methods=["POST"])
-def chat_auto():
+def chat():
+    """
+    Reçoit:
+      - message: str
+      - history: [{role: 'user'|'assistant', content: '...'}, ...] (optionnel)
+    Renvoie:
+      - reply: str
+    """
     try:
-        payload = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify({"error": "invalid_json"}), 400
+        data = request.get_json(silent=True) or {}
+        user_message = (data.get("message") or "").strip()
+        history = data.get("history") or []
 
-    user_text = _payload_text(payload).strip()
-    metadata = _payload_metadata(payload)
-    conversation_id, user_id = _get_or_create_conversation_id(payload)
+        if not user_message:
+            return jsonify({"error": "Message vide"}), 400
+        if not isinstance(history, list):
+            history = []
 
-    if user_text == START_SIGNAL:
-        greeting = common_greeting_text()
-        append_conversation_turn(
-            conversation_id=conversation_id,
-            brand_effective="auto",
-            user_text="",
-            assistant_reply=greeting,
-            extra={"metadata": metadata, "brand_effective": "auto", "openai_usage": {"mode": "start"}, "user_id": user_id},
+        # Construire le payload messages
+        messages_payload = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+        # Garder les 10 derniers échanges valides (anti-spam / anti-boucle)
+        for msg in history[-10:]:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            content = msg.get("content")
+            if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+                messages_payload.append({"role": role, "content": content.strip()})
+
+        messages_payload.append({"role": "user", "content": user_message})
+
+        # Appel OpenAI
+        # Note: selon SDK/modèle, reasoning_effort peut ne pas être supporté.
+        # On l'applique uniquement s'il est renseigné.
+        kwargs = dict(
+            model=MODEL_NAME,
+            messages=messages_payload,
+            temperature=TEMPERATURE,
+            max_tokens=MAX_OUTPUT_TOKENS,
         )
-        resp = make_response(
-            jsonify({"reply": greeting, "answer": greeting, "brand_effective": "auto", "brand_entry": "auto", "conversation_id": conversation_id}),
-            200,
-        )
-        resp.set_cookie(CONV_COOKIE_NAME, conversation_id, max_age=60 * 60 * 24 * 30, samesite="Lax")
-        return resp
 
-    if not user_text:
-        return jsonify({"error": "missing_message"}), 400
+        # Tentative d'option reasoning (si supporté par votre modèle/SDK)
+        if REASONING_EFFORT in ("low", "medium", "high", "none"):
+            # On évite de casser si le SDK ne supporte pas : on catch plus bas.
+            kwargs["reasoning_effort"] = REASONING_EFFORT  # type: ignore
 
-    is_first_turn = len(load_conversation_messages(conversation_id)) == 0
-
-    reply, usage, owner = process_chat("auto", user_text, conversation_id)
-    reply = strip_markdown_simple(reply)
-    reply = maybe_prefix_common_greeting(reply, is_first_turn=is_first_turn)
-
-    append_conversation_turn(
-        conversation_id=conversation_id,
-        brand_effective=owner,
-        user_text=user_text,
-        assistant_reply=reply,
-        extra={"metadata": metadata, "brand_effective": owner, "openai_usage": usage, "user_id": user_id},
-    )
-
-    resp = make_response(
-        jsonify({"reply": reply, "answer": reply, "brand_effective": owner, "brand_entry": "auto", "conversation_id": conversation_id}),
-        200,
-    )
-    resp.set_cookie(CONV_COOKIE_NAME, conversation_id, max_age=60 * 60 * 24 * 30, samesite="Lax")
-    return resp
-
-
-@app.route("/chat/<brand>", methods=["POST"])
-def chat_brand(brand: str):
-    try:
-        payload = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify({"error": "invalid_json"}), 400
-
-    user_text = _payload_text(payload).strip()
-    metadata = _payload_metadata(payload)
-    conversation_id, user_id = _get_or_create_conversation_id(payload)
-
-    if user_text == START_SIGNAL:
-        greeting = common_greeting_text()
-        append_conversation_turn(
-            conversation_id=conversation_id,
-            brand_effective=brand,
-            user_text="",
-            assistant_reply=greeting,
-            extra={"metadata": metadata, "brand_entry": brand, "brand_effective": brand, "openai_usage": {"mode": "start"}, "user_id": user_id},
-        )
-        resp = make_response(
-            jsonify({"reply": greeting, "answer": greeting, "brand_effective": brand, "brand_entry": brand, "conversation_id": conversation_id}),
-            200,
-        )
-        resp.set_cookie(CONV_COOKIE_NAME, conversation_id, max_age=60 * 60 * 24 * 30, samesite="Lax")
-        return resp
-
-    if not user_text:
-        return jsonify({"error": "missing_message"}), 400
-
-    is_first_turn = len(load_conversation_messages(conversation_id)) == 0
-
-    reply, usage, owner = process_chat(brand, user_text, conversation_id)
-    reply = strip_markdown_simple(reply)
-    reply = maybe_prefix_common_greeting(reply, is_first_turn=is_first_turn)
-
-    append_conversation_turn(
-        conversation_id=conversation_id,
-        brand_effective=owner,
-        user_text=user_text,
-        assistant_reply=reply,
-        extra={"metadata": metadata, "brand_entry": brand, "brand_effective": owner, "openai_usage": usage, "user_id": user_id},
-    )
-
-    resp = make_response(
-        jsonify({"reply": reply, "answer": reply, "brand_effective": owner, "brand_entry": brand, "conversation_id": conversation_id}),
-        200,
-    )
-    resp.set_cookie(CONV_COOKIE_NAME, conversation_id, max_age=60 * 60 * 24 * 30, samesite="Lax")
-    return resp
-
-
-@app.route("/user/api/history", methods=["GET"])
-def user_api_history():
-    if USER_HISTORY_TOKEN and not _require_user_token(request):
-        return jsonify({"error": "forbidden"}), 403
-
-    conversation_id = (request.args.get("conversation_id") or "").strip()
-    user_id = (request.args.get("user_id") or "").strip()
-
-    if not conversation_id and user_id:
-        conversation_id = get_user_conversation(user_id) or ""
-
-    if not conversation_id:
-        conversation_id = (request.cookies.get(CONV_COOKIE_NAME) or "").strip()
-
-    if not conversation_id:
-        return jsonify({"error": "missing_conversation_id"}), 400
-
-    obj = load_conversation_obj(conversation_id)
-    return jsonify({"conversation_id": conversation_id, "conversation": obj}), 200
-
-
-@app.route("/kb/<brand>", methods=["GET"])
-def kb_get(brand: str):
-    kb = load_kb(brand)
-    return jsonify(kb), 200
-
-
-@app.route("/kb/<brand>", methods=["POST"])
-def kb_upsert(brand: str):
-    if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
-        return jsonify({"error": "forbidden"}), 403
-
-    try:
-        payload = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify({"error": "invalid_json"}), 400
-
-    kb = load_kb(brand)
-    new_items = payload.get("items")
-    if isinstance(new_items, list):
-        kb["items"] = new_items
-
-    ok = save_kb(brand, kb)
-    return jsonify({"ok": ok, "brand": brand}), 200
-
-
-@app.route("/admin/api/export/conversations.zip", methods=["GET"])
-def admin_export_conversations_zip():
-    if ADMIN_DASHBOARD_TOKEN and not _require_admin_token(request):
-        return jsonify({"error": "forbidden"}), 403
-
-    buf = io.BytesIO()
-    stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S") + "Z"
-    zip_name = f"conversations_{stamp}.zip"
-
-    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
         try:
-            for fn in os.listdir(CONV_DIR):
-                if fn.endswith(".json"):
-                    full = os.path.join(CONV_DIR, fn)
-                    z.write(full, arcname=f"conversations/{fn}")
-        except Exception as e:
-            logger.warning("export conversations failed: %s", e)
+            response = client.chat.completions.create(**kwargs)
+        except TypeError:
+            # Le SDK n'accepte pas reasoning_effort => on retente sans
+            kwargs.pop("reasoning_effort", None)
+            response = client.chat.completions.create(**kwargs)
 
-        if os.path.exists(USER_INDEX_PATH):
-            z.write(USER_INDEX_PATH, arcname="user_index.json")
+        bot_reply = response.choices[0].message.content or ""
 
-    buf.seek(0)
-    return send_file(
-        buf,
-        mimetype="application/zip",
-        as_attachment=True,
-        download_name=zip_name,
-        max_age=0,
-    )
+        if debug_logs:
+            logger.debug("Payload roles: %s", [m["role"] for m in messages_payload])
+            logger.debug("User: %s", user_message)
+            logger.debug("Reply: %s", bot_reply[:400])
 
+        return jsonify({"reply": bot_reply})
 
-@app.route("/admin", methods=["GET"])
-def admin_page():
-    return send_from_directory(app.static_folder, "admin.html")
-
-
-@app.route("/admin/conversations", methods=["GET"])
-def admin_conversations_page():
-    return send_from_directory(app.static_folder, "admin.html")
-
-
-@app.route("/<path:path>", methods=["GET"])
-def static_proxy(path: str):
-    return send_from_directory(app.static_folder, path)
-
+    except Exception as e:
+        logger.error("ERREUR CRITIQUE /chat : %s", str(e))
+        return jsonify({
+            "reply": (
+                "Désolé, je rencontre un souci technique momentané.\n"
+                "Retroworld : 04 94 47 94 64\n"
+                "Runningman : 04 98 09 30 59"
+            )
+        }), 500
 
 if __name__ == "__main__":
-    logger.info("Starting %s on port %s", SERVICE_NAME, PORT)
-    app.run(host="0.0.0.0", port=PORT)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
