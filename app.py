@@ -9,13 +9,20 @@ from typing import Any, Dict, List
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from openai import OpenAI
-from dotenv import load_dotenv
+
+# -------------------------
+# .env (optionnel)
+# Render n'en a pas besoin. En local, ça peut aider si python-dotenv est installé.
+# -------------------------
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    pass
 
 # -------------------------
 # CONFIG
 # -------------------------
-load_dotenv()
-
 debug_logs = os.environ.get("DEBUG_LOGS", "false").strip().lower() == "true"
 log_level = logging.DEBUG if debug_logs else logging.INFO
 logging.basicConfig(level=log_level, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -50,7 +57,9 @@ except ValueError:
 
 OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "").strip().lower()  # optionnel
 
+# -------------------------
 # CORS
+# -------------------------
 app = Flask(__name__)
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
 if allowed_origins:
@@ -65,7 +74,9 @@ else:
     CORS(app, supports_credentials=True)
     logger.warning("CORS: ALLOWED_ORIGINS vide -> accès ouvert (à éviter en prod)")
 
+# -------------------------
 # OpenAI client
+# -------------------------
 if not OPENAI_API_KEY:
     logger.warning("OPENAI_API_KEY manquante !")
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -73,11 +84,9 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # -------------------------
 # SYSTEM PROMPT
 # -------------------------
-# Le fichier est dans src/data/system_data.py
 try:
     from src.data.system_data import SYSTEM_PROMPT
 except Exception:
-    # Fallback si PYTHONPATH ne contient pas src
     try:
         import sys
         src_dir = os.path.join(BASE_DIR, "src")
@@ -89,7 +98,7 @@ except Exception:
         SYSTEM_PROMPT = "Erreur configuration : Base de connaissance introuvable."
 
 # -------------------------
-# HELPERS STORAGE
+# Helpers stockage
 # -------------------------
 def _now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
@@ -115,23 +124,19 @@ def _new_conv_id() -> str:
     return "conv_" + uuid.uuid4().hex[:18]
 
 def _get_conv_id() -> str:
-    # 1) cookie
     cid = (request.cookies.get(CONV_COOKIE_NAME) or "").strip()
     if cid:
         return cid
-    # 2) header custom optionnel
     cid = (request.headers.get("X-Conv-Id") or "").strip()
     if cid:
         return cid
-    # 3) body optionnel
     data = request.get_json(silent=True) or {}
     cid = (data.get("conv_id") or "").strip()
     if cid:
         return cid
-    # 4) sinon nouveau
     return _new_conv_id()
 
-def _load_history(conv_id: str) -> List[Dict[str, str]]:
+def _load_history(conv_id: str) -> List[Dict[str, Any]]:
     doc = _safe_read_json(_conv_path(conv_id), {"messages": []}) or {"messages": []}
     msgs = doc.get("messages", [])
     return msgs if isinstance(msgs, list) else []
@@ -147,13 +152,14 @@ def _append_history(conv_id: str, role: str, content: str) -> None:
     doc = _safe_read_json(doc_path, {"created_at": _now_iso(), "messages": []}) or {"created_at": _now_iso(), "messages": []}
     if "created_at" not in doc:
         doc["created_at"] = _now_iso()
+
     msgs = doc.get("messages", [])
     if not isinstance(msgs, list):
         msgs = []
 
     msgs.append({"role": role, "content": content, "ts": time.time()})
 
-    # Limit: garder les 30 derniers messages pour éviter de grossir
+    # garde les 30 derniers messages max
     if len(msgs) > 30:
         msgs = msgs[-30:]
 
@@ -165,13 +171,12 @@ def _require_admin(req) -> bool:
     if not ADMIN_DASHBOARD_TOKEN:
         return False
     token = (req.headers.get("Authorization") or "").strip()
-    # accepte "Bearer xxx" ou "xxx"
     if token.lower().startswith("bearer "):
         token = token[7:].strip()
     return token == ADMIN_DASHBOARD_TOKEN
 
 # -------------------------
-# ROUTES
+# Routes
 # -------------------------
 @app.route("/", methods=["GET"])
 def index():
@@ -188,11 +193,6 @@ def health_check():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    """
-    Stockage Q/R serveur activé:
-      - conv_id via cookie rw_conv_id (auto)
-      - history front optionnel (mais pas nécessaire)
-    """
     conv_id = _get_conv_id()
 
     try:
@@ -203,14 +203,10 @@ def chat():
         if not user_message:
             return jsonify({"error": "Message vide"}), 400
 
-        # 1) Historique serveur
         stored_msgs = _load_history(conv_id)
 
-        # 2) Optionnel: si le front fournit un historique, on peut l'utiliser,
-        #    mais on préfère le serveur pour la cohérence.
-        #    (on garde quand même stored_msgs comme source principale)
-        if isinstance(client_history, list) and len(client_history) > 0 and len(stored_msgs) == 0:
-            # premier démarrage: on peut “amorcer” le serveur avec le history du client
+        # amorce si le front envoie un history et que le serveur n'a rien
+        if isinstance(client_history, list) and client_history and not stored_msgs:
             for msg in client_history[-10:]:
                 if isinstance(msg, dict):
                     r = msg.get("role")
@@ -219,17 +215,11 @@ def chat():
                         _append_history(conv_id, r, c.strip())
             stored_msgs = _load_history(conv_id)
 
-        # Ajout du message utilisateur dans l’historique serveur
         _append_history(conv_id, "user", user_message)
-
-        # Recharge après append (garantit l'ordre exact stocké)
         stored_msgs = _load_history(conv_id)
 
-        # Construire payload OpenAI
         messages_payload: List[Dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-        # On garde les 12 derniers messages (pour limiter tokens)
-        # (comme chaque message peut être long)
         cleaned = []
         for m in stored_msgs[-12:]:
             if not isinstance(m, dict):
@@ -238,7 +228,6 @@ def chat():
             content = m.get("content")
             if role in ("user", "assistant") and isinstance(content, str) and content.strip():
                 cleaned.append({"role": role, "content": content.strip()})
-
         messages_payload.extend(cleaned)
 
         kwargs = dict(
@@ -248,28 +237,23 @@ def chat():
             max_tokens=OPENAI_MAX_OUTPUT_TOKENS,
         )
 
-        # Optionnel: reasoning effort (si supporté par votre modèle/SDK)
         if OPENAI_REASONING_EFFORT in ("low", "medium", "high", "none"):
             kwargs["reasoning_effort"] = OPENAI_REASONING_EFFORT  # type: ignore
 
         try:
             response = client.chat.completions.create(**kwargs)
         except TypeError:
-            # si le SDK ne supporte pas reasoning_effort
             kwargs.pop("reasoning_effort", None)
             response = client.chat.completions.create(**kwargs)
 
         bot_reply = response.choices[0].message.content or ""
-
-        # Stocker la réponse assistant
         _append_history(conv_id, "assistant", bot_reply)
 
         if debug_logs:
-            logger.debug("conv_id=%s | msg=%s", conv_id, user_message)
+            logger.debug("conv_id=%s | user=%s", conv_id, user_message)
             logger.debug("reply=%s", bot_reply[:400])
 
         resp = make_response(jsonify({"reply": bot_reply, "conv_id": conv_id}))
-        # cookie 30 jours
         resp.set_cookie(CONV_COOKIE_NAME, conv_id, max_age=60 * 60 * 24 * 30, httponly=False, samesite="Lax")
         return resp
 
@@ -286,7 +270,6 @@ def chat():
         resp.set_cookie(CONV_COOKIE_NAME, conv_id, max_age=60 * 60 * 24 * 30, httponly=False, samesite="Lax")
         return resp
 
-# --- ADMIN: lire l'historique d'une conversation ---
 @app.route("/admin/history/<conv_id>", methods=["GET"])
 def admin_history(conv_id: str):
     if not _require_admin(request):
@@ -294,7 +277,6 @@ def admin_history(conv_id: str):
     msgs = _load_history(conv_id)
     return jsonify({"conv_id": conv_id, "messages": msgs})
 
-# --- ADMIN: reset conversation ---
 @app.route("/admin/reset/<conv_id>", methods=["POST"])
 def admin_reset(conv_id: str):
     if not _require_admin(request):
