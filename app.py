@@ -3,6 +3,7 @@ import json
 import time
 import uuid
 import logging
+import importlib.util
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -12,7 +13,6 @@ from openai import OpenAI
 
 # -------------------------
 # .env (optionnel)
-# Render n'en a pas besoin. En local, ça peut aider si python-dotenv est installé.
 # -------------------------
 try:
     from dotenv import load_dotenv  # type: ignore
@@ -21,7 +21,7 @@ except Exception:
     pass
 
 # -------------------------
-# CONFIG
+# LOGS
 # -------------------------
 debug_logs = os.environ.get("DEBUG_LOGS", "false").strip().lower() == "true"
 log_level = logging.DEBUG if debug_logs else logging.INFO
@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 SERVICE_NAME = os.environ.get("SERVICE_NAME", "retroworld-ia").strip()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# -------------------------
+# DATA / STORAGE
+# -------------------------
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(BASE_DIR, "data")).strip()
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -39,9 +43,22 @@ os.makedirs(CONV_DIR, exist_ok=True)
 
 CONV_COOKIE_NAME = os.environ.get("CONV_COOKIE_NAME", "rw_conv_id").strip()
 
+# -------------------------
+# ADMIN
+# -------------------------
 ADMIN_DASHBOARD_TOKEN = (os.environ.get("ADMIN_DASHBOARD_TOKEN") or os.environ.get("ADMIN_API_TOKEN") or "").strip()
 
-# OpenAI settings (Render)
+def _require_admin(req) -> bool:
+    if not ADMIN_DASHBOARD_TOKEN:
+        return False
+    token = (req.headers.get("Authorization") or "").strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    return token == ADMIN_DASHBOARD_TOKEN
+
+# -------------------------
+# OPENAI
+# -------------------------
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o").strip()
 
@@ -55,12 +72,46 @@ try:
 except ValueError:
     OPENAI_MAX_OUTPUT_TOKENS = 900
 
-OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "").strip().lower()  # optionnel
+OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "").strip().lower()
+
+if not OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY manquante !")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # -------------------------
-# CORS
+# SYSTEM PROMPT (chargé par chemin, robuste Render)
+# -------------------------
+def load_system_prompt() -> str:
+    """
+    Charge SYSTEM_PROMPT depuis /app/src/data/system_data.py sans dépendre de packages Python.
+    """
+    candidates = [
+        os.path.join(BASE_DIR, "src", "data", "system_data.py"),
+        os.path.join("/app", "src", "data", "system_data.py"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                spec = importlib.util.spec_from_file_location("system_data", path)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)  # type: ignore
+                    prompt = getattr(module, "SYSTEM_PROMPT", None)
+                    if isinstance(prompt, str) and prompt.strip():
+                        logger.info("SYSTEM_PROMPT chargé depuis %s", path)
+                        return prompt
+            except Exception as e:
+                logger.critical("Import SYSTEM_PROMPT échoué (%s): %s", path, str(e))
+    logger.critical("SYSTEM_PROMPT introuvable (vérifiez que src/data/system_data.py est bien déployé).")
+    return "Erreur configuration : Base de connaissance introuvable."
+
+SYSTEM_PROMPT = load_system_prompt()
+
+# -------------------------
+# FLASK + CORS
 # -------------------------
 app = Flask(__name__)
+
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
 if allowed_origins:
     origins_list = [o.strip() for o in allowed_origins.split(",") if o.strip()]
@@ -75,30 +126,7 @@ else:
     logger.warning("CORS: ALLOWED_ORIGINS vide -> accès ouvert (à éviter en prod)")
 
 # -------------------------
-# OpenAI client
-# -------------------------
-if not OPENAI_API_KEY:
-    logger.warning("OPENAI_API_KEY manquante !")
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-# -------------------------
-# SYSTEM PROMPT
-# -------------------------
-try:
-    from src.data.system_data import SYSTEM_PROMPT
-except Exception:
-    try:
-        import sys
-        src_dir = os.path.join(BASE_DIR, "src")
-        if src_dir not in sys.path:
-            sys.path.insert(0, src_dir)
-        from data.system_data import SYSTEM_PROMPT  # type: ignore
-    except Exception as e:
-        logger.critical("Impossible d'importer SYSTEM_PROMPT: %s", str(e))
-        SYSTEM_PROMPT = "Erreur configuration : Base de connaissance introuvable."
-
-# -------------------------
-# Helpers stockage
+# HELPERS CONV
 # -------------------------
 def _now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"
@@ -158,8 +186,6 @@ def _append_history(conv_id: str, role: str, content: str) -> None:
         msgs = []
 
     msgs.append({"role": role, "content": content, "ts": time.time()})
-
-    # garde les 30 derniers messages max
     if len(msgs) > 30:
         msgs = msgs[-30:]
 
@@ -167,16 +193,8 @@ def _append_history(conv_id: str, role: str, content: str) -> None:
     doc["updated_at"] = _now_iso()
     _safe_write_json(doc_path, doc)
 
-def _require_admin(req) -> bool:
-    if not ADMIN_DASHBOARD_TOKEN:
-        return False
-    token = (req.headers.get("Authorization") or "").strip()
-    if token.lower().startswith("bearer "):
-        token = token[7:].strip()
-    return token == ADMIN_DASHBOARD_TOKEN
-
 # -------------------------
-# Routes
+# ROUTES
 # -------------------------
 @app.route("/", methods=["GET"])
 def index():
@@ -184,7 +202,7 @@ def index():
         "status": "online",
         "service": SERVICE_NAME,
         "model": OPENAI_MODEL,
-        "version": "3.2-storage"
+        "version": "3.3-storage-importfix"
     })
 
 @app.route("/health", methods=["GET"])
@@ -198,22 +216,8 @@ def chat():
     try:
         data = request.get_json(silent=True) or {}
         user_message = (data.get("message") or "").strip()
-        client_history = data.get("history")
-
         if not user_message:
             return jsonify({"error": "Message vide"}), 400
-
-        stored_msgs = _load_history(conv_id)
-
-        # amorce si le front envoie un history et que le serveur n'a rien
-        if isinstance(client_history, list) and client_history and not stored_msgs:
-            for msg in client_history[-10:]:
-                if isinstance(msg, dict):
-                    r = msg.get("role")
-                    c = msg.get("content")
-                    if r in ("user", "assistant") and isinstance(c, str) and c.strip():
-                        _append_history(conv_id, r, c.strip())
-            stored_msgs = _load_history(conv_id)
 
         _append_history(conv_id, "user", user_message)
         stored_msgs = _load_history(conv_id)
@@ -249,10 +253,6 @@ def chat():
         bot_reply = response.choices[0].message.content or ""
         _append_history(conv_id, "assistant", bot_reply)
 
-        if debug_logs:
-            logger.debug("conv_id=%s | user=%s", conv_id, user_message)
-            logger.debug("reply=%s", bot_reply[:400])
-
         resp = make_response(jsonify({"reply": bot_reply, "conv_id": conv_id}))
         resp.set_cookie(CONV_COOKIE_NAME, conv_id, max_age=60 * 60 * 24 * 30, httponly=False, samesite="Lax")
         return resp
@@ -270,6 +270,7 @@ def chat():
         resp.set_cookie(CONV_COOKIE_NAME, conv_id, max_age=60 * 60 * 24 * 30, httponly=False, samesite="Lax")
         return resp
 
+# --- ADMIN ---
 @app.route("/admin/history/<conv_id>", methods=["GET"])
 def admin_history(conv_id: str):
     if not _require_admin(request):
