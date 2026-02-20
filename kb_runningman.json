@@ -1,0 +1,32 @@
+{
+  "brand": "runningman",
+  "updated": "2026-02-19",
+  "items": [
+    {
+      "q": "Runningman Games, c’est quoi ?",
+      "a": "Runningman Games propose un action game (activité physique et ludique) dans le même bâtiment que Retroworld, à Draguignan.",
+      "tags": [
+        "runningman",
+        "action game",
+        "activité"
+      ]
+    },
+    {
+      "q": "Comment réserver chez Runningman Games ?",
+      "a": "Les réservations se font directement auprès de Runningman Games. Téléphone : 04 98 09 30 59. Site : https://www.runningmangames.fr",
+      "tags": [
+        "réservation",
+        "contact",
+        "téléphone"
+      ]
+    },
+    {
+      "q": "Est-ce que Retroworld gère les réservations Runningman ?",
+      "a": "Non. Même si nous sommes dans le même bâtiment, les clients doivent contacter Runningman Games directement pour toute réservation ou information sur l’action game.",
+      "tags": [
+        "partenaire",
+        "réservation"
+      ]
+    }
+  ]
+}

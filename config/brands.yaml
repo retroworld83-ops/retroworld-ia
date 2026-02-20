@@ -1,0 +1,25 @@
+# Configuration multi-établissements (facultatif).
+# Si vous modifiez ce fichier, redéployez sur Render.
+
+default_brand: retroworld
+
+brands:
+  retroworld:
+    display_name: "Retroworld"
+    domains:
+      - "retroworldfrance.com"
+      - "www.retroworldfrance.com"
+    kb_file: "kb_retroworld.json"
+
+  runningman:
+    display_name: "Runningman Games"
+    domains:
+      - "runningmangames.fr"
+      - "www.runningmangames.fr"
+    kb_file: "kb_runningman.json"
+
+  enigmaniac:
+    display_name: "Enigmaniac"
+    # Ajoutez ici vos domaines si vous avez un site (ex: enigmaniac.fr)
+    domains: []
+    kb_file: "kb_enigmaniac.json"

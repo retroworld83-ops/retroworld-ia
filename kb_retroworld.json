@@ -1,0 +1,96 @@
+{
+  "brand": "retroworld",
+  "updated": "2026-02-19",
+  "items": [
+    {
+      "q": "Où se trouve Retroworld France ?",
+      "a": "Retroworld France est situé au 815 avenue Pierre Brossolette, 83300 Draguignan, France.",
+      "tags": [
+        "adresse",
+        "draguignan",
+        "localisation"
+      ]
+    },
+    {
+      "q": "Quels sont les horaires d’ouverture ?",
+      "a": "Du mardi au dimanche, de 11h à 22h (fermé le lundi).",
+      "tags": [
+        "horaires",
+        "ouverture"
+      ]
+    },
+    {
+      "q": "Comment contacter Retroworld ?",
+      "a": "Téléphone : 04 94 47 94 64. Email : contact@retroworldfrance.com. Site : https://www.retroworldfrance.com",
+      "tags": [
+        "contact",
+        "telephone",
+        "email",
+        "site"
+      ]
+    },
+    {
+      "q": "Quels sont les tarifs des jeux VR ?",
+      "a": "Jeux VR : 15 € / joueur, jusqu’à 5 joueurs. (Les jeux VR ne comprennent pas l’escape game VR.)",
+      "tags": [
+        "tarif",
+        "prix",
+        "vr"
+      ]
+    },
+    {
+      "q": "Quel est le tarif des escape games VR ?",
+      "a": "Escape Game VR : 30 € / joueur. Si vous terminez en avance, un jeu de complétion est proposé.",
+      "tags": [
+        "escape",
+        "vr",
+        "tarif"
+      ]
+    },
+    {
+      "q": "Proposez-vous des quiz interactifs ?",
+      "a": "Quiz interactifs : 8 € (30 min), 15 € (60 min), 20 € (90 min). Jusqu’à 12 joueurs. Dès 10 ans avec un accompagnant.",
+      "tags": [
+        "quiz",
+        "interactif",
+        "tarif"
+      ]
+    },
+    {
+      "q": "Avez-vous une salle enfant pour les anniversaires ?",
+      "a": "Salle enfant : 50 € / heure, puis 20 € par demi-heure supplémentaire. Comprend des jeux en bois, un mur interactif, une balayeuse, et un espace de stockage pour le goûter.",
+      "tags": [
+        "anniversaire",
+        "enfant",
+        "salle"
+      ]
+    },
+    {
+      "q": "Y a-t-il une salle d’attente ?",
+      "a": "Oui : canapés confortables, café/thé/chocolat chaud, distributeur de snacks et boissons fraîches, borne de basketball, baby-foot, air hockey, écrans de diffusion, salle climatisée.",
+      "tags": [
+        "salle",
+        "attente",
+        "confort"
+      ]
+    },
+    {
+      "q": "Comment assurez-vous l’hygiène des casques VR ?",
+      "a": "Nous utilisons des casques VR professionnels (Vive Pro 2 et Meta Quest 3) et tout le matériel est soigneusement nettoyé entre chaque session.",
+      "tags": [
+        "hygiene",
+        "casque",
+        "vr"
+      ]
+    },
+    {
+      "q": "Runningman Games, c’est vous ?",
+      "a": "Runningman Games est un partenaire situé dans le même bâtiment. Pour l’action game, les clients doivent les contacter directement : http://www.runningmangames.fr (tél. 04 98 09 30 59).",
+      "tags": [
+        "runningman",
+        "partenaire",
+        "action game"
+      ]
+    }
+  ]
+}

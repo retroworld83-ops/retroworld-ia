@@ -1,0 +1,16 @@
+{
+  "brand": "enigmaniac",
+  "updated": "",
+  "items": [
+    {
+      "q": "Qui est Enigmaniac ?",
+      "a": "Enigmaniac fait partie des activités présentes au même endroit que Retroworld et Runningman. Cette FAQ est à compléter avec vos informations (horaires, tarifs, adresse exacte, réservation).",
+      "tags": ["presentation"]
+    },
+    {
+      "q": "Comment réserver chez Enigmaniac ?",
+      "a": "Information à compléter. En attendant, indiquez-nous votre date souhaitée et le nombre de personnes, et nous vous orienterons.",
+      "tags": ["reservation", "booking"]
+    }
+  ]
+}

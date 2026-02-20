@@ -1,0 +1,25 @@
+{
+  "id": "rw_73e494c7ce02",
+  "brand": "retroworld",
+  "user_id": "",
+  "created": "2026-02-19T17:23:21.558820Z",
+  "updated": "2026-02-19T17:23:21.560983Z",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Quels sont vos horaires ?",
+      "ts": "2026-02-19T17:23:21.559289Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Le service IA n'est pas configuré (OPENAI_API_KEY manquante).",
+      "ts": "2026-02-19T17:23:21.560980Z",
+      "extra": {
+        "model": "",
+        "usage": {
+          "error": "openai_not_configured"
+        }
+      }
+    }
+  ]
+}
