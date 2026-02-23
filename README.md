@@ -39,7 +39,7 @@ L’application lit ses variables d’environnement pour se configurer. Voici le
 - `BRAND_ID` (défaut `retroworld`) : marque par défaut si aucune n’est détectée.
 - `ADMIN_API_TOKEN` / `ADMIN_DASHBOARD_TOKEN` : jetons pour sécuriser l’accès aux routes administrateur.
 - `ALLOWED_ORIGINS` : liste séparée par des virgules des origines autorisées pour CORS.
-- `FAQ_ENABLED_BRANDS` (`retroworld,runningman` par défaut) : marques pour lesquelles la FAQ est publiée.
+- `FAQ_ENABLED_BRANDS` (`retroworld,runningman,enigmaniac` par défaut) : marques pour lesquelles la FAQ est publiée.
 - `PUBLIC_BASE_URL` : URL publique du service (affichée dans `/brands.json`).
 - `DEBUG_LOGS` (`true`/`false`) : active l’affichage de logs de debug côté serveur.
 
@@ -75,3 +75,20 @@ Le fichier `src/data/system_data.py` contient la totalité des descriptions et r
 ## Contributions
 
 Ce projet a été construit à partir des échanges précédents avec un utilisateur. Il vise à fournir un chatbot fiable sans injection de bases de connaissances externes, tout en offrant une gestion simple des conversations et de la FAQ. N’hésitez pas à adapter le code à vos besoins (ajout de scénarios, amélioration de l’interface, etc.).
+
+
+## Déploiement Render (Docker)
+
+Ce dépôt inclut un `Dockerfile` pour Render en mode Docker.
+
+- Build Command: *(laisser vide en mode Docker)*
+- Start Command: *(laisser vide en mode Docker)*
+- Render détecte automatiquement le `Dockerfile` à la racine.
+
+Le conteneur démarre avec:
+
+```bash
+gunicorn -w 2 -k gthread -b 0.0.0.0:$PORT app:app
+```
+
+Assurez-vous de définir vos variables d'environnement dans Render (notamment `OPENAI_API_KEY`, `ADMIN_API_TOKEN`, `ADMIN_DASHBOARD_TOKEN`, `ALLOWED_ORIGINS`, `PUBLIC_BASE_URL`).
