@@ -92,3 +92,10 @@ gunicorn -w 2 -k gthread -b 0.0.0.0:$PORT app:app
 ```
 
 Assurez-vous de définir vos variables d'environnement dans Render (notamment `OPENAI_API_KEY`, `ADMIN_API_TOKEN`, `ADMIN_DASHBOARD_TOKEN`, `ALLOWED_ORIGINS`, `PUBLIC_BASE_URL`).
+
+
+### Dépannage Render: "failed to read dockerfile"
+Si Render affiche `failed to read dockerfile: open Dockerfile: no such file or directory`:
+- Vérifiez que le service pointe bien sur le bon dépôt **et la bonne branche** (`main`).
+- Vérifiez que le commit déployé contient bien `Dockerfile` (fichier à la racine).
+- Si vous utilisez Blueprint, utilisez le `render.yaml` de ce dépôt (il pointe explicitement vers `./Dockerfile`).
