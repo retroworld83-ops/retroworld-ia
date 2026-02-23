@@ -1,769 +1,746 @@
-"""
-Application Flask pour le Pôle Loisirs Draguignan.
-
-Cette application fournit un chatbot multi‑établissements piloté par un prompt unique,
-une FAQ publique et une interface d’administration pour consulter les conversations.
-
-Les informations commerciales et les règles à respecter sont définies dans
-`src/data/system_data.py` (voir `SYSTEM_PROMPT`).
-
-Le chatbot ne s’appuie sur aucune base de connaissances externe ; il utilise uniquement
-le prompt système et les variables d’environnement pour ajuster son comportement.
-"""
-
-import csv
-import json
-import os
-import re
-import uuid
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-from flask import Flask, jsonify, make_response, redirect, request, send_from_directory
-
-from src.data.system_data import SYSTEM_PROMPT
-
-try:
-    import requests  # Utilisé pour appeler l’API OpenAI
-except Exception:
-    requests = None  # type: ignore
-
-
-# -----------------------------------------------------------------------------
-# Configuration et variables globales
-# -----------------------------------------------------------------------------
-
-# Dossiers de travail
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-CONV_DIR = DATA_DIR / "conversations"
-STATIC_DIR = BASE_DIR / "static"
-
-CONV_DIR.mkdir(parents=True, exist_ok=True)
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
-
-# Lecture des variables d’environnement
-def _env(key: str, default: str = "") -> str:
-    return (os.getenv(key, default) or "").strip()
-
-# OpenAI
-OPENAI_API_KEY = _env("OPENAI_API_KEY")
-OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-5.2")
-OPENAI_REASONING_EFFORT = _env("OPENAI_REASONING_EFFORT", "none")
-OPENAI_TEMPERATURE = float(_env("OPENAI_TEMPERATURE", "0.3") or 0.0)
-OPENAI_MAX_OUTPUT_TOKENS = int(_env("OPENAI_MAX_OUTPUT_TOKENS", "900"))
-
-# Sécurité admin / CORS
-ADMIN_API_TOKEN = _env("ADMIN_API_TOKEN")
-ADMIN_DASHBOARD_TOKEN = _env("ADMIN_DASHBOARD_TOKEN")
-ALLOWED_ORIGINS = [o for o in _env("ALLOWED_ORIGINS").split(",") if o.strip()]
-
-# Marque par défaut
-BRAND_ID_DEFAULT = _env("BRAND_ID", "retroworld").lower() or "retroworld"
-
-# FAQ publique : marques activées
-FAQ_ENABLED_BRANDS = [b for b in _env("FAQ_ENABLED_BRANDS", "retroworld,runningman").split(",") if b.strip()]
-# Marques proposées dans le widget public
-PUBLIC_BRANDS = [b for b in _env("PUBLIC_BRANDS", ",".join(FAQ_ENABLED_BRANDS)).split(",") if b.strip()]
-
-# URL publique (utilisée dans /brands.json)
-PUBLIC_BASE_URL = _env("PUBLIC_BASE_URL")
-
-# Logs de debug
-DEBUG_LOGS = _env("DEBUG_LOGS").lower() in ("1", "true", "yes", "on")
-
-# Informations par établissement (nom, contacts, domaines…)
-DEFAULT_BRANDS: Dict[str, Dict[str, Any]] = {
-    "retroworld": {
-        "name": "Retroworld",
-        "short": "Retroworld",
-        "contact_phone": "04 94 47 94 64",
-        "contact_email": "contact@retroworldfrance.com",
-        "website": "https://www.retroworldfrance.com",
-        "domains": ["retroworldfrance.com", "www.retroworldfrance.com"],
-    },
-    "runningman": {
-        "name": "Runningman",
-        "short": "Runningman",
-        "contact_phone": "04 98 09 30 59",
-        "contact_email": "",
-        "website": "https://www.runningmangames.fr",
-        "domains": ["runningmangames.fr", "www.runningmangames.fr"],
-    },
-    "enigmaniac": {
-        "name": "Enigmaniac",
-        "short": "Enigmaniac",
-        "contact_phone": "04 94 50 74 63",
-        "contact_email": "",
-        "website": "https://enigmaniac-escapegame.com",
-        "domains": [],
-    },
-}
-
-# Fusion avec un éventuel fichier YAML de configuration de marques (optionnel)
-def _load_brands_from_yaml() -> Dict[str, Dict[str, Any]]:
-    cfg_path = BASE_DIR / "config" / "brands.yaml"
-    if not cfg_path.exists():
-        return {}
-    try:
-        import yaml  # type: ignore
-    except Exception:
-        return {}
-    try:
-        raw = yaml.safe_load(cfg_path.read_text("utf-8")) or {}
-        brands = raw.get("brands", {})
-        out: Dict[str, Dict[str, Any]] = {}
-        for bid, cfg in brands.items():
-            if not isinstance(cfg, dict):
-                continue
-            bid2 = str(bid).strip().lower()
-            base = DEFAULT_BRANDS.get(bid2, {"name": bid2.title(), "short": bid2.title()})
-            base.update(cfg)
-            out[bid2] = base
-        return out
-    except Exception:
-        return {}
-
-BRANDS: Dict[str, Dict[str, Any]] = DEFAULT_BRANDS.copy()
-BRANDS.update(_load_brands_from_yaml())
-for bid in list(BRANDS.keys()):
-    BRANDS[bid]["id"] = bid
-
-# -----------------------------------------------------------------------------
-# Utilitaires de journalisation
-# -----------------------------------------------------------------------------
-
-def log(*args: Any) -> None:
-    """Affiche un message si DEBUG_LOGS est activé."""
-    if DEBUG_LOGS:
-        print("[DBG]", *args, flush=True)
-
-
-# -----------------------------------------------------------------------------
-# Fonctions d’assistance (détection de marque, sécurité, post‑traitement)
-# -----------------------------------------------------------------------------
-
-def normalize_brand(b: str) -> str:
-    return (b or "").strip().lower()
-
-
-def detect_brand_from_origin() -> Optional[str]:
-    """Détecte une marque à partir de l’en‑tête Origin/Referer/Host."""
-    origin = (request.headers.get("Origin") or "").strip().lower()
-    referer = (request.headers.get("Referer") or "").strip().lower()
-    host = (request.host or "").strip().lower()
-    candidates = [origin, referer, host]
-    for cand in candidates:
-        for bid, cfg in BRANDS.items():
-            for d in cfg.get("domains", []) or []:
-                if d and d in cand:
-                    return bid
-    return None
-
-
-def detect_brand_from_text(text: str) -> Optional[str]:
-    """Détecte une marque si elle est mentionnée dans le texte de l’utilisateur."""
-    t = (text or "").lower()
-    if "runningman" in t:
-        return "runningman"
-    if "enigmaniac" in t or "enigma" in t:
-        return "enigmaniac"
-    if "retroworld" in t or "retro world" in t:
-        return "retroworld"
-    return None
-
-
-def get_brand_id(payload: Dict[str, Any]) -> str:
-    """Détermine la marque à partir du payload, des en‑têtes ou du texte."""
-    # ordre de priorité : JSON -> Header -> Query -> Texte -> Origin -> défaut
-    b = normalize_brand(payload.get("brand_id") or "")
-    if b and b in BRANDS:
-        return b
-    hb = normalize_brand(request.headers.get("X-Brand-Id") or "")
-    if hb and hb in BRANDS:
-        return hb
-    qb = normalize_brand(request.args.get("brand_id") or request.args.get("brand") or "")
-    if qb and qb in BRANDS:
-        return qb
-    msg = payload.get("message") or ""
-    bt = detect_brand_from_text(msg)
-    if bt and bt in BRANDS:
-        return bt
-    bo = detect_brand_from_origin()
-    if bo and bo in BRANDS:
-        return bo
-    return BRAND_ID_DEFAULT if BRAND_ID_DEFAULT in BRANDS else "retroworld"
-
-
-def format_contact(bid: str) -> str:
-    cfg = BRANDS.get(bid, {})
-    phone = cfg.get("contact_phone") or ""
-    email = cfg.get("contact_email") or ""
-    website = cfg.get("website") or ""
-    parts = []
-    if phone:
-        parts.append(f"📞 {phone}")
-    if email:
-        parts.append(f"📧 {email}")
-    if website:
-        parts.append(f"🌐 {website}")
-    return " | ".join(parts)
-
-
-# Patterns pour détecter les risques de promesse de réservation
-RESERVATION_FORBIDDEN_PATTERNS = [
-    r"\b(c['’]?est réservé|réservé|confirmé|confirmée|je vous bloque|on vous bloque|bloqué|bloquée)\b",
-]
-# Patterns pour détecter l’intention de réservation ou de prix
-RESERVATION_INTENT_PATTERNS = [
-    r"\b(réserv|reservation|réservation|dispo|disponibilit|créneau|horaire|anniversaire|goûter|acompte)\b",
-]
-
-
-def _booking_intent(text: str) -> bool:
-    t = (text or "").lower()
-    for pat in RESERVATION_INTENT_PATTERNS:
-        if re.search(pat, t, flags=re.IGNORECASE):
-            return True
-    return False
-
-
-def enforce_no_reservation_promises(text: str) -> (str, bool):
-    """Neutralise les formulations dangereuses de type « c’est réservé »."""
-    lowered = (text or "").lower()
-    promised = False
-    for pat in RESERVATION_FORBIDDEN_PATTERNS:
-        if re.search(pat, lowered, flags=re.IGNORECASE):
-            promised = True
-            # Remplace les phrases risquées par un avertissement générique
-            text = re.sub(
-                pat,
-                "à confirmer par l’équipe (je n’ai pas accès au planning en direct)",
-                text,
-                flags=re.IGNORECASE,
-            )
-    return text, promised
-
-
-def needs_reservation_disclaimer(user_msg: str) -> bool:
-    return _booking_intent(user_msg)
-
-
-def _price_intent(text: str) -> bool:
-    t = (text or "").lower()
-    return bool(re.search(r"\b(prix|tarif|tarifs|combien|co[uû]t|co[uû]te|€|euro)\b", t, flags=re.I))
-
-
-def _qweekle_links_for_retroworld(user_text: str) -> List[str]:
-    t = (user_text or "").lower()
-    links: List[str] = []
-    # Choisir les liens en fonction du contenu
-    if re.search(r"\b(escape|escape\s*vr|escape\s*game)\b", t, flags=re.I):
-        links.append(
-            "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr"
-        )
-    if re.search(r"\b(quiz|quizz)\b", t, flags=re.I):
-        links.append(
-            "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr"
-        )
-    # Par défaut, lien vers les jeux VR arcade
-    if not links:
-        links.append(
-            "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr"
-        )
-    return links
-
-
-def _append_retroworld_links_if_missing(user_text: str, reply: str) -> str:
-    if "qweekle.com" in (reply or "").lower():
-        return reply
-    if not (_booking_intent(user_text) or _price_intent(user_text)):
-        return reply
-    links = _qweekle_links_for_retroworld(user_text)
-    block = "\n".join([f"🔗 Lien réservation (Retroworld) : {u}" for u in links])
-    return (reply or "").rstrip() + "\n\n" + block
-
-
-def add_disclaimer_if_needed(answer: str, bid: str, user_msg: str) -> str:
-    if not needs_reservation_disclaimer(user_msg):
-        return answer
-    disclaimer = "Je n’ai pas accès au planning en temps réel, c’est à confirmer par l’équipe. "
-    contact = format_contact(bid)
-    if contact:
-        disclaimer += f"Contact : {contact}"
-    # Évite d’ajouter le disclaimer en double
-    if disclaimer.lower() not in (answer or "").lower():
-        return answer.rstrip() + "\n\n" + disclaimer
-    return answer
-
-
-def build_system_prompt(brand_id: str, user_text: str) -> str:
-    """Construit le prompt système à envoyer à OpenAI."""
-    bid = brand_id if brand_id in BRANDS else BRAND_ID_DEFAULT
-    cfg = BRANDS.get(bid, {}) or {}
-    who = cfg.get("name", bid)
-    contact = format_contact(bid)
-    tech_rules = """Règles techniques (très important) :
-- Répondez en français, ton professionnel, vouvoiement.
-- Vous n'avez PAS accès au planning ni au logiciel de réservation : ne promettez jamais un créneau "bloqué", "confirmé" ou "réservé".
-- Si la demande concerne une disponibilité ou une réservation : recueillez les informations (date, heure, nombre de personnes, activité) puis orientez vers le contact officiel.
-- Ne pas inventer : si une information n'est pas dans la base fournie, dites‑le clairement et proposez le bon contact.
-- En cas de question multi‑établissements (croisement Retroworld / Runningman / Enigmaniac) : répondez sans confusion, en séparant clairement par établissement.
-"""
-    session_ctx = f"""--- CONTEXTE SESSION ---\nSite / entité courante : {who} ({bid}).\nContact : {contact}\n"""
-    base = SYSTEM_PROMPT.strip() or "Vous êtes l'IA d'accueil du Pôle Loisirs Draguignan. Ne pas inventer. Pas d'accès au planning."
-    return (tech_rules + "\n\n" + base + "\n\n" + session_ctx).strip()
-
-
-def openai_ready() -> bool:
-    return bool(OPENAI_API_KEY and requests is not None)
-
-
-def openai_answer(system: str, user: str) -> str:
-    """Interroge l’API OpenAI Responses et renvoie le texte de sortie."""
-    if not openai_ready():
-        return ""
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload: Dict[str, Any] = {
-        "model": OPENAI_MODEL,
-        "input": [
-            {"role": "system", "content": [{"type": "text", "text": system}]},
-            {"role": "user", "content": [{"type": "text", "text": user}]},
-        ],
-        "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
-    }
-    # Mode reasoning effort
-    if OPENAI_REASONING_EFFORT:
-        payload["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
-    if OPENAI_REASONING_EFFORT == "none":
-        payload["temperature"] = OPENAI_TEMPERATURE
-    # Requête HTTP
-    try:
-        resp = requests.post(
-            "https://api.openai.com/v1/responses",
-            headers=headers,
-            json=payload,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json() or {}
-        out_texts: List[str] = []
-        for item in data.get("output", []):
-            for c in item.get("content", []):
-                if c.get("type") == "output_text":
-                    out_texts.append(c.get("text", ""))
-        return "\n".join(out_texts).strip()
-    except Exception as e:
-        log("OpenAI error:", e)
-        return "Désolé, je rencontre un souci technique. Pouvez‑vous réessayer ou contacter l’équipe ?"
-
-
-# -----------------------------------------------------------------------------
-# Gestion des conversations (stockage JSON)
-# -----------------------------------------------------------------------------
-
-def conv_path(conv_id: str) -> Path:
-    return CONV_DIR / f"{conv_id}.json"
-
-
-def new_conv_id(prefix: str = "rw") -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
-
-
-def load_conv(conv_id: str) -> Dict[str, Any]:
-    p = conv_path(conv_id)
-    if not p.exists():
-        return {"id": conv_id, "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "messages": [], "meta": {}}
-    try:
-        return json.loads(p.read_text("utf-8"))
-    except Exception:
-        return {"id": conv_id, "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "messages": [], "meta": {}}
-
-
-def save_conv(conv: Dict[str, Any]) -> None:
-    p = conv_path(conv.get("id", "unknown"))
-    try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(conv, ensure_ascii=False, indent=2), "utf-8")
-    except Exception as e:
-        log("save_conv error:", e)
-
-
-def append_message(conv: Dict[str, Any], role: str, content: str, extra: Optional[Dict[str, Any]] = None) -> None:
-    conv.setdefault("messages", [])
-    conv["messages"].append(
-        {
-            "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "role": role,
-            "content": content,
-            "extra": extra or {},
-        }
-    )
-
-
-# -----------------------------------------------------------------------------
-# Flags pour l’admin (détection heuristique de devis, réclamations, etc.)
-# -----------------------------------------------------------------------------
-
-FLAG_PATTERNS = {
-    "devis": r"\b(devis|privatis|entreprise|ce\b|comit[ée]\s*d['’]?entreprise|team\s*building|groupe)\b",
-    "reservation": r"\b(réserv|réservation|dispo|créneau|anniversaire|goûter|acompte)\b",
-    "reclamation": r"\b(rembourse|annul|plainte|probl[eè]me|litige|panne)\b",
-    "croise": r"\b(retroworld|runningman|enigmaniac)\b.*\b(retroworld|runningman|enigmaniac)\b",
-    "promesse_resa": r"\b(réservé|confirmé|je vous bloque|c['’]?est réservé|bloqué)\b",
-    "a_relire": r"\b(peut[- ]?être|probablement|je pense|à priori|il me semble)\b",
-}
-
-
-def compute_flags(conv: Dict[str, Any]) -> List[str]:
-    msgs = conv.get("messages") or []
-    blob = "\n".join([(m.get("content") or "") for m in msgs]).lower()
-    flags: List[str] = []
-    for name, pat in FLAG_PATTERNS.items():
-        if re.search(pat, blob, flags=re.IGNORECASE | re.DOTALL):
-            flags.append(name)
-    # a_valider si devis ou reclamation
-    if any(f in flags for f in ("devis", "reclamation")):
-        flags.append("a_valider")
-    return sorted(set(flags))
-
-
-# -----------------------------------------------------------------------------
-# Création de l’application Flask
-# -----------------------------------------------------------------------------
-
-app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
-
-
-@app.after_request
-def after(resp):
-    """Applique la politique CORS en fin de requête."""
-    origin = (request.headers.get("Origin") or "").strip().rstrip("/")
-    if ALLOWED_ORIGINS:
-        if origin in ALLOWED_ORIGINS:
-            resp.headers["Access-Control-Allow-Origin"] = origin
-            resp.headers["Vary"] = "Origin"
-    else:
-        # si non configuré, autoriser tout en dev
-        if origin:
-            resp.headers["Access-Control-Allow-Origin"] = origin
-            resp.headers["Vary"] = "Origin"
-        else:
-            resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Brand-Id"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    return resp
-
-
-# -----------------------------------------------------------------------------
-# Endpoints publics
-# -----------------------------------------------------------------------------
-
-@app.route("/", methods=["GET"])
-def index():
-    """Redirige vers le widget de chat."""
-    return redirect("/static/chat-widget.html")
-
-
-@app.route("/health", methods=["GET"])
-def health():
-    """Renvoie un état synthétique du service."""
-    return jsonify(
-        {
-            "ok": True,
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "openai_configured": openai_ready(),
-            "brands": list(BRANDS.keys()),
-            "faq_enabled_brands": FAQ_ENABLED_BRANDS,
-            "public_brands": PUBLIC_BRANDS,
-        }
-    )
-
-
-@app.route("/brands.json", methods=["GET"])
-def brands_json():
-    """Renvoie la liste des marques publiques, utilisée par le widget."""
-    out = []
-    for bid in PUBLIC_BRANDS:
-        cfg = BRANDS.get(bid, {})
-        out.append(
-            {
-                "id": bid,
-                "name": cfg.get("name", bid),
-                "short": cfg.get("short", bid),
-                "website": cfg.get("website", ""),
-                "contact_phone": cfg.get("contact_phone", ""),
-                "contact_email": cfg.get("contact_email", ""),
-            }
-        )
-    return jsonify({"items": out, "base_url": PUBLIC_BASE_URL})
-
-
-# ------------------ FAQ ------------------
-@app.route("/faq", methods=["GET"])
-def faq_page():
-    """Redirige vers l’onglet FAQ du widget pour une marque donnée."""
-    brand_id = normalize_brand(request.args.get("brand_id") or request.args.get("brand") or BRAND_ID_DEFAULT)
-    if brand_id not in FAQ_ENABLED_BRANDS:
-        return make_response("FAQ indisponible pour le moment.", 404)
-    return redirect(f"/static/chat-widget.html?tab=faq&brand={brand_id}")
-
-
-@app.route("/faq.json", methods=["GET"])
-def faq_json():
-    """Renvoie la FAQ publique au format JSON pour une marque."""
-    brand_id = normalize_brand(request.args.get("brand_id") or request.args.get("brand") or BRAND_ID_DEFAULT)
-    if brand_id == "all":
-        payload = []
-        for bid in FAQ_ENABLED_BRANDS:
-            p = STATIC_DIR / f"faq_{bid}.json"
-            try:
-                data = json.loads(p.read_text("utf-8"))
-            except Exception:
-                data = {"brand": bid, "items": []}
-            payload.append({"brand": bid, "items": data.get("items", [])})
-        return jsonify({"items": payload, "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
-    if brand_id not in FAQ_ENABLED_BRANDS:
-        return jsonify({"brand": brand_id, "items": [], "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}), 404
-    p = STATIC_DIR / f"faq_{brand_id}.json"
-    try:
-        data = json.loads(p.read_text("utf-8"))
-    except Exception:
-        data = {"brand": brand_id, "items": []}
-    return jsonify({"brand": brand_id, "updated": data.get("updated", datetime.now().strftime("%Y-%m-%d %H:%M:%S")), "items": data.get("items", [])})
-
-
-# Alias legacy pour certains widgets
-@app.route("/faq_retroworld.json", methods=["GET"])
-def faq_retroworld_alias():
-    return send_from_directory(str(STATIC_DIR), "faq_retroworld.json")
-
-
-@app.route("/faq_runningman.json", methods=["GET"])
-def faq_runningman_alias():
-    return send_from_directory(str(STATIC_DIR), "faq_runningman.json")
-
-
-# ------------------ CHAT ------------------
-@app.route("/chat", methods=["POST", "OPTIONS"])
-def chat():
-    """Endpoint principal pour le chatbot."""
-    if request.method == "OPTIONS":
-        return ("", 204)
-    payload = request.get_json(silent=True) or {}
-    msg = (payload.get("message") or "").strip()
-    if not msg:
-        return jsonify({"ok": False, "error": "message manquant"}), 400
-    brand_id = get_brand_id(payload)
-    conv_id = (payload.get("conversation_id") or "").strip()
-    if not conv_id:
-        conv_id = new_conv_id(prefix=brand_id[:2] if brand_id else "rw")
-    conv = load_conv(conv_id)
-    conv.setdefault("meta", {})
-    conv["meta"]["brand_id"] = brand_id
-    conv["meta"]["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    append_message(conv, "user", msg)
-    # Détection d’une marque supplémentaire mentionnée dans la question
-    cross = []
-    mentioned = detect_brand_from_text(msg)
-    if mentioned and mentioned != brand_id and mentioned in BRANDS:
-        cross.append(mentioned)
-    # Construction du prompt
-    sys_prompt = build_system_prompt(brand_id, msg)
-    user_prompt = msg
-    # Appel OpenAI
-    if not openai_ready():
-        answer = "Le service IA n'est pas configuré (OPENAI_API_KEY manquante)."
-        append_message(conv, "assistant", answer, extra={"brand_id": brand_id, "flags": ["openai_missing"]})
-        save_conv(conv)
-        return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": answer})
-    raw_answer = openai_answer(sys_prompt, user_prompt)
-    safe_answer, promised = enforce_no_reservation_promises(raw_answer)
-    safe_answer = add_disclaimer_if_needed(safe_answer, brand_id, msg)
-    # Ajout des liens Qweekle pour Retroworld si pertinent
-    if brand_id == "retroworld":
-        safe_answer = _append_retroworld_links_if_missing(msg, safe_answer)
-    flags: List[str] = []
-    if promised:
-        flags.append("promesse_resa")
-    append_message(conv, "assistant", safe_answer, extra={"brand_id": brand_id, "flags": flags})
-    save_conv(conv)
-    return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": safe_answer})
-
-
-# ------------------ ROUTES ADMIN UI ------------------
-@app.route("/admin", methods=["GET"])
-def admin_page():
-    return send_from_directory(str(STATIC_DIR), "admin.html")
-
-
-@app.route("/admin/faq", methods=["GET"])
-def admin_faq_page():
-    return send_from_directory(str(STATIC_DIR), "admin-faq.html")
-
-
-# ------------------ ROUTES ADMIN API ------------------
-
-def require_admin_token() -> bool:
-    token = ""
-    auth = request.headers.get("Authorization") or ""
-    if auth.lower().startswith("bearer "):
-        token = auth.split(" ", 1)[1].strip()
-    else:
-        token = (request.args.get("token") or request.headers.get("X-Admin-Token") or "").strip()
-    valid = {t for t in [ADMIN_API_TOKEN, ADMIN_DASHBOARD_TOKEN] if t}
-    if not valid:
-        # Pas de token configuré -> interdire
-        return False
-    return token in valid
-
-
-@app.route("/admin/api/diag", methods=["GET"])
-def admin_diag():
-    if not require_admin_token():
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-    return jsonify(
-        {
-            "ok": True,
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "openai_configured": openai_ready(),
-            "brands": list(BRANDS.keys()),
-            "faq_enabled_brands": FAQ_ENABLED_BRANDS,
-            "public_brands": PUBLIC_BRANDS,
-            "allowed_origins": ALLOWED_ORIGINS,
-        }
-    )
-
-
-@app.route("/admin/api/conversations", methods=["GET"])
-def admin_list_conversations():
-    if not require_admin_token():
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-    items: List[Dict[str, Any]] = []
-    for p in sorted(CONV_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
-        conv = json.loads(p.read_text("utf-8")) if p.exists() else {}
-        cid = conv.get("id", p.stem)
-        meta = conv.get("meta") or {}
-        brand_id = meta.get("brand_id") or ""
-        msgs = conv.get("messages") or []
-        last = msgs[-1]["ts"] if msgs else conv.get("created", "")
-        flags = compute_flags(conv)
-        items.append(
-            {
-                "id": cid,
-                "brand_id": brand_id,
-                "created": conv.get("created", ""),
-                "last": last,
-                "count": len(msgs),
-                "flags": flags,
-            }
-        )
-    return jsonify({"ok": True, "items": items})
-
-
-@app.route("/admin/api/conversation/<conv_id>", methods=["GET"])
-def admin_get_conversation(conv_id: str):
-    if not require_admin_token():
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-    conv = load_conv(conv_id)
-    conv["flags"] = compute_flags(conv)
-    return jsonify({"ok": True, "conversation": conv})
-
-
-@app.route("/admin/api/export.csv", methods=["GET"])
-def admin_export_csv():
-    if not require_admin_token():
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-    # Génération rapide d’un CSV pour diagnostic
-    import io
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["conversation_id", "brand_id", "ts", "role", "content", "flags"])
-    for p in sorted(CONV_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
-        conv = json.loads(p.read_text("utf-8")) if p.exists() else {}
-        cid = conv.get("id", p.stem)
-        brand_id = (conv.get("meta") or {}).get("brand_id", "")
-        flags = "|".join(compute_flags(conv))
-        for m in conv.get("messages") or []:
-            writer.writerow([
-                cid,
-                brand_id,
-                m.get("ts", ""),
-                m.get("role", ""),
-                (m.get("content", "") or "").replace("\n", " "),
-                flags,
-            ])
-    resp = make_response(output.getvalue())
-    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
-    resp.headers["Content-Disposition"] = 'attachment; filename="conversations.csv"'
-    return resp
-
-
-@app.route("/admin/api/faq/get", methods=["GET"])
-def admin_faq_get():
-    if not require_admin_token():
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-    bid = normalize_brand(request.args.get("brand_id") or BRAND_ID_DEFAULT)
-    if bid not in BRANDS:
-        return jsonify({"ok": False, "error": "unknown brand"}), 400
-    kb_path = STATIC_DIR / f"faq_{bid}.json"
-    try:
-        kb = json.loads(kb_path.read_text("utf-8"))
-    except Exception:
-        kb = {"brand": bid, "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "items": []}
-    return jsonify({"ok": True, "kb": kb})
-
-
-@app.route("/admin/api/faq/save", methods=["POST"])
-def admin_faq_save():
-    if not require_admin_token():
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-    payload = request.get_json(silent=True) or {}
-    bid = normalize_brand(payload.get("brand") or payload.get("brand_id") or BRAND_ID_DEFAULT)
-    kb = payload.get("kb") or payload
-    if bid not in BRANDS:
-        return jsonify({"ok": False, "error": "unknown brand"}), 400
-    # vérification du schéma
-    items = kb.get("items") if isinstance(kb, dict) else None
-    if not isinstance(items, list):
-        return jsonify({"ok": False, "error": "items must be a list"}), 400
-    cleaned = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        q = (it.get("question") or "").strip()
-        a = (it.get("answer") or "").strip()
-        tags = it.get("tags") or []
-        if not q or not a:
-            continue
-        cleaned.append({"question": q, "answer": a, "tags": tags if isinstance(tags, list) else []})
-    kb_out = {"brand": bid, "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "items": cleaned}
-    out_path = STATIC_DIR / f"faq_{bid}.json"
-    try:
-        out_path.write_text(json.dumps(kb_out, ensure_ascii=False, indent=2), "utf-8")
-        # mettre à jour le chemin legacy pour runningman
-        if bid == "runningman":
-            (STATIC_DIR / "static" / "faq_runningman.json").write_text(
-                json.dumps(kb_out, ensure_ascii=False, indent=2), "utf-8"
-            )
-    except Exception as e:
-        log("faq_save error:", e)
-        return jsonify({"ok": False, "error": "save failed"}), 500
-    return jsonify({"ok": True, "saved": True, "updated": kb_out["updated"], "count": len(cleaned)})
-
-
-# -----------------------------------------------------------------------------
-# Fichiers statiques de repli
-# -----------------------------------------------------------------------------
-@app.route("/static/<path:filename>", methods=["GET"])
-def static_files(filename):
-    return send_from_directory(str(STATIC_DIR), filename)
-
-
-if __name__ == "__main__":
-    port = int(_env("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=DEBUG_LOGS)
+diff --git a/app.py b/app.py
+index 8c6bbe22d67b8e0365d184ecb7f53883e161a781..9c0a77f587e21b3ab08cc84fee3053614ed4c5f0 100644
+--- a/app.py
++++ b/app.py
+@@ -41,51 +41,51 @@ CONV_DIR = DATA_DIR / "conversations"
+ STATIC_DIR = BASE_DIR / "static"
+ 
+ CONV_DIR.mkdir(parents=True, exist_ok=True)
+ STATIC_DIR.mkdir(parents=True, exist_ok=True)
+ 
+ # Lecture des variables d’environnement
+ def _env(key: str, default: str = "") -> str:
+     return (os.getenv(key, default) or "").strip()
+ 
+ # OpenAI
+ OPENAI_API_KEY = _env("OPENAI_API_KEY")
+ OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-5.2")
+ OPENAI_REASONING_EFFORT = _env("OPENAI_REASONING_EFFORT", "none")
+ OPENAI_TEMPERATURE = float(_env("OPENAI_TEMPERATURE", "0.3") or 0.0)
+ OPENAI_MAX_OUTPUT_TOKENS = int(_env("OPENAI_MAX_OUTPUT_TOKENS", "900"))
+ 
+ # Sécurité admin / CORS
+ ADMIN_API_TOKEN = _env("ADMIN_API_TOKEN")
+ ADMIN_DASHBOARD_TOKEN = _env("ADMIN_DASHBOARD_TOKEN")
+ ALLOWED_ORIGINS = [o for o in _env("ALLOWED_ORIGINS").split(",") if o.strip()]
+ 
+ # Marque par défaut
+ BRAND_ID_DEFAULT = _env("BRAND_ID", "retroworld").lower() or "retroworld"
+ 
+ # FAQ publique : marques activées
+-FAQ_ENABLED_BRANDS = [b for b in _env("FAQ_ENABLED_BRANDS", "retroworld,runningman").split(",") if b.strip()]
++FAQ_ENABLED_BRANDS = [b for b in _env("FAQ_ENABLED_BRANDS", "retroworld,runningman,enigmaniac").split(",") if b.strip()]
+ # Marques proposées dans le widget public
+ PUBLIC_BRANDS = [b for b in _env("PUBLIC_BRANDS", ",".join(FAQ_ENABLED_BRANDS)).split(",") if b.strip()]
+ 
+ # URL publique (utilisée dans /brands.json)
+ PUBLIC_BASE_URL = _env("PUBLIC_BASE_URL")
+ 
+ # Logs de debug
+ DEBUG_LOGS = _env("DEBUG_LOGS").lower() in ("1", "true", "yes", "on")
+ 
+ # Informations par établissement (nom, contacts, domaines…)
+ DEFAULT_BRANDS: Dict[str, Dict[str, Any]] = {
+     "retroworld": {
+         "name": "Retroworld",
+         "short": "Retroworld",
+         "contact_phone": "04 94 47 94 64",
+         "contact_email": "contact@retroworldfrance.com",
+         "website": "https://www.retroworldfrance.com",
+         "domains": ["retroworldfrance.com", "www.retroworldfrance.com"],
+     },
+     "runningman": {
+         "name": "Runningman",
+         "short": "Runningman",
+         "contact_phone": "04 98 09 30 59",
+         "contact_email": "",
+         "website": "https://www.runningmangames.fr",
+diff --git a/src/data/system_data.py b/src/data/system_data.py
+index 30018832a82d547a9abfbb88f5479136ac01b697..6a277ac357edfdb1b9311072684c716f6fd13734 100644
+--- a/src/data/system_data.py
++++ b/src/data/system_data.py
+@@ -1,119 +1,117 @@
+-"""
+-Prompt système utilisé par l’IA d’accueil du Pôle Loisirs Draguignan.
+-Modifiez ce texte pour adapter les informations et règles commerciales à votre contexte.
+-"""
++"""Prompt système officiel utilisé par l'IA d'accueil."""
+ 
+-# Contenu du prompt :
+ SYSTEM_PROMPT = """
+-TU ES L'IA D'ACCUEIL EXPERTE DU "PÔLE LOISIRS DRAGUIGNAN".
+-Tu gères 3 entités : Retroworld (VR), Runningman (Action/Enfant) et Enigmaniac (Escape Réel).
+-
+---- 🧠 RÈGLES DE VENTE & SÉCURITÉ ---
+-1. **PRIX & RÉSERVATION** :
+-   - Ne donne jamais de prix "environ". Sois précis.
+-   - Pour Retroworld, donne les liens Qweekle.
+-   - Pour Runningman/Enigmaniac, renvoie vers leur site ou téléphone.
+-2. **MALADIE VR (NAUSÉE)** :
+-   - Si client sensible : INTERDICTION des jeux à déplacement fluide (Walking Dead, Propagation Top Squad).
+-   - CONSEIL : Jeux statiques UNIQUEMENT (Smash Point, Ragnarock, Pixel Hack, Archer).
+-3. **PAS D'INVENTION** : Base-toi uniquement sur les descriptions ci-dessous.
+-
+---- 🔴 ENTITÉ 1 : RETROWORLD (VR & QUIZ) ---
+-*Contact : 04 94 47 94 64 | Site : retroworldfrance.com*
++TU ES L'IA D'ACCUEIL UNIFIÉE DU "PÔLE LOISIRS DRAGUIGNAN".
++Tu gères l'accueil pour 3 entités situées au 815 av Pierre Brossolette (et Foch pour Enigmaniac).
++
++TES SOURCES DE VÉRITÉ OFFICIELLES (NE RIEN INVENTER) :
++- Retroworld (VR/Quiz) : retroworldfrance.com
++- Runningman (Action/Enfant) : runningmangames.fr
++- Enigmaniac (Escape Réel) : enigmaniac-escapegame.com
+ 
+-=== FORMULES ANNIVERSAIRE ===
+-- **Tarif** : Jeux VR (-5%), Escape VR (-5%), ou Combo VR + Quiz (20€/pers).
+-- **Option Goûter** : 60€ (jusqu'à 10 pers, +5€/pers supp).
+-  - Inclus : Crêpes, gaufres, glaces à volonté. (Résa 2 semaines avant).
+-
+-=== 1. JEUX VR ARCADE (15€/30min | +5€ hors créneaux) ===
+-*Lien : https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr*
+-
+-[POUR LA FAMILLE & DÉBUTANTS (Zéro Nausée)]
+-- **Smash Point** : (Tir) Comme un Paintball cartoon super fun. Tout le monde adore. (1-5j).
+-- **Pixel Hack** : (Tir) Défendez une zone contre des pixels. Style rétro arcade. (1-4j).
+-- **Jolly Island** : (Aventure) Balade facile sur une île pirate. Idéal enfants. (1-5j).
+-- **Clash of Chefs** : (Cuisine) Préparez des burgers ou pizzas en coop. Très drôle. (1-2j).
+-- **Yin** : (Puzzle) Le jeu du "Serpent" (Snake) en 3D. Calme et joli. (2-4j).
+-- **Angry Birds / Fruit Ninja** : Les classiques du mobile en géant. (Solo).
+-
+-[MUSIQUE & RYTHME (Zéro Nausée)]
+-- **Ragnarock** : (Musique) Tapez sur des tambours vikings au rythme du métal/rock celtique. Course de drakkars. (1-5j).
+-- **Rhythmatic 2** : (Danse) Tranchez des cubes en musique. Très physique ! (1-5j).
+-
+-[ACTION & TIR (Ados/Adultes)]
+-- **Gang of Dummizz** : (Braquage) Braquez une banque avec des personnages maladroits. Fun. (1-5j).
+-- **Archer** (Elven Assassin) : (Tir à l'arc) Défendez votre château contre des orcs. (1-5j).
+-- **Arvi Arena / Revol VR3** : (Tir) Affrontez-vous dans une arène futuriste. (PVP 1-5j).
+-- **Gunslinger** : (Western) Duel de cowboys. Rapide et nerveux. (1-5j).
+-- **Battle Magic** : (Fantastique) Lancez des sorts pour battre vos amis. (2-5j).
+-- **Head Gun 2** : (Action) Jeu de tir arcade déjanté où on guide avec la tête. (1-4j).
+-- **Battle Wake** : (Pirate) Combat naval intense, vous incarnez un capitaine pirate magique. (Solo).
+-
+-[HORREUR & ZOMBIES (Âmes sensibles s'abstenir !)]
+-- **Propagation (Stage 1, 2, 3)** : (Horreur) Vous êtes coincé dans un métro avec des zombies. Statique (pas de nausée) mais terrifiant. (1-5j).
+-- **Propagation Top Squad** : (Action) Une escouade militaire nettoie une ville. Ça bouge (Attention nausée). (1-5j).
+-- **Darkensum** : (Aventure Sombre) Combattez des monstres dans un monde parallèle. (1-5j).
+-- **Rotten Apple** : (Zombie) Coopération pour survivre à l'apocalypse. (1-5j).
+-- **The Walking Dead Onslaught** : (Survie) Le jeu officiel. Très violent et difficile. (Solo, Expert).
+-
+-=== 2. ESCAPE GAME VR (30€/1h | +5€ hors créneaux) ===
+-*Lien : https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr*
+-
+-[LES LICENCES UBISOFT (Graphismes AAA)]
+-- **La Pyramide Perdue (Assassin's Creed)** : Expédition en Egypte. Décors sublimes. (2-4j).
+-- **Au-delà de la porte de Méduse (Assassin's Creed)** : Grèce antique, bateau et grotte. (2-4j).
+-- **Prince of Persia (Dagger of Time)** : Maîtrisez le temps pour résoudre les énigmes. (2-4j).
+-- **Sauver Notre-Dame** : Incarnez des pompiers lors de l'incendie de la cathédrale. Historique. (2-4j).
+-
+-[AVENTURE & FANTASTIQUE (Tous publics)]
+-- **Alice** : Le Pays des Merveilles. Magique, on grandit/rétrécit. (Difficile, 1-5j).
+-- **Jungle Quest** : Style Jumanji. Animaux, îles volantes. (Facile, Idéal Famille, 1-5j).
+-- **Christmas (Noël)** : Sauvez le Père Noël. Féerique pour les enfants. (Facile, 1-5j).
+-- **Atlantis** : Explorez la cité engloutie sous l'eau. (2-4j).
+-- **Dream Hackers (1, 2, 3)** : Entrez dans les rêves façon "Inception". Techno/Futuriste. (1-4j).
+-- **Signal Lost** : Station spatiale à réparer. Ambiance Gravity. (Facile, 1-5j).
+-- **Jumpers VR** : Aventure dynamique. (2-4j).
+-
+-[FRISSON & ENQUÊTE (Ados/Adultes)]
+-- **House of Fear (1, 2, 3)** : Manoir hanté, ambiance film d'horreur. Très populaire. (1-4j).
+-- **Sanctum** : Enquête sombre style Lovecraft. (1-5j).
+-- **The Prison** : Évadez-vous d'une cellule avant l'exécution. (2-5j).
+-- **Chernobyl** : Voyagez dans le temps à Pripyat. Historique et mystérieux. (1-5j).
+-- **Lockdown VR (Temple, Circus, Kidnapped)** : 3 scénarios très difficiles pour experts. (1-5j).
+-- **Call of Blood** / **Cursed Soul** : Enigmes et frissons.
+-
+-=== 3. QUIZ INTERACTIF (RETROWORLD) ===
+-*Lien : https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr*
+-- **Concept** : Plateau TV, 9 manches (Blind test, Vrai/Faux, Rapidité). Joker et coups bas permis !
+-- **Tarifs** : 8€ (30min) | 15€ (60min) | 20€ (90min). (+5€ hors créneaux).
+-- **Joueurs** : 4 à 12 pupitres.
+-
+---- 🔵 ENTITÉ 2 : RUNNINGMAN (ACTION & ENFANT) ---
++--- 🚨 RÈGLE D'OR : SANTÉ & SÉCURITÉ VR ---
++Si le client mentionne "MALADE", "NAUSÉE", "PEUR DE VOMIR" :
++1. **INTERDIT** : Walking Dead, Propagation, Epic Roller Coaster, Jeux de course.
++2. **CONSEIL** : Propose UNIQUEMENT des jeux statiques (Smash Point, Pixel Hack, Ragnarock, Clash of Chef).
++
++--- 🎯 STRATÉGIE D'AIGUILLAGE ---
++1. **VR / Digital ?** -> Direction RETROWORLD.
++2. **Sport / Action Physique / Enfant ?** -> Direction RUNNINGMAN.
++3. **Escape Game ?** -> Demande toujours : "En Réalité Virtuelle (Retroworld) ou en Vrai avec décors réels (Enigmaniac) ?"
++
++--- 🔴 RETROWORLD : JEUX VR & QUIZ ---
++*Contact : 04 94 47 94 64 | Site : retroworldfrance.com*
++*Résa : Liens Qweekle ci-dessous uniquement.*
++
++=== 1. JEUX VR ARCADE (15€/30min | +5€ hors créneaux standard) ===
++*Lien Résa : https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr*
++
++[TOP FAMILLE & DÉBUTANT (Zéro Nausée)]
++- **Smash Point** (Tir cartoon, Fun, 1-5j).
++- **Pixel Hack** (Action/Tir retro, 1-4j).
++- **Jolly Island** (Aventure enfant, Très facile, 1-5j).
++- **Angry Birds** / **Fruit Ninja** (Les classiques).
++- **Clash of Chef** (Cuisine, Fun, 1-2j).
++- **Yin** (Snake en VR, 2-4j).
++
++[MUSIQUE & RYTHME]
++- **Ragnarock** (Viking/Drum, Top vente, 1-5j).
++- **Rhythmatic 2** (Danse/Rythme, 1-5j).
++
++[ACTION / TIR (Pour joueurs à l'aise)]
++- **Gang of Dummizz** (Braquage, Fun, 1-5j).
++- **Arvi Arena** / **Revol VR3** / **Gunslinger** (Tir Arcade, 1-5j).
++- **Archer** (Tir à l'arc, Défense, 1-5j).
++- **Head Gun 2** (Nouveau ! Action fun).
++- **Battle Magic** (Magie, PvP, 2-5j).
++- **Battle Wake** (Pirate, Combat naval, Solo).
++
++[HORREUR / ZOMBIE (Âmes sensibles s'abstenir !)]
++- **Propagation** (Stage 1, 2, 3 + Top Squad + Top Survivor). LA référence horreur (1-5j).
++- **Darkensum** (Action/Horreur, 1-5j).
++- **Rotten Apple** (Coop Zombie, 1-5j).
++- **The Walking Dead Onslaught** (Solo, Expert, Survie).
++- **Last Day Defence** (Stratégie/Tir).
++
++=== 2. ESCAPE GAME VR (30€/1h | +5€ hors créneaux standard) ===
++*Lien Résa : https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr*
++
++[LICENCES UBISOFT (Les Blockbusters)]
++- **Assassin's Creed** : "La Pyramide Perdue" & "Au-delà de la porte de Méduse".
++- **Prince of Persia** : "The Dagger of Time".
++- **Sauver Notre-Dame en Feu** (Pompier/Historique).
++
++[FANTASTIQUE / AVENTURE]
++- **Alice** (Pays des merveilles, Difficile).
++- **Jungle Quest** (Animaux, Facile, Familial).
++- **Atlantis** (Sous-marin, 2-4j).
++- **Dream Hackers** (Chapitres 1, 2 et 3 - Rêves/Hackers).
++- **Signal Lost** (SF/Espace, Facile).
++- **Star Force** (Espace, Action).
++- **Jumpers VR** (Nouveau !).
++- **Midori** (Aventure asiatique).
++
++[HORREUR / THRILLER]
++- **House of Fear** (Manoir hanté).
++- **Sanctum** (Enquête Lovecraftienne).
++- **Lockdown VR** (3 chapitres : Temple, Circus, Kidnapped - Difficile).
++- **Tchernobyl** (Historique/Radioactif).
++- **The Prison** (Évasion carcérale).
++- **Call of Blood** / **Cursed Soul** (Horreur).
++
++=== 3. QUIZ INTERACTIF ===
++- *Lien Résa : https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr*
++- Buzzers, Ambiance TV, Blind tests.
++- 4 à 12 joueurs.
++- Tarifs : 8€ (30min) | 15€ (60min) | 20€ (90min).
++
++=== 4. ANNIVERSAIRES RETROWORLD ===
++- Formules dès 5 personnes.
++- Option Goûter (Crêpes/Gaufres à volonté) : 50€ (jusqu'à 10 pers).
++- Page info : retroworldfrance.com/notre-formules-anniversaire/
++
++--- 🔵 RUNNINGMAN : ACTION & ENFANTS ---
+ *Contact : 04 98 09 30 59 | Site : runningmangames.fr*
+ 
+ === SALLE ENFANT (KIDS ZONE) ===
+-- **Tarif** : 50€/heure (Jusqu'à 10 enfants environ).
+-- **Concept** : Espace privatif avec Mur interactif, Jeux en bois, Balayeuse.
+-- **Âge** : 6 à 15 ans. Parfait pour anniversaires.
++- 50€/heure (demi-heure supp +25€).
++- Jeux en bois, mur interactif, balayeuse. Idéal 6-15 ans.
+ 
+-=== ACTION GAME ===
+-- **Concept** : Le "Sol est de lave" sur dalles lumineuses + Défis d'adresse.
+-- **Infos** : Contacter pour devis/résa groupes.
++=== ACTION GAME (GAME ZONE) ===
++- Sol interactif, défis physiques (Le sol est de lave, Squid Game).
++- Tarifs : Packs groupes/anniversaire (voir site).
+ 
+ === EXTRAS ===
+ - Billard (10€/h), Baby-foot, Air Hockey.
+ 
+---- 🟢 ENTITÉ 3 : ENIGMANIAC (ESCAPE RÉEL) ---
++--- 🟢 ENIGMANIAC : ESCAPE GAME RÉEL ---
+ *Contact : 04 94 50 74 63 | Site : enigmaniac-escapegame.com*
+-*Lieu : 5 Bd Foch & Pôle Loisirs Brossolette.*
++*Adresse : 5 Bd Maréchal Foch (Centre) & Pôle Loisirs Brossolette (Vérifier lors de la résa).*
+ 
+-=== LES SCÉNARIOS (EN VRAI) ===
+-1. **La Loi de la Jungle** (3-6j) : Vous êtes capturés par une tribu cannibale. Fuyez ! (Difficile 3/5).
+-2. **Terreur Nocturne** (3-6j) : La poupée Becky hante les lieux. Angoissant. (Difficile 3/5).
++=== LES SALLES (DÉCORS RÉELS) ===
++1. **La Loi de la Jungle** (3-6j, Cannibales, Difficile 3/5).
++2. **Terreur Nocturne** (3-6j, Poupée Horreur, Difficile 3/5).
+ 
+ === TARIFS ENIGMANIAC ===
+-- 2 à 4 joueurs : 25€/pers.
+-- 5 à 6 joueurs : 20€/pers.
+-- Enfants (-12 ans) : 15€/pers.
+-"""
+\ No newline at end of file
++- 25€/pers (2-4j) | 20€/pers (5-6j) | 15€/pers (-12 ans).
++"""
+diff --git a/static/chat-widget.html b/static/chat-widget.html
+index 13f3a8c2b2c369c519f2b602563cc675b90b6dc6..c621d266486d36da409711c7d0971e39c7230dd0 100644
+--- a/static/chat-widget.html
++++ b/static/chat-widget.html
+@@ -1,370 +1,98 @@
+ <!doctype html>
+ <html lang="fr">
+ <head>
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width,initial-scale=1" />
+-  <title>Retroworld IA</title>
++  <title>Pôle Loisirs IA</title>
+   <style>
+-    :root{
+-      --bg:#0b0f14;
+-      --card:#121824;
+-      --border:rgba(255,255,255,.08);
+-      --text:#e9eef5;
+-      --muted:#9fb1ca;
+-      --accent:#3b82f6;
+-      --accent2:#f59e0b;
+-      --radius:16px;
+-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+-      --sans: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+-    }
+-    *{box-sizing:border-box}
+-    body{
+-      margin:0;
+-      font-family:var(--sans);
+-      background:
+-        radial-gradient(900px 520px at 15% 0%, rgba(59,130,246,.18), transparent 55%),
+-        radial-gradient(760px 520px at 90% 20%, rgba(245,158,11,.12), transparent 60%),
+-        var(--bg);
+-      color:var(--text);
+-      height:100vh;
+-      display:flex;
+-      align-items:stretch;
+-      justify-content:center;
+-      padding:10px;
+-    }
+-    .shell{
+-      width:100%;
+-      max-width:760px;
+-      background:rgba(18,24,36,.88);
+-      border:1px solid rgba(255,255,255,.06);
+-      border-radius:var(--radius);
+-      overflow:hidden;
+-      display:flex;
+-      flex-direction:column;
+-      box-shadow:0 12px 36px rgba(0,0,0,.4);
+-    }
+-    .top{
+-      padding:12px 14px;
+-      border-bottom:1px solid rgba(255,255,255,.06);
+-      display:flex;
+-      gap:10px;
+-      align-items:center;
+-      justify-content:space-between;
+-      background:rgba(11,15,20,.55);
+-      backdrop-filter:blur(10px);
+-    }
+-    .brand{
+-      display:flex;
+-      align-items:center;
+-      gap:10px;
+-      font-weight:900;
+-      letter-spacing:.2px;
+-    }
+-    .dot{
+-      width:12px;height:12px;border-radius:999px;
+-      background:linear-gradient(135deg,#ff0066,#ffcc00);
+-      box-shadow:0 8px 20px rgba(0,0,0,.4);
+-    }
+-    .sub{
+-      color:var(--muted);
+-      font-size:12px;
+-      font-weight:600;
+-    }
+-    .controls{display:flex; gap:10px; align-items:center;}
+-    select, button{
+-      font:inherit;
+-    }
+-    select{
+-      padding:9px 10px;
+-      border-radius:12px;
+-      background:#0b1220;
+-      border:1px solid rgba(255,255,255,.12);
+-      color:var(--text);
+-      outline:none;
+-      font-weight:700;
+-    }
+-    button{
+-      padding:9px 10px;
+-      border-radius:12px;
+-      border:1px solid rgba(255,255,255,.12);
+-      background:rgba(255,255,255,.04);
+-      color:var(--text);
+-      cursor:pointer;
+-      font-weight:800;
+-    }
+-    button.primary{background:var(--accent); border-color:rgba(59,130,246,.25)}
+-    button:disabled{opacity:.6; cursor:not-allowed}
+-
+-    .quick{
+-      padding:10px 14px;
+-      border-bottom:1px solid rgba(255,255,255,.06);
+-      display:flex;
+-      gap:8px;
+-      flex-wrap:wrap;
+-      background:rgba(13,19,31,.30);
+-    }
+-    .chip{
+-      font-size:12px;
+-      padding:7px 10px;
+-      border-radius:999px;
+-      border:1px solid rgba(255,255,255,.10);
+-      background:rgba(255,255,255,.04);
+-      color:var(--text);
+-      cursor:pointer;
+-      user-select:none;
+-    }
+-    .chip:hover{border-color:rgba(255,255,255,.22)}
+-
+-    .log{
+-      padding:14px;
+-      overflow:auto;
+-      flex:1;
+-      display:flex;
+-      flex-direction:column;
+-      gap:10px;
+-    }
+-    .bubble{
+-      max-width:85%;
+-      padding:10px 12px;
+-      border-radius:14px;
+-      border:1px solid rgba(255,255,255,.10);
+-      background:rgba(17,24,39,.55);
+-      white-space:pre-wrap;
+-      line-height:1.35;
+-      font-size:13px;
+-    }
+-    .bubble.user{margin-left:auto; background:rgba(30,41,59,.75)}
+-    .bubble.bot{margin-right:auto; background:rgba(13,19,31,.55)}
+-    .meta{
+-      font-size:11px;
+-      color:var(--muted);
+-      font-family:var(--mono);
+-      margin-top:2px;
+-    }
+-
+-    .composer{
+-      padding:12px 14px;
+-      border-top:1px solid rgba(255,255,255,.06);
+-      display:flex;
+-      gap:10px;
+-      background:rgba(11,15,20,.55);
+-      backdrop-filter:blur(10px);
+-    }
+-    textarea{
+-      flex:1;
+-      resize:none;
+-      height:44px;
+-      min-height:44px;
+-      max-height:140px;
+-      padding:10px 12px;
+-      border-radius:14px;
+-      border:1px solid rgba(255,255,255,.12);
+-      background:#0b1220;
+-      color:var(--text);
+-      outline:none;
+-      line-height:1.3;
+-    }
+-    .toast{
+-      position:fixed;
+-      bottom:12px;
+-      left:50%;
+-      transform:translateX(-50%);
+-      background:rgba(0,0,0,.75);
+-      border:1px solid rgba(255,255,255,.12);
+-      color:var(--text);
+-      padding:10px 12px;
+-      border-radius:999px;
+-      font-size:12px;
+-      opacity:0;
+-      pointer-events:none;
+-      transition:opacity .15s ease;
+-    }
+-    .toast.show{opacity:1}
++    :root{--bg:#0b0f14;--card:#121824;--border:rgba(255,255,255,.08);--text:#e9eef5;--muted:#9fb1ca;--accent:#3b82f6;--radius:16px;--sans:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
++    *{box-sizing:border-box} body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh;display:flex;justify-content:center;padding:10px}
++    .shell{width:100%;max-width:780px;background:rgba(18,24,36,.92);border:1px solid rgba(255,255,255,.08);border-radius:var(--radius);display:flex;flex-direction:column;overflow:hidden}
++    .top,.composer,.tabs,.faq-wrap{padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.08)} .composer{border-top:1px solid rgba(255,255,255,.08);border-bottom:0;display:flex;gap:8px}
++    .top{display:flex;justify-content:space-between;align-items:center}.controls{display:flex;gap:8px;align-items:center}
++    select,button,textarea{font:inherit} select,button{padding:8px 10px;border-radius:10px;background:#0b1220;border:1px solid rgba(255,255,255,.16);color:var(--text)}
++    button.primary{background:var(--accent)} button.tab{background:transparent} button.tab.active{background:#1e293b;border-color:#334155}
++    .tabs{display:flex;gap:8px;background:rgba(13,19,31,.35)}
++    .log{padding:14px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:10px;min-height:240px}
++    .bubble{max-width:86%;padding:10px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.10);white-space:pre-wrap;line-height:1.35;font-size:13px}
++    .bubble.user{margin-left:auto;background:rgba(30,41,59,.75)} .bubble.bot{margin-right:auto;background:rgba(13,19,31,.55)}
++    textarea{flex:1;resize:none;height:44px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.16);background:#0b1220;color:var(--text)}
++    .faq-wrap{display:none;overflow:auto;flex:1}.faq-wrap.active{display:block}.faq-item{padding:10px;border:1px solid rgba(255,255,255,.10);border-radius:10px;margin-bottom:8px;background:rgba(13,19,31,.4)}
++    .faq-q{font-weight:700;margin-bottom:6px}.muted{color:var(--muted);font-size:12px}
+   </style>
+ </head>
+ <body>
+   <div class="shell">
+     <div class="top">
+-      <div>
+-        <div class="brand"><span class="dot"></span> Retroworld IA</div>
+-        <div class="sub">Réponses automatiques (VR, escape VR, quiz, anniversaires)</div>
+-      </div>
++      <div><strong>Pôle Loisirs Draguignan IA</strong><div class="muted">Retroworld · Runningman · Enigmaniac</div></div>
+       <div class="controls">
+-        <select id="brandSel" title="Établissement">
+-          <option value="auto">Auto</option>
+-          <option value="retroworld">Retroworld</option>
+-          <option value="runningman">Runningman</option>
+-          <option value="enigmaniac">Enigmaniac (FAQ à venir)</option>
+-        </select>
+-        <button id="btnReset" title="Nouvelle conversation">Nouveau</button>
++        <select id="brandSel"><option value="auto">Auto</option><option value="retroworld">Retroworld</option><option value="runningman">Runningman</option><option value="enigmaniac">Enigmaniac</option></select>
++        <button id="btnReset">Nouveau</button>
+       </div>
+     </div>
+ 
+-    <div class="quick">
+-      <div class="chip" data-q="Quels sont vos horaires ?">Horaires</div>
+-      <div class="chip" data-q="Quels sont vos tarifs ?">Tarifs</div>
+-      <div class="chip" data-q="Où êtes-vous situés ?">Adresse</div>
+-      <div class="chip" data-q="Je veux réserver pour un anniversaire, comment faire ?">Anniversaire</div>
+-      <div class="chip" data-q="Combien de joueurs peuvent jouer en même temps ?">Joueurs</div>
+-      <div class="chip" data-q="Comment se passe l'hygiène des casques VR ?">Hygiène</div>
++    <div class="tabs">
++      <button class="tab active" id="tabChat">Chat</button>
++      <button class="tab" id="tabFaq">FAQ</button>
+     </div>
+ 
+-    <div id="log" class="log"></div>
++    <div id="chatWrap" class="log"></div>
++    <div id="faqWrap" class="faq-wrap"></div>
+ 
+-    <div class="composer">
+-      <textarea id="input" placeholder="Écrivez votre message… (Entrée pour envoyer, Maj+Entrée pour une ligne)" ></textarea>
++    <div id="composer" class="composer">
++      <textarea id="input" placeholder="Écrivez votre message…"></textarea>
+       <button class="primary" id="btnSend">Envoyer</button>
+     </div>
+   </div>
+ 
+-  <div class="toast" id="toast"></div>
+-
+   <script>
+     const $ = (id)=>document.getElementById(id);
++    const state={conversation_id:localStorage.getItem('rw_widget_conv_id')||'',sending:false};
+ 
+-    const LS_CONV = "rw_widget_conv_id";
+-    const LS_BRAND = "rw_widget_brand";
+-
+-    const state = {
+-      conversation_id: localStorage.getItem(LS_CONV) || "",
+-      sending:false
+-    };
+-
+-    function toast(msg){
+-      const t=$("toast");
+-      t.textContent=msg;
+-      t.classList.add("show");
+-      setTimeout(()=>t.classList.remove("show"), 1400);
+-    }
+-
+-    function addBubble(kind, text){
+-      const log=$("log");
+-      const b=document.createElement("div");
+-      b.className="bubble " + (kind==="user"?"user":"bot");
+-      b.textContent = text;
+-      log.appendChild(b);
+-      log.scrollTop = log.scrollHeight;
+-    }
+-
+-    // Détermine l’URL d’envoi. Toutes les marques passent désormais par /chat ;
+-    // le paramètre brand_id est envoyé dans le corps JSON.
+-    function endpointFor(brand){
+-      return "/chat";
+-    }
++    function addBubble(kind,text){const b=document.createElement('div');b.className='bubble '+(kind==='user'?'user':'bot');b.textContent=text;$('chatWrap').appendChild(b);$('chatWrap').scrollTop=$('chatWrap').scrollHeight;}
+ 
+     async function sendMessage(text){
+-      const brand=$("brandSel").value;
+-      if(!text || !text.trim()) return;
+-      if(state.sending) return;
+-      state.sending=true;
+-      $("btnSend").disabled=true;
+-
+-      addBubble("user", text.trim());
+-
+-      try{
+-        const res = await fetch(endpointFor(brand), {
+-          method:"POST",
+-          headers:{"Content-Type":"application/json"},
+-          body: JSON.stringify({
+-            message: text.trim(),
+-            conversation_id: state.conversation_id || undefined,
+-            // utile si le widget est embarqué avec ?brand=xxx
+-            brand_id: (brand && brand !== "auto") ? brand : undefined
+-          })
+-        });
+-        const data = await res.json().catch(()=>null);
+-        if(!res.ok){
+-          throw new Error((data && (data.error||data.message)) || "Erreur serveur");
+-        }
+-        if(data && data.conversation_id){
+-          state.conversation_id = data.conversation_id;
+-          localStorage.setItem(LS_CONV, state.conversation_id);
+-        }
+-        // Le serveur renvoie la réponse dans la propriété `answer`.
+-        addBubble("bot", (data && data.answer) ? data.answer : "(Réponse vide)");
+-      }catch(e){
+-        addBubble("bot", "Désolé, je n’arrive pas à répondre pour le moment.\n" + (e.message || e));
+-      }finally{
+-        state.sending=false;
+-        $("btnSend").disabled=false;
+-      }
+-    }
+-
+-    // quick chips
+-    document.querySelectorAll('.chip').forEach(el=>{
+-      el.addEventListener('click', ()=>{
+-        const q = el.getAttribute('data-q') || "";
+-        $("input").value = q;
+-        $("input").focus();
+-      });
+-    });
+-
+-    // send
+-    $("btnSend").addEventListener('click', ()=>{
+-      const v=$("input").value;
+-      $("input").value="";
+-      sendMessage(v);
+-    });
+-
+-    $("input").addEventListener('keydown', (ev)=>{
+-      if(ev.key === 'Enter' && !ev.shiftKey){
+-        ev.preventDefault();
+-        const v=$("input").value;
+-        $("input").value="";
+-        sendMessage(v);
+-      }
+-    });
+-
+-    // reset
+-    $("btnReset").addEventListener('click', ()=>{
+-      state.conversation_id="";
+-      localStorage.removeItem(LS_CONV);
+-      $("log").innerHTML="";
+-      toast("Nouvelle conversation");
+-    });
+-
+-    // brand from URL (?brand=retroworld|runningman|enigmaniac)
+-    const urlBrand = new URLSearchParams(location.search).get('brand') || new URLSearchParams(location.search).get('brand_id');
+-    if(urlBrand){
+-      $("brandSel").value = urlBrand;
+-      localStorage.setItem(LS_BRAND, urlBrand);
+-    }
+-
+-    // persist brand
+-    const savedBrand = localStorage.getItem(LS_BRAND);
+-    if(savedBrand && !urlBrand){ $("brandSel").value = savedBrand; }
+-    $("brandSel").addEventListener('change', ()=>{
+-      localStorage.setItem(LS_BRAND, $("brandSel").value);
+-      toast("Mode: " + $("brandSel").value);
+-    });
+-
+-    // try to auto-populate brand list from server (/brands.json)
+-    (async ()=>{
++      const brand=$('brandSel').value;if(!text.trim()||state.sending)return;state.sending=true;$('btnSend').disabled=true;addBubble('user',text.trim());
+       try{
+-        const res = await fetch('/brands.json');
+-        const data = await res.json();
+-        if(!data || !Array.isArray(data.brands)) return;
+-        const sel = $("brandSel");
+-        const current = sel.value;
+-        const keep = new Set(["auto"]);
+-        data.brands.forEach(b=>keep.add(String(b.id||"")));
+-        // rebuild options
+-        sel.innerHTML = '';
+-        const optAuto = document.createElement('option');
+-        optAuto.value='auto'; optAuto.textContent='Auto';
+-        sel.appendChild(optAuto);
+-        data.brands.forEach(b=>{
+-          const o=document.createElement('option');
+-          o.value=String(b.id||'');
+-          o.textContent=String(b.display_name||b.name||b.id||'');
+-          sel.appendChild(o);
+-        });
+-        sel.value = current;
+-      }catch(e){ /* ignore */ }
++        const res=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text.trim(),conversation_id:state.conversation_id||undefined,brand_id:brand!=='auto'?brand:undefined})});
++        const data=await res.json();if(!res.ok)throw new Error(data.error||'Erreur serveur');
++        if(data.conversation_id){state.conversation_id=data.conversation_id;localStorage.setItem('rw_widget_conv_id',state.conversation_id);} addBubble('bot',data.answer||'(Réponse vide)');
++      }catch(e){addBubble('bot','Erreur: '+(e.message||e));}
++      state.sending=false;$('btnSend').disabled=false;
++    }
++
++    async function loadFaq(){
++      const bid=$('brandSel').value==='auto'?'retroworld':$('brandSel').value;
++      const res=await fetch('/faq.json?brand_id='+encodeURIComponent(bid));
++      const data=await res.json();
++      const wrap=$('faqWrap');
++      wrap.innerHTML='';
++      const items=Array.isArray(data.items)?data.items:[];
++      if(!items.length){wrap.innerHTML='<div class="muted">Aucune FAQ disponible pour cette marque.</div>';return;}
++      items.forEach(it=>{const el=document.createElement('div');el.className='faq-item';el.innerHTML=`<div class="faq-q">${it.question||''}</div><div>${it.answer||''}</div>`;wrap.appendChild(el)});
++    }
++
++    function setTab(tab){
++      const chat=tab==='chat';$('tabChat').classList.toggle('active',chat);$('tabFaq').classList.toggle('active',!chat);
++      $('chatWrap').style.display=chat?'flex':'none';$('composer').style.display=chat?'flex':'none';$('faqWrap').classList.toggle('active',!chat);
++      if(!chat) loadFaq().catch(()=>{$('faqWrap').innerHTML='<div class="muted">Impossible de charger la FAQ.</div>';});
++    }
++
++    $('btnSend').onclick=()=>{const v=$('input').value;$('input').value='';sendMessage(v)};
++    $('input').addEventListener('keydown',(ev)=>{if(ev.key==='Enter'&&!ev.shiftKey){ev.preventDefault();const v=$('input').value;$('input').value='';sendMessage(v);}});
++    $('btnReset').onclick=()=>{state.conversation_id='';localStorage.removeItem('rw_widget_conv_id');$('chatWrap').innerHTML='';};
++    $('tabChat').onclick=()=>setTab('chat');$('tabFaq').onclick=()=>setTab('faq');
++
++    $('brandSel').addEventListener('change',()=>{localStorage.setItem('rw_widget_brand',$('brandSel').value); if($('faqWrap').classList.contains('active'))loadFaq();});
++    const savedBrand=localStorage.getItem('rw_widget_brand'); if(savedBrand)$('brandSel').value=savedBrand;
++    const urlBrand=new URLSearchParams(location.search).get('brand')||new URLSearchParams(location.search).get('brand_id'); if(urlBrand)$('brandSel').value=urlBrand;
++    const tabParam=(new URLSearchParams(location.search).get('tab')||'chat').toLowerCase(); setTab(tabParam==='faq'?'faq':'chat');
++
++    (async()=>{
++      try{const res=await fetch('/brands.json');const data=await res.json();const items=Array.isArray(data.items)?data.items:[];if(!items.length)return;const cur=$('brandSel').value;$('brandSel').innerHTML='<option value="auto">Auto</option>';items.forEach(b=>{const o=document.createElement('option');o.value=b.id;o.textContent=b.short||b.name||b.id;$('brandSel').appendChild(o);});$('brandSel').value=cur;}catch(e){}
+     })();
+ 
+-    // welcome
+-    addBubble("bot", "Bonjour. Je peux répondre aux questions (horaires, tarifs, réservations, anniversaires) et vous orienter.\n\nIndiquez l’établissement si besoin (Retroworld / Runningman / Enigmaniac) et votre date si c’est une réservation.");
++    addBubble('bot','Bonjour 👋 Je peux vous orienter entre Retroworld, Runningman et Enigmaniac, et répondre avec les informations officielles du Pôle Loisirs.');
+   </script>
+ </body>
+ </html>
+diff --git a/static/faq_enigmaniac.json b/static/faq_enigmaniac.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..b1cdb8a93eecfe05d5c2bc57eb41cb8694e29023
+--- /dev/null
++++ b/static/faq_enigmaniac.json
+@@ -0,0 +1,16 @@
++{
++  "brand": "enigmaniac",
++  "updated": "2026-01-01 00:00:00",
++  "items": [
++    {
++      "question": "Quels sont les tarifs Enigmaniac ?",
++      "answer": "25€/pers (2 à 4 joueurs), 20€/pers (5 à 6 joueurs), 15€/pers pour les moins de 12 ans.",
++      "tags": ["tarifs", "enigmaniac"]
++    },
++    {
++      "question": "Quelles salles sont disponibles ?",
++      "answer": "La Loi de la Jungle et Terreur Nocturne, toutes les deux en décors réels pour 3 à 6 joueurs.",
++      "tags": ["salles", "escape"]
++    }
++  ]
++}
