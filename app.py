@@ -63,7 +63,7 @@ ALLOWED_ORIGINS = [o for o in _env("ALLOWED_ORIGINS").split(",") if o.strip()]
 BRAND_ID_DEFAULT = _env("BRAND_ID", "retroworld").lower() or "retroworld"
 
 # FAQ publique : marques activées
-FAQ_ENABLED_BRANDS = [b for b in _env("FAQ_ENABLED_BRANDS", "retroworld,runningman").split(",") if b.strip()]
+FAQ_ENABLED_BRANDS = [b for b in _env("FAQ_ENABLED_BRANDS", "retroworld,runningman,enigmaniac").split(",") if b.strip()]
 # Marques proposées dans le widget public
 PUBLIC_BRANDS = [b for b in _env("PUBLIC_BRANDS", ",".join(FAQ_ENABLED_BRANDS)).split(",") if b.strip()]
 
