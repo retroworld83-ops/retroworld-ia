@@ -110,3 +110,17 @@ Pour éviter les ambiguïtés de runtime:
 - mode Python natif: `Procfile` est fourni (`web: gunicorn ...`).
 
 `app.py` supporte aussi `SERVER_MODE=auto|flask|gunicorn` (par défaut `auto`) et passe automatiquement en gunicorn sur Render quand l'application est lancée via `python app.py`.
+
+
+## Git: publier sur la branche `main`
+
+Si vos changements existent seulement sur une branche locale (ex: `work`), ils ne seront pas déployés par un service qui suit `main`.
+
+Exemple de commandes:
+
+```bash
+git checkout -B main
+git push -u origin main
+```
+
+Ensuite, configurez Render pour suivre `main` et déclenchez un redeploy.
