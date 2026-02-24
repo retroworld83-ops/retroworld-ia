@@ -124,3 +124,13 @@ git push -u origin main
 ```
 
 Ensuite, configurez Render pour suivre `main` et déclenchez un redeploy.
+
+
+### Widget embarqué sur un autre domaine
+Si le widget est servi depuis un domaine différent de l'API, passez la base API en query string:
+
+```
+https://retroworld-ia.onrender.com/static/chat-widget.html?api=https://retroworld-ia.onrender.com
+```
+
+Le widget accepte `api`, `api_base` ou `base_url` et conserve la valeur en localStorage (`rw_widget_api_base`).

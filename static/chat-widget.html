@@ -47,14 +47,41 @@
 
   <script>
     const $ = (id)=>document.getElementById(id);
+    const qs = new URLSearchParams(location.search);
     const state={conversation_id:localStorage.getItem('rw_widget_conv_id')||'',sending:false};
+
+    function normalizeBaseUrl(v){
+      const x=(v||'').trim();
+      if(!x) return '';
+      return x.replace(/\/$/, '');
+    }
+
+    function detectApiBase(){
+      const fromQuery = normalizeBaseUrl(qs.get('api') || qs.get('api_base') || qs.get('base_url'));
+      const fromGlobal = normalizeBaseUrl(window.RW_IA_API_BASE || '');
+      const fromStorage = normalizeBaseUrl(localStorage.getItem('rw_widget_api_base') || '');
+      const base = fromQuery || fromGlobal || fromStorage || '';
+      if(fromQuery) localStorage.setItem('rw_widget_api_base', fromQuery);
+      return base;
+    }
+
+    const API_BASE = detectApiBase();
+
+    function apiUrl(path){
+      const p = path.startsWith('/') ? path : '/' + path;
+      return API_BASE ? (API_BASE + p) : p;
+    }
+
+    async function apiFetch(path, options){
+      return fetch(apiUrl(path), options || {});
+    }
 
     function addBubble(kind,text){const b=document.createElement('div');b.className='bubble '+(kind==='user'?'user':'bot');b.textContent=text;$('chatWrap').appendChild(b);$('chatWrap').scrollTop=$('chatWrap').scrollHeight;}
 
     async function sendMessage(text){
       const brand=$('brandSel').value;if(!text.trim()||state.sending)return;state.sending=true;$('btnSend').disabled=true;addBubble('user',text.trim());
       try{
-        const res=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text.trim(),conversation_id:state.conversation_id||undefined,brand_id:brand!=='auto'?brand:undefined})});
+        const res=await apiFetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text.trim(),conversation_id:state.conversation_id||undefined,brand_id:brand!=='auto'?brand:undefined})});
         const data=await res.json();if(!res.ok)throw new Error(data.error||'Erreur serveur');
         if(data.conversation_id){state.conversation_id=data.conversation_id;localStorage.setItem('rw_widget_conv_id',state.conversation_id);} addBubble('bot',data.answer||'(Réponse vide)');
       }catch(e){addBubble('bot','Erreur: '+(e.message||e));}
@@ -63,7 +90,7 @@
 
     async function loadFaq(){
       const bid=$('brandSel').value==='auto'?'retroworld':$('brandSel').value;
-      const res=await fetch('/faq.json?brand_id='+encodeURIComponent(bid));
+      const res=await apiFetch('/faq.json?brand_id='+encodeURIComponent(bid));
       const data=await res.json();
       const wrap=$('faqWrap');
       wrap.innerHTML='';
@@ -89,10 +116,10 @@
     const tabParam=(new URLSearchParams(location.search).get('tab')||'chat').toLowerCase(); setTab(tabParam==='faq'?'faq':'chat');
 
     (async()=>{
-      try{const res=await fetch('/brands.json');const data=await res.json();const items=Array.isArray(data.items)?data.items:[];if(!items.length)return;const cur=$('brandSel').value;$('brandSel').innerHTML='<option value="auto">Auto</option>';items.forEach(b=>{const o=document.createElement('option');o.value=b.id;o.textContent=b.short||b.name||b.id;$('brandSel').appendChild(o);});$('brandSel').value=cur;}catch(e){}
+      try{const res=await apiFetch('/brands.json');const data=await res.json();const items=Array.isArray(data.items)?data.items:[];if(!items.length)return;const cur=$('brandSel').value;$('brandSel').innerHTML='<option value="auto">Auto</option>';items.forEach(b=>{const o=document.createElement('option');o.value=b.id;o.textContent=b.short||b.name||b.id;$('brandSel').appendChild(o);});$('brandSel').value=cur;}catch(e){}
     })();
 
-    addBubble('bot','Bonjour 👋 Je peux vous orienter entre Retroworld, Runningman et Enigmaniac, et répondre avec les informations officielles du Pôle Loisirs.');
+    addBubble('bot','Bonjour 👋 Je peux vous orienter entre Retroworld, Runningman et Enigmaniac, et répondre avec les informations officielles du Pôle Loisirs.' + (API_BASE ? ('\n\n🔌 API: ' + API_BASE) : ''));
   </script>
 </body>
 </html>
