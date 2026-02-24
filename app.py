@@ -73,6 +73,27 @@ PUBLIC_BASE_URL = _env("PUBLIC_BASE_URL")
 # Logs de debug
 DEBUG_LOGS = _env("DEBUG_LOGS").lower() in ("1", "true", "yes", "on")
 
+# Mode serveur (auto|flask|gunicorn)
+SERVER_MODE = _env("SERVER_MODE", "auto").lower()
+
+
+def _running_on_render() -> bool:
+    return _env("RENDER").lower() in ("1", "true", "yes", "on")
+
+
+def _gunicorn_cmd(port: int) -> List[str]:
+    return ["gunicorn", "-w", "2", "-k", "gthread", "-b", f"0.0.0.0:{port}", "app:app"]
+
+
+def _should_use_gunicorn() -> bool:
+    if SERVER_MODE == "gunicorn":
+        return True
+    if SERVER_MODE == "flask":
+        return False
+    # mode auto
+    return _running_on_render()
+
+
 # Informations par établissement (nom, contacts, domaines…)
 DEFAULT_BRANDS: Dict[str, Dict[str, Any]] = {
     "retroworld": {
@@ -480,6 +501,8 @@ def health():
             "brands": list(BRANDS.keys()),
             "faq_enabled_brands": FAQ_ENABLED_BRANDS,
             "public_brands": PUBLIC_BRANDS,
+            "server_mode": SERVER_MODE,
+            "running_on_render": _running_on_render(),
         }
     )
 
@@ -634,6 +657,8 @@ def admin_diag():
             "brands": list(BRANDS.keys()),
             "faq_enabled_brands": FAQ_ENABLED_BRANDS,
             "public_brands": PUBLIC_BRANDS,
+            "server_mode": SERVER_MODE,
+            "running_on_render": _running_on_render(),
             "allowed_origins": ALLOWED_ORIGINS,
         }
     )
@@ -766,4 +791,9 @@ def static_files(filename):
 
 if __name__ == "__main__":
     port = int(_env("PORT", "5000"))
+    if _should_use_gunicorn():
+        cmd = _gunicorn_cmd(port)
+        print("[BOOT] mode gunicorn auto:", " ".join(cmd), flush=True)
+        os.execvp(cmd[0], cmd)
+    print("[BOOT] mode flask dev", flush=True)
     app.run(host="0.0.0.0", port=port, debug=DEBUG_LOGS)

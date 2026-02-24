@@ -99,3 +99,14 @@ Si Render affiche `failed to read dockerfile: open Dockerfile: no such file or d
 - Vérifiez que le service pointe bien sur le bon dépôt **et la bonne branche** (`main`).
 - Vérifiez que le commit déployé contient bien `Dockerfile` (fichier à la racine).
 - Si vous utilisez Blueprint, utilisez le `render.yaml` de ce dépôt (il pointe explicitement vers `./Dockerfile`).
+
+
+### Note sur Render: clone du dépôt à chaque build
+C'est **normal**: Render clone le dépôt à chaque nouveau déploiement/build.
+Cela ne signifie pas une erreur en soi.
+
+Pour éviter les ambiguïtés de runtime:
+- mode Docker: utiliser `Dockerfile` (et `render.yaml` si Blueprint),
+- mode Python natif: `Procfile` est fourni (`web: gunicorn ...`).
+
+`app.py` supporte aussi `SERVER_MODE=auto|flask|gunicorn` (par défaut `auto`) et passe automatiquement en gunicorn sur Render quand l'application est lancée via `python app.py`.
