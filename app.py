@@ -46,12 +46,30 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 def _env(key: str, default: str = "") -> str:
     return (os.getenv(key, default) or "").strip()
 
+
+def _env_float(key: str, default: float) -> float:
+    raw = _env(key, str(default))
+    try:
+        return float(raw)
+    except ValueError:
+        log(f"Invalid float for {key}: {raw!r}, using {default}")
+        return default
+
+
+def _env_int(key: str, default: int) -> int:
+    raw = _env(key, str(default))
+    try:
+        return int(raw)
+    except ValueError:
+        log(f"Invalid int for {key}: {raw!r}, using {default}")
+        return default
+
 # OpenAI
 OPENAI_API_KEY = _env("OPENAI_API_KEY")
 OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-5.2")
 OPENAI_REASONING_EFFORT = _env("OPENAI_REASONING_EFFORT", "none")
-OPENAI_TEMPERATURE = float(_env("OPENAI_TEMPERATURE", "0.3") or 0.0)
-OPENAI_MAX_OUTPUT_TOKENS = int(_env("OPENAI_MAX_OUTPUT_TOKENS", "900"))
+OPENAI_TEMPERATURE = _env_float("OPENAI_TEMPERATURE", 0.3)
+OPENAI_MAX_OUTPUT_TOKENS = _env_int("OPENAI_MAX_OUTPUT_TOKENS", 900)
 
 # Sécurité admin / CORS
 ADMIN_API_TOKEN = _env("ADMIN_API_TOKEN")
@@ -356,9 +374,14 @@ def openai_answer(system: str, user: str) -> str:
         "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
     }
     # Mode reasoning effort
-    if OPENAI_REASONING_EFFORT:
+    allowed_reasoning_efforts = {"low", "medium", "high"}
+    normalized_effort = (OPENAI_REASONING_EFFORT or "").lower().strip()
+    if normalized_effort in allowed_reasoning_efforts:
         payload["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
-    if OPENAI_REASONING_EFFORT == "none":
+    elif normalized_effort not in ("", "none"):
+        log(f"Ignoring unsupported OPENAI_REASONING_EFFORT={OPENAI_REASONING_EFFORT!r}")
+
+    if normalized_effort in ("", "none"):
         payload["temperature"] = OPENAI_TEMPERATURE
     # Requête HTTP
     try:
