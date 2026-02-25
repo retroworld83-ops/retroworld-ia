@@ -12,6 +12,8 @@ le prompt système et les variables d’environnement pour ajuster son comportem
 """
 
 import csv
+import importlib
+import importlib.util
 import json
 import os
 import re
@@ -24,10 +26,7 @@ from flask import Flask, jsonify, make_response, redirect, request, send_from_di
 
 from src.data.system_data import SYSTEM_PROMPT
 
-try:
-    import requests  # Utilisé pour appeler l’API OpenAI
-except Exception:
-    requests = None  # type: ignore
+requests = importlib.import_module("requests") if importlib.util.find_spec("requests") else None
 
 
 # -----------------------------------------------------------------------------
@@ -63,9 +62,9 @@ ALLOWED_ORIGINS = [o for o in _env("ALLOWED_ORIGINS").split(",") if o.strip()]
 BRAND_ID_DEFAULT = _env("BRAND_ID", "retroworld").lower() or "retroworld"
 
 # FAQ publique : marques activées
-FAQ_ENABLED_BRANDS = [b for b in _env("FAQ_ENABLED_BRANDS", "retroworld,runningman,enigmaniac").split(",") if b.strip()]
+FAQ_ENABLED_BRANDS = [b.strip() for b in _env("FAQ_ENABLED_BRANDS", "retroworld,runningman,enigmaniac").split(",") if b.strip()]
 # Marques proposées dans le widget public
-PUBLIC_BRANDS = [b for b in _env("PUBLIC_BRANDS", ",".join(FAQ_ENABLED_BRANDS)).split(",") if b.strip()]
+PUBLIC_BRANDS = [b.strip() for b in _env("PUBLIC_BRANDS", ",".join(FAQ_ENABLED_BRANDS)).split(",") if b.strip()]
 
 # URL publique (utilisée dans /brands.json)
 PUBLIC_BASE_URL = _env("PUBLIC_BASE_URL")
@@ -127,10 +126,9 @@ def _load_brands_from_yaml() -> Dict[str, Dict[str, Any]]:
     cfg_path = BASE_DIR / "config" / "brands.yaml"
     if not cfg_path.exists():
         return {}
-    try:
-        import yaml  # type: ignore
-    except Exception:
+    if not importlib.util.find_spec("yaml"):
         return {}
+    yaml = importlib.import_module("yaml")
     try:
         raw = yaml.safe_load(cfg_path.read_text("utf-8")) or {}
         brands = raw.get("brands", {})
@@ -772,7 +770,9 @@ def admin_faq_save():
         out_path.write_text(json.dumps(kb_out, ensure_ascii=False, indent=2), "utf-8")
         # mettre à jour le chemin legacy pour runningman
         if bid == "runningman":
-            (STATIC_DIR / "static" / "faq_runningman.json").write_text(
+            legacy_path = STATIC_DIR / "static" / "faq_runningman.json"
+            legacy_path.parent.mkdir(parents=True, exist_ok=True)
+            legacy_path.write_text(
                 json.dumps(kb_out, ensure_ascii=False, indent=2), "utf-8"
             )
     except Exception as e:
