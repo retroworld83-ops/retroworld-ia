@@ -52,7 +52,6 @@ def _env_float(key: str, default: float) -> float:
     try:
         return float(raw)
     except ValueError:
-        log(f"Invalid float for {key}: {raw!r}, using {default}")
         return default
 
 
@@ -61,7 +60,6 @@ def _env_int(key: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        log(f"Invalid int for {key}: {raw!r}, using {default}")
         return default
 
 # OpenAI
@@ -377,7 +375,7 @@ def openai_answer(system: str, user: str) -> str:
     allowed_reasoning_efforts = {"low", "medium", "high"}
     normalized_effort = (OPENAI_REASONING_EFFORT or "").lower().strip()
     if normalized_effort in allowed_reasoning_efforts:
-        payload["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
+        payload["reasoning"] = {"effort": normalized_effort}
     elif normalized_effort not in ("", "none"):
         log(f"Ignoring unsupported OPENAI_REASONING_EFFORT={OPENAI_REASONING_EFFORT!r}")
 
