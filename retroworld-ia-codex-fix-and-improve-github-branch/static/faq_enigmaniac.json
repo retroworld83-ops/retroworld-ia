@@ -1,0 +1,16 @@
+{
+  "brand": "enigmaniac",
+  "updated": "2026-01-01 00:00:00",
+  "items": [
+    {
+      "question": "Quels sont les tarifs Enigmaniac ?",
+      "answer": "25€/pers (2 à 4 joueurs), 20€/pers (5 à 6 joueurs), 15€/pers pour les moins de 12 ans.",
+      "tags": ["tarifs", "enigmaniac"]
+    },
+    {
+      "question": "Quelles salles sont disponibles ?",
+      "answer": "La Loi de la Jungle et Terreur Nocturne, toutes les deux en décors réels pour 3 à 6 joueurs.",
+      "tags": ["salles", "escape"]
+    }
+  ]
+}

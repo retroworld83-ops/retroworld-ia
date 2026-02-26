@@ -1,0 +1,21 @@
+{
+  "brand": "runningman",
+  "updated": "2026-02-23 00:00:00",
+  "items": [
+    {
+      "question": "Runningman est‑il dans le même bâtiment que Retroworld ?",
+      "answer": "Oui, Runningman Games est dans le même bâtiment. Pour l’action game, les réservations se font directement auprès de Runningman.",
+      "tags": [
+        "localisation",
+        "partenariat"
+      ]
+    },
+    {
+      "question": "Comment contacter Runningman ?",
+      "answer": "Téléphone Runningman : 04 98 09 30 59. Site : https://www.runningmangames.fr",
+      "tags": [
+        "contact"
+      ]
+    }
+  ]
+}

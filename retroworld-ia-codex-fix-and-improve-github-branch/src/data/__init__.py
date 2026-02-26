@@ -1,0 +1,1 @@
+"""Data subpackage for Pôle Loisirs Draguignan IA."""
