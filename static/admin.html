@@ -318,6 +318,32 @@
       background: rgba(255,255,255,.06);
       color: var(--text);
     }
+    .diag-panel{
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:12px;
+      background:rgba(11,18,32,.55);
+      padding:10px;
+      display:none;
+    }
+    .diag-panel.show{display:block}
+    .diag-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
+    .diag-title{font-size:12px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.3px}
+    .diag-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:8px}
+    @media (max-width:860px){.diag-grid{grid-template-columns:1fr}}
+    .diag-kpi{border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:8px;background:rgba(2,6,23,.45)}
+    .diag-kpi .k{font-size:11px;color:var(--muted)}
+    .diag-kpi .v{font-size:13px;font-weight:800;color:#e2e8f0;margin-top:2px;word-break:break-word}
+    .diag-list{margin:8px 0 0;padding-left:18px;color:#cbd5e1;font-size:12px;line-height:1.4;max-height:130px;overflow:auto}
+    .diag-log-list{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;margin-top:8px}
+    .diag-log-item{border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:8px;background:rgba(2,6,23,.45)}
+    .diag-log-head{display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:11px;color:#93c5fd}
+    .diag-log-msg{margin-top:5px;color:#e2e8f0;font-size:12px;line-height:1.35}
+    .diag-log-ctx{margin-top:5px;white-space:pre-wrap;font-family:var(--mono);font-size:10px;color:#94a3b8;background:rgba(15,23,42,.7);border-radius:8px;padding:6px}
+    .diag-pill{display:inline-block;border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:2px 8px;font-size:10px;font-weight:800}
+    .diag-pill.ok{border-color:rgba(34,197,94,.5);color:#86efac}
+    .diag-pill.warn{border-color:rgba(245,158,11,.5);color:#fcd34d}
+    .diag-pill.bad{border-color:rgba(239,68,68,.5);color:#fca5a5}
+
     .small{
       font-size:12px;
       color: var(--muted);
@@ -393,6 +419,30 @@
             </div>
           </div>
 
+          <div class="diag-panel" id="diagPanel">
+            <div class="diag-actions">
+              <div class="diag-title">Diagnostic serveur & journaux d'erreurs</div>
+              <button class="btn ghost" id="btnCopyDiag">Copier diag</button>
+            </div>
+
+            <div class="diag-grid" id="diagGrid">
+              <div class="diag-kpi"><div class="k">État OpenAI</div><div class="v" id="diagOpenai">—</div></div>
+              <div class="diag-kpi"><div class="k">Mode serveur</div><div class="v" id="diagMode">—</div></div>
+              <div class="diag-kpi"><div class="k">Conversations</div><div class="v" id="diagConversations">—</div></div>
+              <div class="diag-kpi"><div class="k">Origines autorisées</div><div class="v" id="diagOrigins">—</div></div>
+            </div>
+
+            <div class="diag-kpi" style="margin-bottom:8px;">
+              <div class="k">FAQ détectées</div>
+              <ul class="diag-list" id="diagFaqList"><li>Aucune donnée.</li></ul>
+            </div>
+
+            <div class="diag-kpi">
+              <div class="k">Logs récents</div>
+              <div class="diag-log-list" id="diagLogs"><div class="diag-log-item">Aucun log chargé.</div></div>
+            </div>
+          </div>
+
           <div class="thread" id="thread" style="display:none;"></div>
         </div>
 
@@ -413,10 +463,18 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    // -------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------
     const $ = (id) => document.getElementById(id);
+
+    const state = {
+      adminToken: "",
+      conversations: [],
+      filtered: [],
+      activeId: "",
+      activeObj: null,
+      activeMessages: [],
+      flagFilter: "all",
+      diagText: "",
+    };
 
     function toast(msg){
       const t = $("toast");
@@ -426,243 +484,14 @@
     }
 
     function qs(name){
-      const u = new URL(location.href);
-      return u.searchParams.get(name);
+      return new URL(location.href).searchParams.get(name);
     }
 
     function setQs(name, value){
       const u = new URL(location.href);
-      if(value === null || value === undefined || value === ""){
-        u.searchParams.delete(name);
-      } else {
-        u.searchParams.set(name, value);
-      }
+      if(value) u.searchParams.set(name, value);
+      else u.searchParams.delete(name);
       history.replaceState({}, "", u.toString());
-    }
-
-    function fmtTs(ts){
-      if(!ts) return "";
-      // keep ISO, short
-      try{
-        const d = new Date(ts);
-        if(isNaN(d.getTime())) return String(ts);
-        const pad = (n)=>String(n).padStart(2,"0");
-        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-      }catch(e){
-        return String(ts);
-      }
-    }
-
-    // -------------------------------------------------------
-    // State
-    // -------------------------------------------------------
-    const state = {
-      adminToken: "",
-      conversations: [],
-      filtered: [],
-      activeId: "",
-      activeObj: null,
-      activeMessages: [],
-      flagFilter: "all",
-    };
-
-    $("originText").textContent = location.origin;
-
-    // Load token from URL, else from localStorage
-    const URL_TOKEN = qs("token") || "";
-    const LS_KEY = "rw_admin_token";
-    const LS_TOKEN = localStorage.getItem(LS_KEY) || "";
-
-    state.adminToken = URL_TOKEN || LS_TOKEN || "";
-    $("tokenInput").value = state.adminToken;
-
-    // -------------------------------------------------------
-    // API
-    // -------------------------------------------------------
-    async function apiGet(path){
-      const token = (state.adminToken || "").trim();
-      const url = new URL(location.origin + path);
-
-      // Prefer query param token (matches backend _require_admin_token)
-      if(token){
-        url.searchParams.set("token", token);
-      }
-
-      const headers = {};
-      if(token){
-        headers["X-Admin-Token"] = token;
-      }
-
-      const res = await fetch(url.toString(), { headers });
-      let data = null;
-      try { data = await res.json(); } catch(e){}
-
-      if(!res.ok){
-        const msg = (data && (data.error || data.message)) ? (data.error || data.message) : `HTTP ${res.status}`;
-        throw new Error(msg);
-      }
-      return data;
-    }
-
-    async function loadDiag(){
-      const d = await apiGet("/admin/api/diag");
-      const ok = d && d.openai && d.openai.client_ready;
-      $("statusText").textContent = ok ? "OK" : "Dégradé";
-      $("pillStatus").style.borderColor = ok ? "rgba(34,197,94,.35)" : "rgba(245,158,11,.35)";
-      $("pillStatus").style.background = ok ? "rgba(34,197,94,.10)" : "rgba(245,158,11,.10)";
-      toast("Diag chargé");
-      return d;
-    }
-
-    async function loadConversations(){
-      const items = await apiGet("/admin/api/conversations");
-      state.conversations = Array.isArray(items) ? items : [];
-      applyFilter();
-      renderList();
-      $("countChip").textContent = String(state.filtered.length);
-      $("statusText").textContent = "OK";
-      toast("Conversations chargées");
-    }
-
-    async function loadConversationDetail(convId){
-      if(!convId) return;
-      const detail = await apiGet("/admin/api/conversation/" + encodeURIComponent(convId));
-      state.activeId = convId;
-      state.activeObj = detail && detail.conversation ? detail.conversation : null;
-      state.activeMessages = Array.isArray(detail.messages) ? detail.messages : [];
-      renderThread();
-    }
-
-    // -------------------------------------------------------
-    // Rendering
-    // -------------------------------------------------------
-    function applyFilter(){
-      const q = ($("searchInput").value || "").trim().toLowerCase();
-      const f = (state.flagFilter || "all").trim();
-      state.filtered = state.conversations.filter(c => {
-        const id = String(c.id || "").toLowerCase();
-        const userId = String(c.user_id || "").toLowerCase();
-        const prev = String(c.preview || "").toLowerCase();
-        const brand = String(c.brand || "").toLowerCase();
-        const flags = Array.isArray(c.flags) ? c.flags.map(x=>String(x||"").toLowerCase()) : [];
-        const textMatch = (!q) || id.includes(q) || userId.includes(q) || prev.includes(q) || brand.includes(q) || flags.join(" ").includes(q);
-        const flagMatch = (f === "all") || flags.includes(f);
-        return textMatch && flagMatch;
-      });
-    }
-
-    
-function flagsHtml(flags){
-  if(!Array.isArray(flags) || flags.length===0) return '';
-  return flags.map(f=>`<span class="chip" style="opacity:.95;">${String(f)}</span>`).join(' ');
-}
-
-function brandChipClass(brand){
-      brand = String(brand||"").toLowerCase();
-      if(brand === "runningman") return "chip runningman";
-      if(brand === "enigmaniac") return "chip enigmaniac";
-      if(brand === "retroworld") return "chip retroworld";
-      return "chip";
-    }
-
-    function renderList(){
-      const list = $("convList");
-      list.innerHTML = "";
-
-      if(state.filtered.length === 0){
-        const div = document.createElement("div");
-        div.className = "conv";
-        div.innerHTML = `<div class="preview">Aucune conversation.</div>`;
-        list.appendChild(div);
-        return;
-      }
-
-      for(const c of state.filtered){
-        const div = document.createElement("div");
-        div.className = "conv" + (c.id === state.activeId ? " active" : "");
-        const brand = String(c.brand || "unknown");
-        const chipClass = brandChipClass(brand);
-        const ts = fmtTs(c.updated || c.timestamp);
-
-        div.innerHTML = `
-          <div class="conv-top">
-            <div class="conv-id">${escapeHtml(c.id || "")}</div>
-            <span class="${chipClass}">${escapeHtml(brand)}</span>
-          </div>
-          <div class="preview">${escapeHtml(c.preview || "")}</div>
-          <div class="meta">
-            <span class="chip">msgs <code>${escapeHtml(c.message_count || 0)}</code></span>
-            <span class="chip">upd <code>${escapeHtml(ts || "—")}</code></span>
-            <span class="chip">user <code>${escapeHtml(c.user_id || "—")}</code></span>
-            ${flagsHtml(c.flags)}
-          </div>
-        `;
-
-        div.addEventListener("click", async () => {
-          // highlight immediately
-          state.activeId = c.id;
-          renderList();
-          $("emptyState").style.display = "none";
-          $("thread").style.display = "block";
-          $("thread").innerHTML = `<div class="empty">Chargement…</div>`;
-          try{
-            await loadConversationDetail(c.id);
-          }catch(e){
-            $("thread").innerHTML = `<div class="empty">Erreur: ${escapeHtml(e.message || String(e))}</div>`;
-            toast("Erreur chargement conversation");
-          }
-        });
-
-        list.appendChild(div);
-      }
-    }
-
-    function renderThread(){
-      const thread = $("thread");
-      const empty = $("emptyState");
-
-      if(!state.activeId){
-        empty.style.display = "block";
-        thread.style.display = "none";
-        return;
-      }
-
-      empty.style.display = "none";
-      thread.style.display = "block";
-      thread.innerHTML = "";
-
-      const brand = (state.activeObj && state.activeObj.brand_last) ? String(state.activeObj.brand_last) : "—";
-      const userId = (state.activeObj && state.activeObj.user_id) ? String(state.activeObj.user_id) : "—";
-      $("brandChip").className = brandChipClass(brand);
-      $("brandChip").textContent = "brand: " + brand;
-      $("userChip").textContent = "user_id: " + userId;
-
-      const msgs = state.activeMessages || [];
-      if(msgs.length === 0){
-        thread.innerHTML = `<div class="empty">Conversation vide.</div>`;
-        return;
-      }
-
-      for(const m of msgs){
-        const role = String(m.role || "");
-        const content = String(m.content || "");
-        const ts = fmtTs(m.ts);
-
-        const wrap = document.createElement("div");
-        wrap.className = "msg " + (role === "user" ? "user" : "assistant");
-
-        wrap.innerHTML = `
-          <div>${escapeHtml(content)}</div>
-          <div class="msg-footer">
-            <span class="role">${escapeHtml(role)}</span>
-            <span class="ts">${escapeHtml(ts)}</span>
-          </div>
-        `;
-        thread.appendChild(wrap);
-      }
-
-      // scroll to bottom
-      thread.scrollTop = thread.scrollHeight;
     }
 
     function escapeHtml(str){
@@ -674,114 +503,306 @@ function brandChipClass(brand){
         .replaceAll("'", "&#039;");
     }
 
-    // -------------------------------------------------------
-    // Events
-    // -------------------------------------------------------
+    function fmtTs(ts){
+      if(!ts) return "—";
+      return String(ts);
+    }
 
-$("btnExport").addEventListener("click", () => {
-  state.adminToken = ($("tokenInput").value || "").trim();
-  if(state.adminToken){
-    localStorage.setItem(LS_KEY, state.adminToken);
-    setQs("token", state.adminToken);
-  }
-  if(!state.adminToken){ toast("Token manquant"); return; }
-  const url = new URL(location.origin + "/admin/api/conversations.csv");
-  url.searchParams.set("token", state.adminToken);
-  window.open(url.toString(), "_blank");
-});
+    function brandChipClass(brand){
+      const b = String(brand||"").toLowerCase();
+      if(b === "runningman") return "chip runningman";
+      if(b === "enigmaniac") return "chip enigmaniac";
+      if(b === "retroworld") return "chip retroworld";
+      return "chip";
+    }
 
-    $("btnRefresh").addEventListener("click", async () => {
+    function flagsHtml(flags){
+      if(!Array.isArray(flags) || !flags.length) return "";
+      return flags.map(f=>`<span class="chip">${escapeHtml(String(f))}</span>`).join(" ");
+    }
+
+    async function apiGet(path){
+      const token = (state.adminToken || "").trim();
+      const url = new URL(location.origin + path);
+      if(token) url.searchParams.set("token", token);
+      const headers = token ? {"X-Admin-Token": token} : {};
+      const res = await fetch(url.toString(), {headers});
+      let data = null;
+      try { data = await res.json(); } catch(e){}
+      if(!res.ok || (data && data.ok === false)){
+        const msg = (data && (data.error || data.message)) || `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+      return data;
+    }
+
+    function applyFilter(){
+      const q = ($("searchInput").value || "").trim().toLowerCase();
+      const wantedFlag = state.flagFilter;
+      state.filtered = state.conversations.filter(c => {
+        const id = String(c.id || "").toLowerCase();
+        const brand = String(c.brand_id || "").toLowerCase();
+        const flags = Array.isArray(c.flags) ? c.flags.map(f=>String(f).toLowerCase()) : [];
+        const hay = [id, brand, flags.join(" ")].join(" ");
+        const textMatch = !q || hay.includes(q);
+        const flagMatch = (wantedFlag === "all") || flags.includes(wantedFlag);
+        return textMatch && flagMatch;
+      });
+    }
+
+    function renderList(){
+      const list = $("convList");
+      list.innerHTML = "";
+      if(!state.filtered.length){
+        list.innerHTML = `<div class="conv"><div class="preview">Aucune conversation.</div></div>`;
+        $("countChip").textContent = "0";
+        return;
+      }
+
+      for(const c of state.filtered){
+        const div = document.createElement("div");
+        div.className = "conv" + (c.id === state.activeId ? " active" : "");
+        const brand = c.brand_id || "—";
+        div.innerHTML = `
+          <div class="conv-top">
+            <div class="conv-id">${escapeHtml(c.id || "")}</div>
+            <span class="${brandChipClass(brand)}">${escapeHtml(brand)}</span>
+          </div>
+          <div class="preview">Dernière activité: ${escapeHtml(fmtTs(c.last || c.created))}</div>
+          <div class="meta">
+            <span class="chip">msgs <code>${escapeHtml(c.count || 0)}</code></span>
+            ${flagsHtml(c.flags)}
+          </div>
+        `;
+        div.addEventListener("click", async ()=>{
+          state.activeId = c.id;
+          renderList();
+          await loadConversationDetail(c.id);
+        });
+        list.appendChild(div);
+      }
+      $("countChip").textContent = String(state.filtered.length);
+    }
+
+    function renderThread(){
+      const thread = $("thread");
+      const empty = $("emptyState");
+      if(!state.activeId){
+        empty.style.display = "block";
+        thread.style.display = "none";
+        return;
+      }
+      empty.style.display = "none";
+      thread.style.display = "block";
+      thread.innerHTML = "";
+
+      const conv = state.activeObj || {};
+      const meta = conv.meta || {};
+      const brand = meta.brand_id || "—";
+      $("brandChip").className = brandChipClass(brand);
+      $("brandChip").textContent = "brand: " + brand;
+      $("userChip").textContent = "user_id: " + (meta.user_id || "—");
+
+      if(!state.activeMessages.length){
+        thread.innerHTML = `<div class="empty">Conversation vide.</div>`;
+        return;
+      }
+
+      for(const m of state.activeMessages){
+        const role = String(m.role || "assistant");
+        const wrap = document.createElement("div");
+        wrap.className = "msg " + (role === "user" ? "user" : "assistant");
+        wrap.innerHTML = `
+          <div>${escapeHtml(String(m.content || ""))}</div>
+          <div class="msg-footer">
+            <span class="role">${escapeHtml(role)}</span>
+            <span class="ts">${escapeHtml(fmtTs(m.ts))}</span>
+          </div>
+        `;
+        thread.appendChild(wrap);
+      }
+      thread.scrollTop = thread.scrollHeight;
+    }
+
+    function formatDiagText(d){
+      const lines = [];
+      lines.push(`ok: ${d.ok}`);
+      lines.push(`time: ${d.time || ""}`);
+      lines.push(`openai_configured: ${d.openai_configured}`);
+      lines.push(`server_mode: ${d.server_mode}`);
+      lines.push(`running_on_render: ${d.running_on_render}`);
+      lines.push(`brands: ${(d.brands || []).join(", ")}`);
+      lines.push(`faq_enabled_brands: ${(d.faq_enabled_brands || []).join(", ")}`);
+      lines.push(`public_brands: ${(d.public_brands || []).join(", ")}`);
+      lines.push(`conversations_count: ${d.conversations_count ?? "?"}`);
+      lines.push(`allowed_origins: ${(d.allowed_origins || []).join(", ") || "*"}`);
+      lines.push("");
+      lines.push("FAQ files:");
+      for(const f of (d.faq_files || [])){
+        lines.push(`- ${f.file}: ${f.exists ? "OK" : "MISSING"} (${f.size_bytes} bytes)`);
+      }
+      lines.push("");
+      lines.push("Recent logs:");
+      const logs = Array.isArray(d.recent_logs) ? d.recent_logs : [];
+      if(!logs.length) lines.push("- no logs captured yet");
+      for(const l of logs){
+        lines.push(`- [${l.ts}] ${String(l.level || "info").toUpperCase()} ${l.message || ""}`);
+      }
+      return lines.join("\n");
+    }
+
+    function renderDiagPanel(d){
+      const openaiOk = Boolean(d.openai_configured);
+      const runMode = `${d.server_mode || "?"}${d.running_on_render ? " (Render)" : ""}`;
+      $("diagOpenai").innerHTML = `<span class="diag-pill ${openaiOk ? "ok" : "warn"}">${openaiOk ? "Configuré" : "Non configuré"}</span>`;
+      $("diagMode").textContent = runMode;
+      $("diagConversations").textContent = String(d.conversations_count ?? "?");
+      $("diagOrigins").textContent = (d.allowed_origins || []).join(", ") || "*";
+
+      const faqList = $("diagFaqList");
+      const faqFiles = Array.isArray(d.faq_files) ? d.faq_files : [];
+      faqList.innerHTML = faqFiles.length ? faqFiles.map((f)=>{
+        const badgeClass = f.exists ? "ok" : "bad";
+        const badgeText = f.exists ? "OK" : "MISSING";
+        return `<li>${escapeHtml(f.file)} — <span class="diag-pill ${badgeClass}">${badgeText}</span> (${escapeHtml(f.size_bytes)} bytes)</li>`;
+      }).join("") : "<li>Aucune FAQ trouvée.</li>";
+
+      const logsWrap = $("diagLogs");
+      const logs = Array.isArray(d.recent_logs) ? d.recent_logs : [];
+      logsWrap.innerHTML = "";
+      if(!logs.length){
+        logsWrap.innerHTML = '<div class="diag-log-item">Aucun log capturé pour le moment.</div>';
+        return;
+      }
+      const lastLogs = logs.slice(-25).reverse();
+      for(const l of lastLogs){
+        const level = String(l.level || "info").toLowerCase();
+        const lvlClass = level === "error" ? "bad" : (level === "debug" ? "warn" : "ok");
+        const item = document.createElement("div");
+        item.className = "diag-log-item";
+        const ctx = l.context ? JSON.stringify(l.context, null, 2) : "";
+        item.innerHTML = `
+          <div class="diag-log-head">
+            <span>${escapeHtml(l.ts || "")}</span>
+            <span class="diag-pill ${lvlClass}">${escapeHtml(level.toUpperCase())}</span>
+          </div>
+          <div class="diag-log-msg">${escapeHtml(l.message || "")}</div>
+          ${ctx ? `<div class="diag-log-ctx">${escapeHtml(ctx)}</div>` : ""}
+        `;
+        logsWrap.appendChild(item);
+      }
+    }
+
+    async function loadConversations(){
+      const data = await apiGet("/admin/api/conversations");
+      state.conversations = Array.isArray(data.items) ? data.items : [];
+      applyFilter();
+      renderList();
+      $("statusText").textContent = "OK";
+    }
+
+    async function loadConversationDetail(convId){
+      const data = await apiGet("/admin/api/conversation/" + encodeURIComponent(convId));
+      state.activeObj = data.conversation || null;
+      state.activeMessages = Array.isArray((data.conversation || {}).messages) ? data.conversation.messages : [];
+      renderThread();
+    }
+
+    async function loadDiag(){
+      const d = await apiGet("/admin/api/diag");
+      const txt = formatDiagText(d);
+      state.diagText = txt;
+      renderDiagPanel(d);
+      $("diagPanel").classList.add("show");
+      const ok = Boolean(d.openai_configured);
+      $("statusText").textContent = ok ? "OK" : "Dégradé";
+      $("pillStatus").style.borderColor = ok ? "rgba(34,197,94,.35)" : "rgba(245,158,11,.35)";
+      $("pillStatus").style.background = ok ? "rgba(34,197,94,.10)" : "rgba(245,158,11,.10)";
+      toast("Diagnostic chargé");
+    }
+
+    function syncToken(){
       state.adminToken = ($("tokenInput").value || "").trim();
+      const LS_KEY = "rw_admin_token";
       if(state.adminToken){
         localStorage.setItem(LS_KEY, state.adminToken);
-        setQs("token", state.adminToken); // keep it in URL (handy on Render)
+        setQs("token", state.adminToken);
       } else {
         localStorage.removeItem(LS_KEY);
         setQs("token", "");
       }
+    }
 
-      $("statusText").textContent = "…";
+    // init token
+    const LS_KEY = "rw_admin_token";
+    state.adminToken = qs("token") || localStorage.getItem(LS_KEY) || "";
+    $("tokenInput").value = state.adminToken;
+    $("originText").textContent = location.origin;
+
+    $("btnRefresh").addEventListener("click", async ()=>{
+      syncToken();
       try{
         await loadConversations();
-        if(state.activeId){
-          await loadConversationDetail(state.activeId);
-        }
+        if(state.activeId) await loadConversationDetail(state.activeId);
+        toast("Conversations chargées");
       }catch(e){
         $("statusText").textContent = "Erreur";
         toast("Erreur: " + (e.message || e));
       }
     });
 
-    $("btnDiag").addEventListener("click", async () => {
-      state.adminToken = ($("tokenInput").value || "").trim();
-      if(state.adminToken){
-        localStorage.setItem(LS_KEY, state.adminToken);
-        setQs("token", state.adminToken);
-      }
-      try{
-        const d = await loadDiag();
-        // Small extra toast info
-        const kbR = d && d.kb && d.kb.retroworld ? d.kb.retroworld.items_count : "?";
-        const kbRM = d && d.kb && d.kb.runningman ? d.kb.runningman.items_count : "?";
-        toast(`KB retroworld: ${kbR} | KB runningman: ${kbRM}`);
-      }catch(e){
-        toast("Diag erreur: " + (e.message || e));
-        $("statusText").textContent = "Erreur";
-      }
+    $("btnReload").addEventListener("click", async ()=>{
+      if(!state.activeId) return toast("Aucune conversation sélectionnée");
+      syncToken();
+      try{ await loadConversationDetail(state.activeId); toast("Conversation rechargée"); }
+      catch(e){ toast("Erreur: " + (e.message || e)); }
     });
 
-    $("btnClear").addEventListener("click", () => {
+    $("btnDiag").addEventListener("click", async ()=>{
+      syncToken();
+      try{ await loadDiag(); }
+      catch(e){ $("statusText").textContent = "Erreur"; toast("Diag erreur: " + (e.message || e)); }
+    });
+
+    $("btnExport").addEventListener("click", ()=>{
+      syncToken();
+      if(!state.adminToken) return toast("Token manquant");
+      const url = new URL(location.origin + "/admin/api/export.csv");
+      url.searchParams.set("token", state.adminToken);
+      window.open(url.toString(), "_blank");
+    });
+
+    $("btnClear").addEventListener("click", ()=>{
       $("searchInput").value = "";
       applyFilter();
       renderList();
-      $("countChip").textContent = String(state.filtered.length);
     });
 
-    $("searchInput").addEventListener("input", () => {
-      applyFilter();
-      renderList();
-      $("countChip").textContent = String(state.filtered.length);
+    $("searchInput").addEventListener("input", ()=>{ applyFilter(); renderList(); });
+    $("flagSel").addEventListener("change", ()=>{ state.flagFilter = $("flagSel").value; applyFilter(); renderList(); });
+
+    $("btnCopyId").addEventListener("click", async ()=>{
+      if(!state.activeId) return toast("Aucune conversation sélectionnée");
+      try{ await navigator.clipboard.writeText(state.activeId); toast("conv_id copié"); }
+      catch(e){ toast("Impossible de copier"); }
     });
 
-    $("btnReload").addEventListener("click", async () => {
-      if(!state.activeId){ toast("Aucune conversation sélectionnée"); return; }
-      try{
-        await loadConversationDetail(state.activeId);
-        toast("Conversation rechargée");
-      }catch(e){
-        toast("Erreur: " + (e.message || e));
-      }
+    $("btnCopyJson").addEventListener("click", async ()=>{
+      if(!state.activeObj) return toast("Aucune conversation sélectionnée");
+      try{ await navigator.clipboard.writeText(JSON.stringify(state.activeObj, null, 2)); toast("JSON copié"); }
+      catch(e){ toast("Impossible de copier"); }
     });
 
-    $("btnCopyId").addEventListener("click", async () => {
-      if(!state.activeId){ toast("Aucune conversation sélectionnée"); return; }
-      try{
-        await navigator.clipboard.writeText(state.activeId);
-        toast("conv_id copié");
-      }catch(e){
-        toast("Impossible de copier");
-      }
+    $("btnCopyDiag").addEventListener("click", async ()=>{
+      if(!state.diagText) return toast("Aucun diagnostic chargé");
+      try{ await navigator.clipboard.writeText(state.diagText); toast("Diagnostic copié"); }
+      catch(e){ toast("Impossible de copier"); }
     });
 
-    $("btnCopyJson").addEventListener("click", async () => {
-      if(!state.activeId || !state.activeObj){ toast("Aucune conversation sélectionnée"); return; }
-      try{
-        const payload = JSON.stringify(state.activeObj, null, 2);
-        await navigator.clipboard.writeText(payload);
-        toast("JSON conversation copié");
-      }catch(e){
-        toast("Impossible de copier");
-      }
-    });
-
-    // -------------------------------------------------------
-    // Init
-    // -------------------------------------------------------
     (async function init(){
       $("statusText").textContent = "…";
       try{
         await loadConversations();
-        // Auto-open by conv param if provided
         const conv = qs("conv");
         if(conv){
           state.activeId = conv;
