@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from flask import Flask, jsonify, make_response, redirect, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 from src.data.system_data import SYSTEM_PROMPT
 
@@ -579,6 +580,15 @@ def faq_page():
     return redirect(f"/static/chat-widget.html?tab=faq&brand={brand_id}")
 
 
+@app.route("/faq/<brand_id>", methods=["GET"], strict_slashes=False)
+def faq_page_by_brand(brand_id: str):
+    """Alias de compatibilité: FAQ publique via URL segmentée (/faq/<brand>)."""
+    bid = normalize_brand(brand_id)
+    if bid not in FAQ_ENABLED_BRANDS:
+        return make_response("FAQ indisponible pour le moment.", 404)
+    return redirect(f"/static/chat-widget.html?tab=faq&brand={bid}")
+
+
 @app.route("/faq.json", methods=["GET"])
 def faq_json():
     """Renvoie la FAQ publique au format JSON pour une marque."""
@@ -614,6 +624,11 @@ def faq_runningman_alias():
     return send_from_directory(str(STATIC_DIR), "faq_runningman.json")
 
 
+@app.route("/faq_enigmaniac.json", methods=["GET"])
+def faq_enigmaniac_alias():
+    return send_from_directory(str(STATIC_DIR), "faq_enigmaniac.json")
+
+
 # ------------------ CHAT ------------------
 @app.route("/chat", methods=["POST", "OPTIONS"])
 def chat():
@@ -621,6 +636,8 @@ def chat():
     if request.method == "OPTIONS":
         return ("", 204)
     payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        payload = {}
     msg = (payload.get("message") or "").strip()
     if not msg:
         return jsonify({"ok": False, "error": "message manquant"}), 400
@@ -659,6 +676,55 @@ def chat():
     append_message(conv, "assistant", safe_answer, extra={"brand_id": brand_id, "flags": flags})
     save_conv(conv)
     return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": safe_answer})
+
+
+@app.route("/chat/<brand_id>", methods=["POST", "OPTIONS"], strict_slashes=False)
+def chat_by_brand(brand_id: str):
+    """Alias de compatibilité: endpoint brandé (/chat/<brand>)."""
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    bid = normalize_brand(brand_id)
+    if bid not in BRANDS:
+        return jsonify({"ok": False, "error": "unknown brand"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.setdefault("brand_id", bid)
+
+    msg = (payload.get("message") or "").strip()
+    if not msg:
+        return jsonify({"ok": False, "error": "message manquant"}), 400
+
+    conv_id = (payload.get("conversation_id") or "").strip()
+    if not conv_id:
+        conv_id = new_conv_id(prefix=bid[:2] if bid else "rw")
+    conv = load_conv(conv_id)
+    conv.setdefault("meta", {})
+    conv["meta"]["brand_id"] = bid
+    conv["meta"]["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    append_message(conv, "user", msg)
+
+    sys_prompt = build_system_prompt(bid, msg)
+    user_prompt = msg
+    if not openai_ready():
+        answer = "Le service IA n'est pas configuré (OPENAI_API_KEY manquante)."
+        append_message(conv, "assistant", answer, extra={"brand_id": bid, "flags": ["openai_missing"]})
+        save_conv(conv)
+        return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": bid, "answer": answer})
+
+    raw_answer = openai_answer(sys_prompt, user_prompt)
+    safe_answer, promised = enforce_no_reservation_promises(raw_answer)
+    safe_answer = add_disclaimer_if_needed(safe_answer, bid, msg)
+    if bid == "retroworld":
+        safe_answer = _append_retroworld_links_if_missing(msg, safe_answer)
+    flags: List[str] = []
+    if promised:
+        flags.append("promesse_resa")
+    append_message(conv, "assistant", safe_answer, extra={"brand_id": bid, "flags": flags})
+    save_conv(conv)
+    return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": bid, "answer": safe_answer})
 
 
 # ------------------ ROUTES ADMIN UI ------------------
@@ -846,6 +912,34 @@ def admin_faq_save():
 @app.route("/static/<path:filename>", methods=["GET"])
 def static_files(filename):
     return send_from_directory(str(STATIC_DIR), filename)
+
+
+@app.route("/robots.txt", methods=["GET"])
+def robots_txt():
+    """Expose robots.txt without triggering noisy 404 logs from bots/crawlers."""
+    path = STATIC_DIR / "robots.txt"
+    if path.exists():
+        return send_from_directory(str(STATIC_DIR), "robots.txt")
+    return make_response("User-agent: *\nAllow: /\n", 200, {"Content-Type": "text/plain; charset=utf-8"})
+
+
+def _http_error_payload(status_code: int) -> str:
+    if status_code == 404:
+        return "not_found"
+    if status_code == 405:
+        return "method_not_allowed"
+    return "http_error"
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(err: HTTPException):
+    """Normalise les erreurs HTTP attendues sans les logger comme crash serveur."""
+    status_code = err.code or 500
+    if request.path.startswith("/admin/api/") or request.path.startswith("/chat"):
+        return jsonify({"ok": False, "error": _http_error_payload(status_code)}), status_code
+    if status_code == 404:
+        return make_response("not found", 404)
+    return make_response(err.description or "http error", status_code)
 
 
 @app.errorhandler(Exception)
