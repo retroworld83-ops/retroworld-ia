@@ -19,3 +19,6 @@ data/conversations/*.json
 .DS_Store
 .vscode/
 .idea/
+
+# Archives
+*.zip
