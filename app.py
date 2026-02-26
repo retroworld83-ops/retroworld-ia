@@ -19,14 +19,19 @@ import importlib.util
 import json
 import os
 import re
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from flask import Flask, jsonify, make_response, redirect, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 from src.data.system_data import SYSTEM_PROMPT
+from src.services.conversation_store import ConversationStore
+from src.services.metrics import RuntimeMetrics
+from src.services.rate_limit import InMemoryRateLimiter
 
 requests = importlib.import_module("requests") if importlib.util.find_spec("requests") else None
 
@@ -66,7 +71,8 @@ def _env_int(key: str, default: int) -> int:
 
 # OpenAI
 OPENAI_API_KEY = _env("OPENAI_API_KEY")
-OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-5.2")
+OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_FALLBACK_MODEL = _env("OPENAI_FALLBACK_MODEL", "gpt-4.1-mini")
 OPENAI_REASONING_EFFORT = _env("OPENAI_REASONING_EFFORT", "none")
 OPENAI_TEMPERATURE = _env_float("OPENAI_TEMPERATURE", 0.3)
 OPENAI_MAX_OUTPUT_TOKENS = _env_int("OPENAI_MAX_OUTPUT_TOKENS", 900)
@@ -94,6 +100,13 @@ DEBUG_LOGS = _env("DEBUG_LOGS").lower() in ("1", "true", "yes", "on")
 SERVER_MODE = _env("SERVER_MODE", "auto").lower()
 LOG_BUFFER_MAX = _env_int("ADMIN_LOG_BUFFER_MAX", 300)
 APP_LOGS = deque(maxlen=max(LOG_BUFFER_MAX, 50))
+CONV_BACKEND = _env("CONV_BACKEND", "json").lower()
+CONV_SQLITE_PATH = Path(_env("CONV_SQLITE_PATH", str(DATA_DIR / "conversations.db")))
+CHAT_RATE_LIMIT_PER_MIN = _env_int("CHAT_RATE_LIMIT_PER_MIN", 40)
+
+CONV_STORE = ConversationStore(CONV_BACKEND, CONV_DIR, CONV_SQLITE_PATH)
+CHAT_RATE_LIMITER = InMemoryRateLimiter(CHAT_RATE_LIMIT_PER_MIN, 60)
+RUNTIME_METRICS = RuntimeMetrics()
 
 
 def _record_log(level: str, message: str, context: Optional[Dict[str, Any]] = None) -> None:
@@ -379,20 +392,37 @@ def openai_ready() -> bool:
     return bool(OPENAI_API_KEY and requests is not None)
 
 
-def openai_answer(system: str, user: str) -> str:
-    """Interroge l’API OpenAI Responses et renvoie le texte de sortie."""
+def build_openai_history(conv: Dict[str, Any], max_items: int = 10) -> List[Dict[str, Any]]:
+    msgs = conv.get("messages") or []
+    out: List[Dict[str, Any]] = []
+    for m in msgs[-max_items:]:
+        role = (m.get("role") or "").strip().lower()
+        if role not in ("user", "assistant"):
+            continue
+        content = (m.get("content") or "").strip()
+        if not content:
+            continue
+        out.append({"role": role, "content": content})
+    return out
+
+
+def openai_answer(system: str, user: str, history: Optional[List[Dict[str, Any]]] = None) -> str:
+    """Interroge OpenAI (Responses puis fallback Chat Completions) et renvoie le texte."""
     if not openai_ready():
         return ""
     headers = {
         "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json",
     }
+    convo_input: List[Dict[str, Any]] = [{"role": "system", "content": [{"type": "text", "text": system}]}]
+    for h in history or []:
+        convo_input.append({"role": h.get("role", "user"), "content": [{"type": "text", "text": h.get("content", "")}]} )
+    if not any((h.get("role") == "user" and h.get("content", "").strip() == user.strip()) for h in (history or [])):
+        convo_input.append({"role": "user", "content": [{"type": "text", "text": user}]})
+
     payload: Dict[str, Any] = {
         "model": OPENAI_MODEL,
-        "input": [
-            {"role": "system", "content": [{"type": "text", "text": system}]},
-            {"role": "user", "content": [{"type": "text", "text": user}]},
-        ],
+        "input": convo_input,
         "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
     }
     # Mode reasoning effort
@@ -405,12 +435,12 @@ def openai_answer(system: str, user: str) -> str:
 
     if normalized_effort in ("", "none"):
         payload["temperature"] = OPENAI_TEMPERATURE
-    # Requête HTTP
-    try:
+    def _perform_responses(payload2: Dict[str, Any]) -> str:
+        started = time.perf_counter()
         resp = requests.post(
             "https://api.openai.com/v1/responses",
             headers=headers,
-            json=payload,
+            json=payload2,
             timeout=30,
         )
         resp.raise_for_status()
@@ -420,8 +450,66 @@ def openai_answer(system: str, user: str) -> str:
             for c in item.get("content", []):
                 if c.get("type") == "output_text":
                     out_texts.append(c.get("text", ""))
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        RUNTIME_METRICS.observe_openai(elapsed_ms, ok=True)
         return "\n".join(out_texts).strip()
+
+    def _perform_chat_completions(model: str) -> str:
+        started = time.perf_counter()
+        msg_payload: List[Dict[str, Any]] = [{"role": "system", "content": system}]
+        for h in history or []:
+            msg_payload.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+        if not any((h.get("role") == "user" and h.get("content", "").strip() == user.strip()) for h in (history or [])):
+            msg_payload.append({"role": "user", "content": user})
+        payload3: Dict[str, Any] = {
+            "model": model,
+            "messages": msg_payload,
+            "max_tokens": OPENAI_MAX_OUTPUT_TOKENS,
+            "temperature": OPENAI_TEMPERATURE,
+        }
+        resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=payload3,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json() or {}
+        content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        RUNTIME_METRICS.observe_openai(elapsed_ms, ok=True)
+        return content
+
+    # Requête HTTP
+    try:
+        return _perform_responses(payload)
+    except requests.exceptions.HTTPError as e:  # type: ignore[attr-defined]
+        status = getattr(getattr(e, "response", None), "status_code", 0)
+        if status != 400:
+            RUNTIME_METRICS.observe_openai(0, ok=False)
+            log_error("OpenAI error", e, {"model": OPENAI_MODEL})
+            return "Désolé, je rencontre un souci technique. Pouvez‑vous réessayer ou contacter l’équipe ?"
+
+        # Retry défensif: retire les champs optionnels et applique un modèle de fallback.
+        retry_payload = {
+            "model": OPENAI_FALLBACK_MODEL or OPENAI_MODEL,
+            "input": payload.get("input", []),
+            "max_output_tokens": payload.get("max_output_tokens", OPENAI_MAX_OUTPUT_TOKENS),
+        }
+        try:
+            log("Retrying OpenAI call after 400", {"from_model": OPENAI_MODEL, "to_model": retry_payload["model"]})
+            return _perform_responses(retry_payload)
+        except Exception as e2:
+            log_error("OpenAI retry error", e2, {"model": retry_payload.get("model", "")})
+            try:
+                log("Falling back to chat.completions", {"model": retry_payload.get("model", "")})
+                return _perform_chat_completions(str(retry_payload.get("model", OPENAI_FALLBACK_MODEL or OPENAI_MODEL)))
+            except Exception as e3:
+                RUNTIME_METRICS.observe_openai(0, ok=False)
+                log_error("OpenAI chat.completions fallback error", e3, {"model": retry_payload.get("model", "")})
+                return "Désolé, je rencontre un souci technique. Pouvez‑vous réessayer ou contacter l’équipe ?"
     except Exception as e:
+        RUNTIME_METRICS.observe_openai(0, ok=False)
         log_error("OpenAI error", e, {"model": OPENAI_MODEL})
         return "Désolé, je rencontre un souci technique. Pouvez‑vous réessayer ou contacter l’équipe ?"
 
@@ -439,20 +527,15 @@ def new_conv_id(prefix: str = "rw") -> str:
 
 
 def load_conv(conv_id: str) -> Dict[str, Any]:
-    p = conv_path(conv_id)
-    if not p.exists():
-        return {"id": conv_id, "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "messages": [], "meta": {}}
     try:
-        return json.loads(p.read_text("utf-8"))
+        return CONV_STORE.load(conv_id)
     except Exception:
         return {"id": conv_id, "created": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "messages": [], "meta": {}}
 
 
 def save_conv(conv: Dict[str, Any]) -> None:
-    p = conv_path(conv.get("id", "unknown"))
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(conv, ensure_ascii=False, indent=2), "utf-8")
+        CONV_STORE.save(conv)
     except Exception as e:
         log_error("save_conv error", e, {"conversation_id": conv.get("id", "unknown")})
 
@@ -467,6 +550,16 @@ def append_message(conv: Dict[str, Any], role: str, content: str, extra: Optiona
             "extra": extra or {},
         }
     )
+
+
+def enforce_chat_rate_limit() -> Optional[Any]:
+    ip = (request.headers.get("X-Forwarded-For") or request.remote_addr or "unknown").split(",", 1)[0].strip()
+    allowed, retry_after = CHAT_RATE_LIMITER.allow(ip)
+    if allowed:
+        RUNTIME_METRICS.observe_chat_request(rate_limited=False)
+        return None
+    RUNTIME_METRICS.observe_chat_request(rate_limited=True)
+    return jsonify({"ok": False, "error": "rate_limited", "retry_after": retry_after}), 429
 
 
 # -----------------------------------------------------------------------------
@@ -579,6 +672,29 @@ def faq_page():
     return redirect(f"/static/chat-widget.html?tab=faq&brand={brand_id}")
 
 
+@app.route("/faq/<brand_id>", methods=["GET"], strict_slashes=False)
+def faq_page_by_brand(brand_id: str):
+    """Alias de compatibilité: FAQ publique via URL segmentée (/faq/<brand>)."""
+    bid = normalize_brand(brand_id)
+    if bid not in FAQ_ENABLED_BRANDS:
+        return make_response("FAQ indisponible pour le moment.", 404)
+    return redirect(f"/static/chat-widget.html?tab=faq&brand={bid}")
+
+
+@app.route("/faq/<brand_id>.json", methods=["GET"], strict_slashes=False)
+def faq_json_by_brand_alias(brand_id: str):
+    """Alias legacy: FAQ JSON directe par marque (/faq/<brand>.json)."""
+    bid = normalize_brand(brand_id)
+    if bid not in FAQ_ENABLED_BRANDS:
+        return jsonify({"brand": bid, "items": [], "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}), 404
+    p = STATIC_DIR / f"faq_{bid}.json"
+    try:
+        data = json.loads(p.read_text("utf-8"))
+    except Exception:
+        data = {"brand": bid, "items": []}
+    return jsonify({"brand": bid, "updated": data.get("updated", datetime.now().strftime("%Y-%m-%d %H:%M:%S")), "items": data.get("items", [])})
+
+
 @app.route("/faq.json", methods=["GET"])
 def faq_json():
     """Renvoie la FAQ publique au format JSON pour une marque."""
@@ -614,13 +730,23 @@ def faq_runningman_alias():
     return send_from_directory(str(STATIC_DIR), "faq_runningman.json")
 
 
+@app.route("/faq_enigmaniac.json", methods=["GET"])
+def faq_enigmaniac_alias():
+    return send_from_directory(str(STATIC_DIR), "faq_enigmaniac.json")
+
+
 # ------------------ CHAT ------------------
 @app.route("/chat", methods=["POST", "OPTIONS"])
 def chat():
     """Endpoint principal pour le chatbot."""
     if request.method == "OPTIONS":
         return ("", 204)
+    limited = enforce_chat_rate_limit()
+    if limited is not None:
+        return limited
     payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        payload = {}
     msg = (payload.get("message") or "").strip()
     if not msg:
         return jsonify({"ok": False, "error": "message manquant"}), 400
@@ -647,7 +773,7 @@ def chat():
         append_message(conv, "assistant", answer, extra={"brand_id": brand_id, "flags": ["openai_missing"]})
         save_conv(conv)
         return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": answer})
-    raw_answer = openai_answer(sys_prompt, user_prompt)
+    raw_answer = openai_answer(sys_prompt, user_prompt, history=build_openai_history(conv, max_items=12))
     safe_answer, promised = enforce_no_reservation_promises(raw_answer)
     safe_answer = add_disclaimer_if_needed(safe_answer, brand_id, msg)
     # Ajout des liens Qweekle pour Retroworld si pertinent
@@ -659,6 +785,58 @@ def chat():
     append_message(conv, "assistant", safe_answer, extra={"brand_id": brand_id, "flags": flags})
     save_conv(conv)
     return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": safe_answer})
+
+
+@app.route("/chat/<brand_id>", methods=["POST", "OPTIONS"], strict_slashes=False)
+def chat_by_brand(brand_id: str):
+    """Alias de compatibilité: endpoint brandé (/chat/<brand>)."""
+    if request.method == "OPTIONS":
+        return ("", 204)
+    limited = enforce_chat_rate_limit()
+    if limited is not None:
+        return limited
+
+    bid = normalize_brand(brand_id)
+    if bid not in BRANDS:
+        return jsonify({"ok": False, "error": "unknown brand"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    payload.setdefault("brand_id", bid)
+
+    msg = (payload.get("message") or "").strip()
+    if not msg:
+        return jsonify({"ok": False, "error": "message manquant"}), 400
+
+    conv_id = (payload.get("conversation_id") or "").strip()
+    if not conv_id:
+        conv_id = new_conv_id(prefix=bid[:2] if bid else "rw")
+    conv = load_conv(conv_id)
+    conv.setdefault("meta", {})
+    conv["meta"]["brand_id"] = bid
+    conv["meta"]["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    append_message(conv, "user", msg)
+
+    sys_prompt = build_system_prompt(bid, msg)
+    user_prompt = msg
+    if not openai_ready():
+        answer = "Le service IA n'est pas configuré (OPENAI_API_KEY manquante)."
+        append_message(conv, "assistant", answer, extra={"brand_id": bid, "flags": ["openai_missing"]})
+        save_conv(conv)
+        return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": bid, "answer": answer})
+
+    raw_answer = openai_answer(sys_prompt, user_prompt, history=build_openai_history(conv, max_items=12))
+    safe_answer, promised = enforce_no_reservation_promises(raw_answer)
+    safe_answer = add_disclaimer_if_needed(safe_answer, bid, msg)
+    if bid == "retroworld":
+        safe_answer = _append_retroworld_links_if_missing(msg, safe_answer)
+    flags: List[str] = []
+    if promised:
+        flags.append("promesse_resa")
+    append_message(conv, "assistant", safe_answer, extra={"brand_id": bid, "flags": flags})
+    save_conv(conv)
+    return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": bid, "answer": safe_answer})
 
 
 # ------------------ ROUTES ADMIN UI ------------------
@@ -714,7 +892,10 @@ def admin_diag():
             "server_mode": SERVER_MODE,
             "running_on_render": _running_on_render(),
             "allowed_origins": ALLOWED_ORIGINS,
-            "conversations_count": len(list(CONV_DIR.glob("*.json"))),
+            "conversations_count": CONV_STORE.count(),
+            "conversation_backend": CONV_BACKEND,
+            "chat_rate_limit_per_min": CHAT_RATE_LIMIT_PER_MIN,
+            "runtime_metrics": RUNTIME_METRICS.snapshot(),
             "faq_files": faq_files,
             "recent_logs": list(APP_LOGS)[-80:],
         }
@@ -726,9 +907,8 @@ def admin_list_conversations():
     if not require_admin_token():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     items: List[Dict[str, Any]] = []
-    for p in sorted(CONV_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
-        conv = json.loads(p.read_text("utf-8")) if p.exists() else {}
-        cid = conv.get("id", p.stem)
+    for conv in CONV_STORE.list_all():
+        cid = conv.get("id", "")
         meta = conv.get("meta") or {}
         brand_id = meta.get("brand_id") or ""
         msgs = conv.get("messages") or []
@@ -765,9 +945,8 @@ def admin_export_csv():
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["conversation_id", "brand_id", "ts", "role", "content", "flags"])
-    for p in sorted(CONV_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
-        conv = json.loads(p.read_text("utf-8")) if p.exists() else {}
-        cid = conv.get("id", p.stem)
+    for conv in CONV_STORE.list_all():
+        cid = conv.get("id", "")
         brand_id = (conv.get("meta") or {}).get("brand_id", "")
         flags = "|".join(compute_flags(conv))
         for m in conv.get("messages") or []:
@@ -846,6 +1025,44 @@ def admin_faq_save():
 @app.route("/static/<path:filename>", methods=["GET"])
 def static_files(filename):
     return send_from_directory(str(STATIC_DIR), filename)
+
+
+@app.route("/robots.txt", methods=["GET"])
+def robots_txt():
+    """Expose robots.txt without triggering noisy 404 logs from bots/crawlers."""
+    path = STATIC_DIR / "robots.txt"
+    if path.exists():
+        return send_from_directory(str(STATIC_DIR), "robots.txt")
+    return make_response("User-agent: *\nAllow: /\n", 200, {"Content-Type": "text/plain; charset=utf-8"})
+
+
+def _http_error_payload(status_code: int) -> str:
+    if status_code == 404:
+        return "not_found"
+    if status_code == 405:
+        return "method_not_allowed"
+    return "http_error"
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(err: HTTPException):
+    """Normalise les erreurs HTTP attendues sans les logger comme crash serveur."""
+    status_code = err.code or 500
+    _record_log(
+        "warning",
+        "HTTP exception",
+        {
+            "path": request.path,
+            "method": request.method,
+            "status": status_code,
+            "error": err.name,
+        },
+    )
+    if request.path.startswith("/admin/api/") or request.path.startswith("/chat"):
+        return jsonify({"ok": False, "error": _http_error_payload(status_code)}), status_code
+    if status_code == 404:
+        return make_response("not found", 404)
+    return make_response(err.description or "http error", status_code)
 
 
 @app.errorhandler(Exception)
