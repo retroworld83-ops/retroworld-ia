@@ -13,6 +13,8 @@ le prompt système et les variables d’environnement pour ajuster son comportem
 
 import csv
 import importlib
+import traceback
+from collections import deque
 import importlib.util
 import json
 import os
@@ -46,12 +48,28 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 def _env(key: str, default: str = "") -> str:
     return (os.getenv(key, default) or "").strip()
 
+
+def _env_float(key: str, default: float) -> float:
+    raw = _env(key, str(default))
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(key: str, default: int) -> int:
+    raw = _env(key, str(default))
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
 # OpenAI
 OPENAI_API_KEY = _env("OPENAI_API_KEY")
 OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-5.2")
 OPENAI_REASONING_EFFORT = _env("OPENAI_REASONING_EFFORT", "none")
-OPENAI_TEMPERATURE = float(_env("OPENAI_TEMPERATURE", "0.3") or 0.0)
-OPENAI_MAX_OUTPUT_TOKENS = int(_env("OPENAI_MAX_OUTPUT_TOKENS", "900"))
+OPENAI_TEMPERATURE = _env_float("OPENAI_TEMPERATURE", 0.3)
+OPENAI_MAX_OUTPUT_TOKENS = _env_int("OPENAI_MAX_OUTPUT_TOKENS", 900)
 
 # Sécurité admin / CORS
 ADMIN_API_TOKEN = _env("ADMIN_API_TOKEN")
@@ -74,6 +92,17 @@ DEBUG_LOGS = _env("DEBUG_LOGS").lower() in ("1", "true", "yes", "on")
 
 # Mode serveur (auto|flask|gunicorn)
 SERVER_MODE = _env("SERVER_MODE", "auto").lower()
+LOG_BUFFER_MAX = _env_int("ADMIN_LOG_BUFFER_MAX", 300)
+APP_LOGS = deque(maxlen=max(LOG_BUFFER_MAX, 50))
+
+
+def _record_log(level: str, message: str, context: Optional[Dict[str, Any]] = None) -> None:
+    APP_LOGS.append({
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "level": level,
+        "message": message,
+        "context": context or {},
+    })
 
 
 def _running_on_render() -> bool:
@@ -155,8 +184,19 @@ for bid in list(BRANDS.keys()):
 
 def log(*args: Any) -> None:
     """Affiche un message si DEBUG_LOGS est activé."""
+    message = " ".join([str(a) for a in args])
+    _record_log("debug", message)
     if DEBUG_LOGS:
         print("[DBG]", *args, flush=True)
+
+
+def log_error(message: str, err: Optional[Exception] = None, context: Optional[Dict[str, Any]] = None) -> None:
+    payload = context.copy() if context else {}
+    if err is not None:
+        payload["error"] = str(err)
+        payload["traceback"] = traceback.format_exc(limit=5)
+    _record_log("error", message, payload)
+    print("[ERR]", message, payload.get("error", ""), flush=True)
 
 
 # -----------------------------------------------------------------------------
@@ -356,9 +396,14 @@ def openai_answer(system: str, user: str) -> str:
         "max_output_tokens": OPENAI_MAX_OUTPUT_TOKENS,
     }
     # Mode reasoning effort
-    if OPENAI_REASONING_EFFORT:
-        payload["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
-    if OPENAI_REASONING_EFFORT == "none":
+    allowed_reasoning_efforts = {"low", "medium", "high"}
+    normalized_effort = (OPENAI_REASONING_EFFORT or "").lower().strip()
+    if normalized_effort in allowed_reasoning_efforts:
+        payload["reasoning"] = {"effort": normalized_effort}
+    elif normalized_effort not in ("", "none"):
+        log(f"Ignoring unsupported OPENAI_REASONING_EFFORT={OPENAI_REASONING_EFFORT!r}")
+
+    if normalized_effort in ("", "none"):
         payload["temperature"] = OPENAI_TEMPERATURE
     # Requête HTTP
     try:
@@ -377,7 +422,7 @@ def openai_answer(system: str, user: str) -> str:
                     out_texts.append(c.get("text", ""))
         return "\n".join(out_texts).strip()
     except Exception as e:
-        log("OpenAI error:", e)
+        log_error("OpenAI error", e, {"model": OPENAI_MODEL})
         return "Désolé, je rencontre un souci technique. Pouvez‑vous réessayer ou contacter l’équipe ?"
 
 
@@ -409,7 +454,7 @@ def save_conv(conv: Dict[str, Any]) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps(conv, ensure_ascii=False, indent=2), "utf-8")
     except Exception as e:
-        log("save_conv error:", e)
+        log_error("save_conv error", e, {"conversation_id": conv.get("id", "unknown")})
 
 
 def append_message(conv: Dict[str, Any], role: str, content: str, extra: Optional[Dict[str, Any]] = None) -> None:
@@ -647,6 +692,17 @@ def require_admin_token() -> bool:
 def admin_diag():
     if not require_admin_token():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
+    faq_files = []
+    for bid in BRANDS.keys():
+        fp = STATIC_DIR / f"faq_{bid}.json"
+        faq_files.append(
+            {
+                "brand_id": bid,
+                "file": str(fp.relative_to(BASE_DIR)),
+                "exists": fp.exists(),
+                "size_bytes": fp.stat().st_size if fp.exists() else 0,
+            }
+        )
     return jsonify(
         {
             "ok": True,
@@ -658,6 +714,9 @@ def admin_diag():
             "server_mode": SERVER_MODE,
             "running_on_render": _running_on_render(),
             "allowed_origins": ALLOWED_ORIGINS,
+            "conversations_count": len(list(CONV_DIR.glob("*.json"))),
+            "faq_files": faq_files,
+            "recent_logs": list(APP_LOGS)[-80:],
         }
     )
 
@@ -776,7 +835,7 @@ def admin_faq_save():
                 json.dumps(kb_out, ensure_ascii=False, indent=2), "utf-8"
             )
     except Exception as e:
-        log("faq_save error:", e)
+        log_error("faq_save error", e, {"brand_id": bid})
         return jsonify({"ok": False, "error": "save failed"}), 500
     return jsonify({"ok": True, "saved": True, "updated": kb_out["updated"], "count": len(cleaned)})
 
@@ -787,6 +846,14 @@ def admin_faq_save():
 @app.route("/static/<path:filename>", methods=["GET"])
 def static_files(filename):
     return send_from_directory(str(STATIC_DIR), filename)
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(err: Exception):
+    log_error("Unhandled server exception", err, {"path": request.path, "method": request.method})
+    if request.path.startswith("/admin/api/") or request.path.startswith("/chat"):
+        return jsonify({"ok": False, "error": "internal_error"}), 500
+    return make_response("internal server error", 500)
 
 
 if __name__ == "__main__":
