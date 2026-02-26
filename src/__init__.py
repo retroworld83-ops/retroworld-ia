@@ -1,1 +1,0 @@
-"""Top‑level package for Pôle Loisirs Draguignan IA."""
