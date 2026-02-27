@@ -1,57 +1,41 @@
 {
   "brand": "retroworld",
-  "updated": "2026-02-23 00:00:00",
+  "updated": "2026-02-27 10:00:00",
   "items": [
-    {
-      "question": "Quels sont vos horaires ?",
-      "answer": "Retroworld est ouvert du mardi au dimanche, de 11h à 22h.",
-      "tags": [
-        "horaires"
-      ]
-    },
-    {
-      "question": "Où se situe Retroworld ?",
-      "answer": "Retroworld France se situe au 815 avenue Pierre Brossolette, 83300 Draguignan.",
-      "tags": [
-        "adresse"
-      ]
-    },
-    {
-      "question": "Quels sont vos tarifs VR ?",
-      "answer": "Jeux VR : 15 € / joueur (jusqu’à 5 joueurs). Escape Game VR : 30 € / joueur.",
-      "tags": [
-        "tarifs",
-        "vr"
-      ]
-    },
-    {
-      "question": "Faites‑vous des anniversaires ?",
-      "answer": "Oui. Selon la formule, les points fidélité ne s’appliquent pas aux anniversaires. Pour organiser un anniversaire, l’équipe vous confirmera les disponibilités.",
-      "tags": [
-        "anniversaire"
-      ]
-    },
-    {
-      "question": "Comment fonctionne la fidélité ?",
-      "answer": "1 partie VR = 1 point, 1 escape game VR = 2 points. 10 points = 1 partie VR offerte. 20 points = 1 escape game VR offert. Pour cumuler/consommer vos points, informez l’équipe avant de jouer et présentez votre QR code.",
-      "tags": [
-        "fidelite"
-      ]
-    },
-    {
-      "question": "Proposez‑vous une salle d’attente ?",
-      "answer": "Oui : canapés, café/thé/chocolat, snacks/boissons, baby‑foot, air hockey et borne de basket. Salle climatisée.",
-      "tags": [
-        "salle_attente"
-      ]
-    },
-    {
-      "question": "Hygiène des casques VR ?",
-      "answer": "Nous utilisons des casques VR professionnels (Vive Pro 2, Meta Quest 3) et tout le matériel est soigneusement nettoyé entre chaque session.",
-      "tags": [
-        "hygiene",
-        "vr"
-      ]
-    }
+    { "question": "Quels sont vos horaires ?", "answer": "Retroworld est ouvert du mardi au dimanche, de 11h à 22h. Fermeture le lundi.", "tags": ["horaires"] },
+    { "question": "Où se situe Retroworld ?", "answer": "Retroworld France se situe au 815 avenue Pierre Brossolette, 83300 Draguignan.", "tags": ["adresse", "draguignan"] },
+    { "question": "Quels sont vos tarifs pour les jeux VR ?", "answer": "La session de jeux VR (arcade/shooter) est à 15 € par joueur.", "tags": ["tarifs", "vr"] },
+    { "question": "Quel est le prix d'un Escape Game VR ?", "answer": "L'expérience Escape Game VR est au tarif unique de 30 € par joueur.", "tags": ["tarifs", "escape_game"] },
+    { "question": "Proposez-vous des formules anniversaire ?", "answer": "Oui, nous avons des formules dédiées incluant sessions de jeu et accès à l'espace détente. Contactez-nous pour un devis personnalisé.", "tags": ["anniversaire"] },
+    { "question": "Les points de fidélité marchent-ils pour les anniversaires ?", "answer": "Non, selon nos conditions, les points fidélité ne s'appliquent pas aux formules anniversaires.", "tags": ["fidelite", "anniversaire"] },
+    { "question": "Comment gagner des points de fidélité ?", "answer": "C'est simple : 1 partie VR = 1 point, et 1 escape game VR = 2 points.", "tags": ["fidelite"] },
+    { "question": "Quelles sont les récompenses fidélité ?", "answer": "10 points = 1 partie VR offerte. 20 points = 1 escape game VR offert.", "tags": ["fidelite", "cadeau"] },
+    { "question": "Dois-je montrer mon QR code pour la fidélité ?", "answer": "Oui, présentez votre QR code à l'équipe avant de jouer pour cumuler ou consommer vos points.", "tags": ["fidelite", "technique"] },
+    { "question": "Quels types de casques utilisez-vous ?", "answer": "Nous utilisons du matériel haut de gamme : HTC Vive Pro 2 et Meta Quest 3 pour une immersion totale.", "tags": ["materiel", "vr"] },
+    { "question": "Comment garantissez-vous l'hygiène ?", "answer": "Tout le matériel (casques, manettes) est désinfecté avec des solutions professionnelles après chaque session.", "tags": ["hygiene", "securite"] },
+    { "question": "Y a-t-il une salle d'attente ?", "answer": "Oui, une salle climatisée avec canapés, baby-foot, air hockey et borne de basket est à votre disposition.", "tags": ["confort", "salle_attente"] },
+    { "question": "Peut-on consommer des boissons sur place ?", "answer": "Oui, nous proposons une sélection de snacks et boissons (café, thé, chocolat, sodas).", "tags": ["snack", "boissons"] },
+    { "question": "Quels Escape Games Ubisoft proposez-vous ?", "answer": "Nous avons les licences cultes : Assassin's Creed (Pyramide Perdue, Méduse) et Prince of Persia (Dagger of Time).", "tags": ["ubisoft", "escape_game"] },
+    { "question": "Avez-vous des jeux d'horreur en VR ?", "answer": "Oui, des titres comme 'House of Fear', 'Sanctum' ou 'Propagation' sont disponibles pour les amateurs de frissons.", "tags": ["horreur", "vr"] },
+    { "question": "Peut-on jouer à plusieurs ?", "answer": "Absolument, la plupart de nos jeux VR et Escape Games se jouent en coopération jusqu'à 4 ou 5 joueurs.", "tags": ["multijoueur"] },
+    { "question": "Proposez-vous des bons cadeaux ?", "answer": "Oui, vous pouvez acheter des bons cadeaux directement sur notre site pour offrir une expérience VR.", "tags": ["cadeau", "boutique"] },
+    { "question": "Est-ce accessible aux débutants ?", "answer": "Oui, nos game masters vous briefent avant chaque session. Aucune expérience préalable n'est requise.", "tags": ["accessibilite"] },
+    { "question": "Y a-t-il un âge minimum ?", "answer": "Nous conseillons un âge minimum de 9-10 ans pour profiter pleinement des casques et des énigmes.", "tags": ["age", "enfants"] },
+    { "question": "Faut-il réserver à l'avance ?", "answer": "La réservation est vivement conseillée via notre site ou par téléphone pour garantir votre créneau.", "tags": ["reservation"] },
+    { "question": "Peut-on organiser des événements d'entreprise (Team Building) ?", "answer": "Oui, nous accueillons les groupes et entreprises. Contactez-nous via la page dédiée pour l'organisation.", "tags": ["entreprise", "team_building"] },
+    { "question": "Avez-vous des jeux pour enfants ?", "answer": "Oui, des titres comme 'Alice au pays des merveilles' ou 'Jungle Quest' sont parfaits pour les plus jeunes.", "tags": ["enfants", "catalogue"] },
+    { "question": "Peut-on porter des lunettes de vue sous le casque ?", "answer": "Oui, nos casques VR sont conçus pour accueillir la plupart des montures de lunettes confortablement.", "tags": ["confort", "lunettes"] },
+    { "question": "Le mal de mer (motion sickness) est-il fréquent ?", "answer": "Nos équipements de pointe et nos réglages limitent énormément cet effet pour une expérience fluide.", "tags": ["sante", "vr"] },
+    { "question": "Puis-je modifier ma réservation ?", "answer": "Veuillez nous contacter au moins 24h à l'avance pour toute modification de créneau horaire.", "tags": ["reservation", "annulation"] },
+    { "question": "Comment créer un compte client ?", "answer": "Vous pouvez vous inscrire directement sur notre site dans la section 'Inscription' ou 'Mon Compte'.", "tags": ["compte"] },
+    { "question": "Peut-on payer par carte bancaire ?", "answer": "Oui, nous acceptons les paiements par carte bancaire, espèces et via notre système de réservation en ligne.", "tags": ["paiement"] },
+    { "question": "Où trouver votre catalogue complet ?", "answer": "Vous pouvez consulter nos catalogues dédiés 'Jeux VR' et 'Escape Game' directement sur le site.", "tags": ["catalogue"] },
+    { "question": "Qu'est-ce que l'expérience 'Cyberpunk' ?", "answer": "C'est un escape game futuriste situé dans une ville technologique où vous devez infiltrer un réseau complexe.", "tags": ["escape_game", "cyberpunk"] },
+    { "question": "Combien de temps dure une session d'Escape Game ?", "answer": "Il faut compter environ 1 heure de jeu, plus 15 minutes pour le briefing et le débriefing.", "tags": ["duree"] },
+    { "question": "Peut-on supprimer ses données personnelles ?", "answer": "Oui, un lien 'Supprimer mon compte' est disponible sur le site pour exercer vos droits RGPD.", "tags": ["rgpd", "compte"] },
+    { "question": "Avez-vous un parking ?", "answer": "Oui, des places de stationnement sont disponibles à proximité de l'avenue Pierre Brossolette.", "tags": ["acces", "parking"] },
+    { "question": "Peut-on jouer en solo ?", "answer": "Certains jeux de notre catalogue VR arcade permettent de jouer seul, mais l'Escape Game est une activité de groupe.", "tags": ["solo", "groupe"] },
+    { "question": "Qu'est-ce que 'Ragnarock' ?", "answer": "C'est un jeu de rythme VR où vous incarnez un Viking sur un drakkar, frappant des tambours au rythme de la musique.", "tags": ["jeux_vr"] },
+    { "question": "Comment contacter le support en cas de problème sur une commande ?", "answer": "Vous pouvez nous joindre via le formulaire de contact ou par téléphone aux horaires d'ouverture.", "tags": ["contact", "support"] }
   ]
 }

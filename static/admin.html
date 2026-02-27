@@ -6,19 +6,19 @@
   <title>Admin Retroworld IA</title>
   <style>
     :root{
-      --bg:#0b0f14;
-      --card:#121824;
-      --card2:#0d131f;
-      --border:#1f2937;
-      --border2:#22324a;
-      --text:#e9eef5;
-      --muted:#9fb1ca;
-      --accent:#3b82f6;
+      --bg:#070b14;
+      --card:#0f172a;
+      --card2:#111c32;
+      --border:#243248;
+      --border2:#2d4466;
+      --text:#eef4ff;
+      --muted:#a9bddf;
+      --accent:#38bdf8;
       --ok:#22c55e;
       --warn:#f59e0b;
       --bad:#ef4444;
-      --chip:#111827;
-      --shadow:0 10px 30px rgba(0,0,0,.35);
+      --chip:#172033;
+      --shadow:0 14px 38px rgba(2,6,23,.45);
       --radius:16px;
       --radius2:12px;
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -28,8 +28,9 @@
     body{
       margin:0;
       font-family:var(--sans);
-      background: radial-gradient(1000px 600px at 20% 0%, rgba(59,130,246,.16), transparent 60%),
-                  radial-gradient(900px 600px at 90% 20%, rgba(245,158,11,.10), transparent 60%),
+      background: radial-gradient(1100px 650px at 10% -5%, rgba(56,189,248,.20), transparent 58%),
+                  radial-gradient(950px 640px at 92% 8%, rgba(244,114,182,.16), transparent 62%),
+                  radial-gradient(1000px 700px at 50% 110%, rgba(45,212,191,.10), transparent 60%),
                   var(--bg);
       color:var(--text);
     }
@@ -37,7 +38,7 @@
     .topbar{
       position:sticky; top:0; z-index:10;
       backdrop-filter: blur(10px);
-      background: rgba(11,15,20,.72);
+      background: rgba(7,11,20,.76);
       border-bottom:1px solid rgba(255,255,255,.06);
     }
     .topbar-inner{
@@ -57,24 +58,24 @@
     .logo{
       width:34px; height:34px;
       border-radius:12px;
-      background: linear-gradient(135deg, #ff0066, #ffcc00);
-      box-shadow: 0 8px 24px rgba(0,0,0,.3);
+      background: linear-gradient(135deg, #38bdf8, #a78bfa 55%, #fb7185);
+      box-shadow: 0 8px 24px rgba(56,189,248,.28);
     }
     .controls{
       display:flex; gap:10px; align-items:center; flex-wrap:wrap;
     }
     .btn{
       border:0;
-      background: var(--accent);
+      background: linear-gradient(135deg, var(--accent), #6366f1);
       color:white;
       padding:10px 12px;
       border-radius:12px;
       cursor:pointer;
       font-weight:700;
-      box-shadow: 0 10px 24px rgba(59,130,246,.22);
+      box-shadow: 0 10px 24px rgba(56,189,248,.28);
     }
     .btn.secondary{
-      background:#1e293b;
+      background:#162338;
       border:1px solid rgba(255,255,255,.08);
       box-shadow:none;
       color:var(--text);
@@ -139,7 +140,7 @@
       padding:11px 12px;
       border-radius:12px;
       border:1px solid rgba(255,255,255,.10);
-      background:#0b1220;
+      background:#0c1629;
       color:var(--text);
       outline:none;
     }
@@ -155,8 +156,8 @@
     }
     .conv:hover{background: rgba(255,255,255,.03)}
     .conv.active{
-      background: rgba(59,130,246,.14);
-      border-bottom:1px solid rgba(59,130,246,.26);
+      background: rgba(56,189,248,.16);
+      border-bottom:1px solid rgba(56,189,248,.32);
     }
     .conv-top{
       display:flex; align-items:center; justify-content:space-between; gap:10px;

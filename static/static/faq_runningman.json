@@ -1,21 +1,41 @@
 {
-  "brand": "runningman",
-  "updated": "2026-02-23 00:00:00",
+  "brand": "running man games",
+  "updated": "2026-02-27 12:00:00",
   "items": [
-    {
-      "question": "Runningman est‑il dans le même bâtiment que Retroworld ?",
-      "answer": "Oui, Runningman Games est dans le même bâtiment. Pour l’action game, les réservations se font directement auprès de Runningman.",
-      "tags": [
-        "localisation",
-        "partenariat"
-      ]
-    },
-    {
-      "question": "Comment contacter Runningman ?",
-      "answer": "Téléphone Runningman : 04 98 09 30 59. Site : https://www.runningmangames.fr",
-      "tags": [
-        "contact"
-      ]
-    }
+    { "question": "C'est quoi exactement Running Man ?", "answer": "Running Man est un Action Game inspiré du concept coréen. C'est un mélange de défis physiques, d'agilité et de réflexion où vous évoluez en équipe dans des décors immersifs.", "tags": ["concept", "action_game"] },
+    { "question": "Où vous situez-vous ?", "answer": "Nous sommes situés au 815 avenue Pierre Brossolette, 83300 Draguignan, dans le même bâtiment que Retroworld.", "tags": ["adresse", "draguignan"] },
+    { "question": "Quels sont vos horaires d'ouverture ?", "answer": "Nous sommes ouverts du lundi au dimanche, de 10h à 22h, uniquement sur réservation.", "tags": ["horaires"] },
+    { "question": "À partir de quel âge peut-on participer ?", "answer": "Nos activités sont accessibles dès 7 ans. Certaines épreuves sont adaptées selon l'âge pour convenir aux enfants comme aux adultes.", "tags": ["age", "accessibilite"] },
+    { "question": "Quels sont les tarifs de la Game Zone ?", "answer": "Le tarif est de 20 € par adulte et 15 € pour les enfants de moins de 12 ans.", "tags": ["tarifs", "game_zone"] },
+    { "question": "Qu'est-ce que la Quiz Room ?", "answer": "C'est un plateau de jeu interactif type 'Qui veut gagner des millions'. Vous affrontez vos amis sur 70 thèmes différents (Disney, Harry Potter, culture G).", "tags": ["quiz", "blindtest"] },
+    { "question": "Quel est le prix de la salle de Quiz ?", "answer": "Le tarif est de 8 € pour 30 min, 15 € pour 1h et 20 € pour 1h30 par joueur.", "tags": ["tarifs", "quiz"] },
+    { "question": "Proposez-vous des Escape Games classiques ?", "answer": "Oui, nous proposons des scénarios comme 'La Loi de la Jungle' ou 'Terreur Nocturne' (plus fun qu'effrayante).", "tags": ["escape_game", "scenarios"] },
+    { "question": "Quels sont les tarifs de l'Escape Game ?", "answer": "Les tarifs varient selon le nombre de joueurs : 25 € par personne pour 3-4 joueurs, et 20 € par personne pour 5-6 joueurs.", "tags": ["tarifs", "escape_game"] },
+    { "question": "Peut-on fêter un anniversaire chez Running Man ?", "answer": "Absolument ! Nous avons des formules spéciales pour les enfants et les adultes incluant des activités et une option goûter.", "tags": ["anniversaire"] },
+    { "question": "Offrez-vous la place pour l'enfant qui fête son anniversaire ?", "answer": "Oui, pour les formules anniversaire, la place de l'enfant de moins de 12 ans qui fête son anniversaire est offerte !", "tags": ["anniversaire", "promo"] },
+    { "question": "En quoi consiste l'option goûter ?", "answer": "Disponible le samedi sur réservation, elle inclut crêpes, gaufres, barbe à papa et boissons à volonté (60 € pour 10 participants).", "tags": ["anniversaire", "goûter"] },
+    { "question": "Faites-vous des Escape Games en extérieur ?", "answer": "Oui, nous proposons une aventure en plein air basée sur la légende de Draguignan, idéale pour les grands groupes dès 10 personnes.", "tags": ["exterieur", "groupe"] },
+    { "question": "Combien de temps dure une session Running Man ?", "answer": "Une session dure généralement 60 minutes, hors temps de briefing et débriefing.", "tags": ["duree"] },
+    { "question": "Quelle tenue est conseillée ?", "answer": "Une tenue de sport et des baskets sont vivement conseillées pour être à l'aise dans les épreuves physiques.", "tags": ["tenue", "confort"] },
+    { "question": "Est-ce qu'il y a de la VR (Réalité Virtuelle) ?", "answer": "Oui, en partenariat avec Retroworld, nous proposons des catalogues de jeux et d'escape games VR (à partir de 15 €).", "tags": ["vr", "activites"] },
+    { "question": "Y a-t-il un système de fidélité ?", "answer": "Oui, vous cumulez des points : 10 points = 1 session Quiz ou Jeu VR offerte, 20 points = 1 Escape Game VR offert.", "tags": ["fidelite", "recompense"] },
+    { "question": "Peut-on venir sans réserver ?", "answer": "Non, il est fortement recommandé de réserver via le site ou par téléphone au 04 98 09 30 59 pour garantir votre créneau.", "tags": ["reservation"] },
+    { "question": "Combien de personnes par équipe ?", "answer": "Nos salles accueillent généralement de 3 à 6 joueurs. Pour les groupes plus larges, nous divisons en plusieurs équipes.", "tags": ["groupe", "equipe"] },
+    { "question": "Organisez-vous des Team Building ?", "answer": "Oui, nous avons des solutions sur mesure pour les entreprises avec des challenges de cohésion d'équipe.", "tags": ["entreprise", "team_building"] },
+    { "question": "Faites-vous des enterrements de vie de célibataire (EVG/EVJF) ?", "answer": "C'est notre spécialité ! Nous proposons des packs adaptés avec plusieurs activités pour une demi-journée de fun.", "tags": ["evg", "evjf"] },
+    { "question": "Est-ce que l'Escape Game 'Terreur Nocturne' fait peur ?", "answer": "Non, elle est conçue pour être immersive et amusante. Elle est accessible aux enfants qui n'ont pas peur des ambiances mystérieuses.", "tags": ["escape_game", "peur"] },
+    { "question": "Avez-vous des événements spéciaux ?", "answer": "Oui, nous organisons des soirées spéciales comme pour Halloween avec des scénarios et tarifs exclusifs.", "tags": ["evenement", "halloween"] },
+    { "question": "Les épreuves sont-elles trop physiques ?", "answer": "Pas d'inquiétude, les épreuves demandent de l'agilité mais ne sont pas insurmontables. L'esprit d'équipe compte plus que les muscles !", "tags": ["physique", "difficulte"] },
+    { "question": "Peut-on payer en plusieurs fois ?", "answer": "Le paiement s'effectue globalement à la réservation en ligne ou sur place le jour J.", "tags": ["paiement"] },
+    { "question": "Est-ce climatisé ?", "answer": "Oui, l'intégralité de nos locaux et des salles de jeu est climatisée pour votre confort.", "tags": ["confort", "clim"] },
+    { "question": "Puis-je modifier le nombre de joueurs au dernier moment ?", "answer": "Oui, tant que vous respectez le minimum/maximum de la salle. Le tarif sera ajusté sur place.", "tags": ["reservation", "joueurs"] },
+    { "question": "Avez-vous des jeux pour les tout-petits ?", "answer": "En dessous de 7 ans, l'accès aux jeux est limité. La Quiz Room peut être adaptée dès 7-8 ans avec des thèmes enfants.", "tags": ["enfants"] },
+    { "question": "Peut-on privatiser le centre ?", "answer": "Oui, la privatisation totale est possible pour les événements d'entreprise ou les grands anniversaires.", "tags": ["privatisation"] },
+    { "question": "Quels thèmes sont disponibles au Blindtest ?", "answer": "Années 80, 90, Disney, Séries TV, Musiques de films, Pop-Rock... Plus de 70 thèmes !", "tags": ["blindtest", "musique"] },
+    { "question": "Y a-t-il un parking ?", "answer": "Oui, un parking est disponible pour nos clients juste devant l'établissement.", "tags": ["acces", "parking"] },
+    { "question": "Puis-je offrir une partie ?", "answer": "Oui, des bons cadeaux sont disponibles pour l'ensemble de nos activités.", "tags": ["cadeau"] },
+    { "question": "Comment vous contacter par email ?", "answer": "Vous pouvez nous écrire à contact@runningmangames.fr pour toute demande spécifique.", "tags": ["contact"] },
+    { "question": "Peut-on annuler une réservation ?", "answer": "Merci de nous prévenir au moins 48h à l'avance pour toute annulation afin d'obtenir un report ou remboursement.", "tags": ["annulation"] },
+    { "question": "Le centre est-il accessible aux PMR ?", "answer": "Certaines activités de la Game Zone peuvent être limitées, mais la Quiz Room et certains Escape Games sont accessibles. Appelez-nous pour plus de précisions.", "tags": ["pmr", "accessibilite"] }
   ]
 }

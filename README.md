@@ -35,13 +35,22 @@ retroworld-ia-final/
 L’application lit ses variables d’environnement pour se configurer. Voici les plus importantes :
 
 - `OPENAI_API_KEY` (obligatoire pour activer l’IA) : clé API OpenAI.
-- `OPENAI_MODEL` (défaut `gpt-5.2`) : modèle à utiliser.
+- `OPENAI_MODEL` (défaut `gpt-4.1-mini`) : modèle principal à utiliser.
+- `OPENAI_FALLBACK_MODEL` (défaut `gpt-4.1-mini`) : modèle de repli utilisé automatiquement en cas d’erreur 400 de l’API OpenAI.
+- `OPENAI_API_MODE` (`auto`, `responses`, `chat_completions`, défaut `auto`) : stratégie d’appel OpenAI. En `auto`, les modèles `gpt-5*` passent d’abord par `chat.completions` pour éviter les erreurs 400 récurrentes du endpoint `responses`.
+- En cas de double échec 400 sur l’endpoint `Responses`, l’application tente automatiquement un dernier repli via `Chat Completions`.
 - `BRAND_ID` (défaut `retroworld`) : marque par défaut si aucune n’est détectée.
 - `ADMIN_API_TOKEN` / `ADMIN_DASHBOARD_TOKEN` : jetons pour sécuriser l’accès aux routes administrateur.
 - `ALLOWED_ORIGINS` : liste séparée par des virgules des origines autorisées pour CORS.
 - `FAQ_ENABLED_BRANDS` (`retroworld,runningman,enigmaniac` par défaut) : marques pour lesquelles la FAQ est publiée.
 - `PUBLIC_BASE_URL` : URL publique du service (affichée dans `/brands.json`).
 - `DEBUG_LOGS` (`true`/`false`) : active l’affichage de logs de debug côté serveur.
+- `CONV_BACKEND` (`json` ou `sqlite`, défaut `json`) : backend de stockage conversations.
+- `CONV_SQLITE_PATH` (défaut `data/conversations.db`) : chemin du fichier SQLite si `CONV_BACKEND=sqlite`.
+- `CHAT_RATE_LIMIT_PER_MIN` (défaut `40`) : limite de requêtes `/chat` par IP et par minute.
+- `LEAD_EMAIL_ENABLED` (`true`/`false`, défaut `false`) : active l’envoi d’email lorsqu’une demande contient des intentions de devis/contact.
+- `LEAD_EMAIL_TO` : email destinataire des leads.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` : configuration SMTP pour l’envoi.
 
 ## Exécution locale
 
@@ -75,6 +84,12 @@ Le fichier `src/data/system_data.py` contient la totalité des descriptions et r
 ## Contributions
 
 Ce projet a été construit à partir des échanges précédents avec un utilisateur. Il vise à fournir un chatbot fiable sans injection de bases de connaissances externes, tout en offrant une gestion simple des conversations et de la FAQ. N’hésitez pas à adapter le code à vos besoins (ajout de scénarios, amélioration de l’interface, etc.).
+
+## Robustesse & exploitation
+
+- Les conversations peuvent être stockées en JSON local (mode simple) ou en SQLite (mode recommandé en production légère mono-instance).
+- Un rate limiting IP est actif sur `/chat` pour limiter les abus et protéger le quota OpenAI.
+- Le diagnostic admin (`/admin/api/diag`) expose des métriques runtime utiles (latence OpenAI moyenne/max, nombre d’appels, volume de requêtes chat, requêtes limitées).
 
 
 ## Déploiement Render (Docker)
