@@ -65,6 +65,10 @@
         <button data-prompt="Je veux reserver">Reserver</button>
         <button data-prompt="Comment vous contacter ?">Contact</button>
       </div>
+      <div class="rw-card" style="margin-top:12px">
+        <h4>Questions frequentes</h4>
+        <div id="rw-home-faq" class="rw-faq-list" style="margin:10px 0 0"></div>
+      </div>
       <div class="rw-note">Le chatbot peut guider, qualifier la demande et orienter vers le bon contact, mais ne confirme jamais lui-meme une reservation.</div>
     </div>
 
@@ -150,6 +154,16 @@
       $('rw-faq-count').textContent = String(filtered.length);
       $('rw-faq-list').innerHTML = filtered.map((item, idx) => `<div class="rw-faq-item" data-idx="${idx}"><strong>${item.question}</strong><div style="margin-top:6px;color:var(--rw-muted);font-size:12px">${(item.tags || []).join(', ')}</div></div>`).join('') || '<div class="rw-note">Aucun resultat.</div>';
       document.querySelectorAll('.rw-faq-item').forEach((node) => node.addEventListener('click', () => { const item = filtered[Number(node.dataset.idx)]; $('rw-faq-answer').textContent = item.answer; }));
+      const homeFaq = filtered.slice(0, 4);
+      $('rw-home-faq').innerHTML = homeFaq.map((item, idx) => `<div class="rw-faq-item" data-home-idx="${idx}"><strong>${item.question}</strong></div>`).join('') || '<div class="rw-note">FAQ indisponible pour le moment.</div>';
+      document.querySelectorAll('[data-home-idx]').forEach((node) => node.addEventListener('click', () => {
+        const item = homeFaq[Number(node.dataset.homeIdx)];
+        $('rw-faq-answer').textContent = item.answer;
+        setTab('faq');
+      }));
+      if (filtered.length && $('rw-faq-answer').textContent === 'Selectionnez une question pour afficher la reponse.') {
+        $('rw-faq-answer').textContent = filtered[0].answer;
+      }
     }
     async function loadFaq(){
       try{
