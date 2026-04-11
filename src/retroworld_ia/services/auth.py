@@ -16,14 +16,17 @@ def bootstrap_admin_user() -> None:
         record_log("warning", "Admin bootstrap skipped: no password configured")
         return
     with get_db() as conn:
-        row = conn.execute("SELECT id FROM admin_users WHERE username = ?", (config.ADMIN_USERNAME,)).fetchone()
-        if row:
-            conn.execute("UPDATE admin_users SET password_hash = ?, updated_at = ? WHERE username = ?", (password_hash, now_str(), config.ADMIN_USERNAME))
-        else:
-            conn.execute(
-                "INSERT INTO admin_users (username, password_hash, created_at, updated_at, is_active) VALUES (?, ?, ?, ?, 1)",
-                (config.ADMIN_USERNAME, password_hash, now_str(), now_str()),
-            )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO admin_users (username, password_hash, created_at, updated_at, is_active)
+            VALUES (?, ?, ?, ?, 1)
+            """,
+            (config.ADMIN_USERNAME, password_hash, now_str(), now_str()),
+        )
+        conn.execute(
+            "UPDATE admin_users SET password_hash = ?, updated_at = ? WHERE username = ?",
+            (password_hash, now_str(), config.ADMIN_USERNAME),
+        )
 
 
 def ensure_csrf_token() -> str:
