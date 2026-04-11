@@ -1,0 +1,136 @@
+{
+  "global": {
+    "identity": "Tu geres l'accueil unifie du Pole Loisirs Draguignan.",
+    "rules": [
+      "Ne rien inventer et signaler clairement les limites d'information.",
+      "Pour les disponibilites et reservations, recueillir les informations utiles puis orienter vers le contact officiel.",
+      "Si le client signale nausee, peur de vomir ou inconfort VR, privilegier les experiences statiques et eviter les experiences intenses.",
+      "Distinguer clairement Retroworld, Runningman et Enigmaniac."
+    ],
+    "routing": [
+      "VR, quiz et experiences digitales: Retroworld.",
+      "Action game, univers enfant et activites physiques: Runningman.",
+      "Escape game en decors reels: Enigmaniac.",
+      "Si le client dit seulement escape game, demander si c'est en VR ou en decor reel."
+    ]
+  },
+  "brands": {
+    "retroworld": {
+      "knowledge_cards": [
+        {
+          "summary": "Carte",
+          "title": "Test"
+        }
+      ],
+      "name": "Retroworld",
+      "short": "Retroworld",
+      "id": "retroworld"
+    },
+    "runningman": {
+      "id": "runningman",
+      "name": "Runningman",
+      "short": "Runningman",
+      "contact_phone": "04 98 09 30 59",
+      "contact_email": "",
+      "website": "https://www.runningmangames.fr",
+      "domains": [
+        "runningmangames.fr",
+        "www.runningmangames.fr"
+      ],
+      "summary": "Activites enfant, action game et evenements de groupe dans le meme batiment que Retroworld.",
+      "highlights": [
+        "Action game",
+        "Activites enfants",
+        "Anniversaires"
+      ],
+      "quick_actions": [
+        {
+          "label": "Action game",
+          "prompt": "Je veux des infos sur l action game Runningman"
+        },
+        {
+          "label": "Anniversaire",
+          "prompt": "Je veux organiser un anniversaire chez Runningman"
+        },
+        {
+          "label": "Contact",
+          "prompt": "Comment contacter Runningman ?"
+        }
+      ],
+      "knowledge_cards": [
+        {
+          "title": "Action game",
+          "summary": "Activite physique et dynamique, plutot groupe et challenge."
+        },
+        {
+          "title": "Enfants",
+          "summary": "Positionnement clair pour anniversaires et sorties familiales."
+        }
+      ],
+      "booking_links": [
+        "https://www.runningmangames.fr"
+      ],
+      "offers": [
+        {
+          "name": "Action game",
+          "category": "Physique",
+          "price": "Selon formule",
+          "details": "Reservation et confirmation directement aupres de Runningman."
+        }
+      ]
+    },
+    "enigmaniac": {
+      "id": "enigmaniac",
+      "name": "Enigmaniac",
+      "short": "Enigmaniac",
+      "contact_phone": "04 94 50 74 63",
+      "contact_email": "",
+      "website": "https://enigmaniac-escapegame.com",
+      "domains": [
+        "enigmaniac-escapegame.com",
+        "www.enigmaniac-escapegame.com"
+      ],
+      "summary": "Escape game en decors reels.",
+      "highlights": [
+        "Salles en decors reels",
+        "Aventures et frissons",
+        "Groupes de 3 a 6 joueurs selon salle"
+      ],
+      "quick_actions": [
+        {
+          "label": "Salles",
+          "prompt": "Quelles salles sont disponibles chez Enigmaniac ?"
+        },
+        {
+          "label": "Tarifs",
+          "prompt": "Quels sont les tarifs Enigmaniac ?"
+        },
+        {
+          "label": "Contact",
+          "prompt": "Comment contacter Enigmaniac ?"
+        }
+      ],
+      "knowledge_cards": [
+        {
+          "title": "Decors reels",
+          "summary": "Positionnement escape game classique, non VR, pour groupes."
+        },
+        {
+          "title": "Frissons",
+          "summary": "Parcours adaptes aux clients qui cherchent une ambiance plus immersive."
+        }
+      ],
+      "booking_links": [
+        "https://enigmaniac-escapegame.com"
+      ],
+      "offers": [
+        {
+          "name": "Escape game decors reels",
+          "category": "Escape game",
+          "price": "15 EUR a 25 EUR / personne selon taille du groupe",
+          "details": "La Loi de la Jungle et Terreur Nocturne."
+        }
+      ]
+    }
+  }
+}

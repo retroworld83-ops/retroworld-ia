@@ -5,814 +5,280 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Admin Retroworld IA</title>
   <style>
-    :root{
-      --bg:#070b14;
-      --card:#0f172a;
-      --card2:#111c32;
-      --border:#243248;
-      --border2:#2d4466;
-      --text:#eef4ff;
-      --muted:#a9bddf;
-      --accent:#38bdf8;
-      --ok:#22c55e;
-      --warn:#f59e0b;
-      --bad:#ef4444;
-      --chip:#172033;
-      --shadow:0 14px 38px rgba(2,6,23,.45);
-      --radius:16px;
-      --radius2:12px;
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: system-ui, -apple-system, Segoe UI, Roboto, Arial;
-    }
-    *{box-sizing:border-box}
-    body{
-      margin:0;
-      font-family:var(--sans);
-      background: radial-gradient(1100px 650px at 10% -5%, rgba(56,189,248,.20), transparent 58%),
-                  radial-gradient(950px 640px at 92% 8%, rgba(244,114,182,.16), transparent 62%),
-                  radial-gradient(1000px 700px at 50% 110%, rgba(45,212,191,.10), transparent 60%),
-                  var(--bg);
-      color:var(--text);
-    }
-    a{color:inherit}
-    .topbar{
-      position:sticky; top:0; z-index:10;
-      backdrop-filter: blur(10px);
-      background: rgba(7,11,20,.76);
-      border-bottom:1px solid rgba(255,255,255,.06);
-    }
-    .topbar-inner{
-      max-width:1200px;
-      margin:0 auto;
-      padding:14px 16px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-    }
-    .brand{
-      display:flex; align-items:center; gap:10px;
-      font-weight:800;
-      letter-spacing:.2px;
-    }
-    .logo{
-      width:34px; height:34px;
-      border-radius:12px;
-      background: linear-gradient(135deg, #38bdf8, #a78bfa 55%, #fb7185);
-      box-shadow: 0 8px 24px rgba(56,189,248,.28);
-    }
-    .controls{
-      display:flex; gap:10px; align-items:center; flex-wrap:wrap;
-    }
-    .btn{
-      border:0;
-      background: linear-gradient(135deg, var(--accent), #6366f1);
-      color:white;
-      padding:10px 12px;
-      border-radius:12px;
-      cursor:pointer;
-      font-weight:700;
-      box-shadow: 0 10px 24px rgba(56,189,248,.28);
-    }
-    .btn.secondary{
-      background:#162338;
-      border:1px solid rgba(255,255,255,.08);
-      box-shadow:none;
-      color:var(--text);
-    }
-    .btn.ghost{
-      background: transparent;
-      border:1px solid rgba(255,255,255,.12);
-      box-shadow:none;
-      color:var(--text);
-    }
-    .btn:disabled{opacity:.6; cursor:not-allowed}
-    .pill{
-      display:inline-flex; align-items:center; gap:8px;
-      padding:8px 10px;
-      border-radius:999px;
-      background: rgba(255,255,255,.06);
-      border:1px solid rgba(255,255,255,.08);
-      font-size:12px;
-      color: var(--muted);
-      white-space:nowrap;
-    }
-    .pill strong{color:var(--text); font-weight:800}
-    .wrap{
-      max-width:1200px;
-      margin:0 auto;
-      padding:16px;
-    }
-    .grid{
-      display:grid;
-      grid-template-columns: 360px 1fr;
-      gap:14px;
-    }
-    @media (max-width: 980px){
-      .grid{grid-template-columns: 1fr}
-    }
-    .card{
-      background: rgba(18,24,36,.9);
-      border:1px solid rgba(255,255,255,.06);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      overflow:hidden;
-    }
-    .card-header{
-      padding:12px 14px;
-      border-bottom:1px solid rgba(255,255,255,.06);
-      display:flex; align-items:center; justify-content:space-between; gap:10px;
-    }
-    .card-title{
-      font-weight:900;
-      font-size:13px;
-      letter-spacing:.3px;
-      text-transform:uppercase;
-      color: var(--muted);
-    }
-    .search{
-      display:flex; gap:10px; padding:12px 14px; align-items:center;
-      border-bottom:1px solid rgba(255,255,255,.06);
-      background: rgba(13,19,31,.35);
-    }
-    .search input{
-      width:100%;
-      padding:11px 12px;
-      border-radius:12px;
-      border:1px solid rgba(255,255,255,.10);
-      background:#0c1629;
-      color:var(--text);
-      outline:none;
-    }
-    .list{
-      max-height: calc(100vh - 210px);
-      overflow:auto;
-    }
-    .conv{
-      padding:12px 14px;
-      border-bottom:1px solid rgba(255,255,255,.06);
-      cursor:pointer;
-      transition: background .15s ease;
-    }
-    .conv:hover{background: rgba(255,255,255,.03)}
-    .conv.active{
-      background: rgba(56,189,248,.16);
-      border-bottom:1px solid rgba(56,189,248,.32);
-    }
-    .conv-top{
-      display:flex; align-items:center; justify-content:space-between; gap:10px;
-      margin-bottom:6px;
-    }
-    .conv-id{
-      font-family: var(--mono);
-      font-size:11px;
-      color: var(--muted);
-    }
-    .chip{
-      display:inline-flex; align-items:center; gap:6px;
-      padding:4px 8px;
-      font-size:11px;
-      border-radius:999px;
-      background: rgba(255,255,255,.06);
-      border:1px solid rgba(255,255,255,.08);
-      color: var(--muted);
-      white-space:nowrap;
-    }
-    .chip.retroworld{color:#dbeafe; border-color: rgba(59,130,246,.35); background: rgba(59,130,246,.12)}
-    .chip.runningman{color:#fde68a; border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.12)}
-    .chip.enigmaniac{color:#f5d0fe; border-color: rgba(192,132,252,.35); background: rgba(192,132,252,.12)}
-    .preview{
-      color: var(--text);
-      opacity:.92;
-      font-size:12px;
-      line-height:1.25;
-      display:-webkit-box;
-      -webkit-line-clamp:2;
-      -webkit-box-orient: vertical;
-      overflow:hidden;
-    }
-    .meta{
-      margin-top:8px;
-      display:flex;
-      flex-wrap:wrap;
-      gap:8px;
-      align-items:center;
-      color: var(--muted);
-      font-size:11px;
-    }
-    .meta code{
-      font-family: var(--mono);
-      background: rgba(255,255,255,.06);
-      border:1px solid rgba(255,255,255,.08);
-      padding:2px 6px;
-      border-radius:8px;
-      color: var(--text);
-    }
-
-    .pane{
-      display:flex;
-      flex-direction:column;
-      min-height: 520px;
-    }
-    .pane-body{
-      padding:14px;
-      display:flex;
-      flex-direction:column;
-      gap:12px;
-    }
-    .empty{
-      border:1px dashed rgba(255,255,255,.14);
-      border-radius: var(--radius);
-      padding:18px;
-      color: var(--muted);
-      background: rgba(13,19,31,.35);
-    }
-    .thread{
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-      max-height: calc(100vh - 240px);
-      overflow:auto;
-      padding-right:2px;
-    }
-    .msg{
-      max-width: 88%;
-      padding:10px 12px;
-      border-radius: 14px;
-      line-height: 1.35;
-      font-size: 13px;
-      border: 1px solid rgba(255,255,255,.08);
-      background: rgba(17,24,39,.55);
-      white-space: pre-wrap;
-      word-wrap: break-word;
-    }
-    .msg.user{
-      margin-left:auto;
-      background: rgba(30,41,59,.75);
-      border-color: rgba(148,163,184,.18);
-    }
-    .msg.assistant{
-      margin-right:auto;
-      background: rgba(13,19,31,.55);
-      border-color: rgba(34,50,74,.32);
-    }
-    .msg-footer{
-      margin-top:6px;
-      font-size:10px;
-      color: var(--muted);
-      display:flex;
-      gap:10px;
-      align-items:center;
-      justify-content:space-between;
-    }
-    .msg-footer .role{
-      font-family: var(--mono);
-      opacity:.9;
-    }
-    .msg-footer .ts{
-      font-family: var(--mono);
-      opacity:.7;
-    }
-    .toolbar{
-      display:flex; gap:10px; flex-wrap:wrap; align-items:center;
-      padding:12px 14px;
-      border-top: 1px solid rgba(255,255,255,.06);
-      background: rgba(13,19,31,.35);
-    }
-    .field{
-      display:flex; gap:8px; align-items:center;
-      padding:8px 10px;
-      border-radius:12px;
-      border:1px solid rgba(255,255,255,.10);
-      background:#0b1220;
-      color:var(--text);
-    }
-    .field input{
-      border:0; outline:none;
-      background:transparent;
-      color:var(--text);
-      min-width: 220px;
-      font-family: var(--mono);
-      font-size:12px;
-    }
-    .toast{
-      position: fixed;
-      right: 16px;
-      bottom: 16px;
-      padding: 10px 12px;
-      border-radius: 12px;
-      background: rgba(17,24,39,.92);
-      border:1px solid rgba(255,255,255,.10);
-      color: var(--text);
-      box-shadow: var(--shadow);
-      display:none;
-      max-width: 420px;
-      font-size: 12px;
-    }
-    .toast.show{display:block}
-    .kbd{
-      font-family: var(--mono);
-      font-size:11px;
-      padding:2px 6px;
-      border-radius:8px;
-      border:1px solid rgba(255,255,255,.10);
-      background: rgba(255,255,255,.06);
-      color: var(--text);
-    }
-    .diag-panel{
-      border:1px solid rgba(255,255,255,.10);
-      border-radius:12px;
-      background:rgba(11,18,32,.55);
-      padding:10px;
-      display:none;
-    }
-    .diag-panel.show{display:block}
-    .diag-actions{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:8px}
-    .diag-title{font-size:12px;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.3px}
-    .diag-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:8px}
-    @media (max-width:860px){.diag-grid{grid-template-columns:1fr}}
-    .diag-kpi{border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:8px;background:rgba(2,6,23,.45)}
-    .diag-kpi .k{font-size:11px;color:var(--muted)}
-    .diag-kpi .v{font-size:13px;font-weight:800;color:#e2e8f0;margin-top:2px;word-break:break-word}
-    .diag-list{margin:8px 0 0;padding-left:18px;color:#cbd5e1;font-size:12px;line-height:1.4;max-height:130px;overflow:auto}
-    .diag-log-list{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;margin-top:8px}
-    .diag-log-item{border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:8px;background:rgba(2,6,23,.45)}
-    .diag-log-head{display:flex;justify-content:space-between;gap:8px;font-family:var(--mono);font-size:11px;color:#93c5fd}
-    .diag-log-msg{margin-top:5px;color:#e2e8f0;font-size:12px;line-height:1.35}
-    .diag-log-ctx{margin-top:5px;white-space:pre-wrap;font-family:var(--mono);font-size:10px;color:#94a3b8;background:rgba(15,23,42,.7);border-radius:8px;padding:6px}
-    .diag-pill{display:inline-block;border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:2px 8px;font-size:10px;font-weight:800}
-    .diag-pill.ok{border-color:rgba(34,197,94,.5);color:#86efac}
-    .diag-pill.warn{border-color:rgba(245,158,11,.5);color:#fcd34d}
-    .diag-pill.bad{border-color:rgba(239,68,68,.5);color:#fca5a5}
-
-    .small{
-      font-size:12px;
-      color: var(--muted);
-      line-height:1.25;
-    }
+    :root{--bg:#08111f;--panel:#111b2d;--panel2:#0c1524;--line:#23314a;--text:#eff4ff;--muted:#94a5c2;--accent:#38bdf8;--accent2:#22c55e;--warn:#f59e0b;--bad:#ef4444;--radius:16px}
+    *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:radial-gradient(circle at top left,rgba(56,189,248,.12),transparent 26%),radial-gradient(circle at top right,rgba(34,197,94,.1),transparent 22%),var(--bg);color:var(--text)}
+    .top{position:sticky;top:0;z-index:9;background:rgba(8,17,31,.92);backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,.06)}
+    .top-inner,.wrap{max-width:1320px;margin:0 auto;padding:16px}
+    .top-inner{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
+    .brand{font-weight:900}.muted{color:var(--muted);font-size:13px}
+    .actions{display:flex;gap:10px;flex-wrap:wrap}
+    button,a.btn,select,input{font:inherit}
+    button,a.btn{border:0;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none}
+    .primary{background:linear-gradient(135deg,var(--accent),#6366f1);color:#08111f}
+    .secondary{background:var(--panel);color:var(--text);border:1px solid rgba(255,255,255,.08)}
+    .wrap{display:grid;grid-template-columns:340px 1fr;gap:14px}
+    @media (max-width:1080px){.wrap{grid-template-columns:1fr}}
+    .stack{display:grid;gap:14px}
+    .card{background:rgba(17,27,45,.94);border:1px solid rgba(255,255,255,.06);border-radius:var(--radius);overflow:hidden}
+    .card-h{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+    .title{font-size:13px;text-transform:uppercase;color:var(--muted);font-weight:900}
+    .search{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;gap:10px;flex-wrap:wrap}
+    .search input,.search select{background:var(--panel2);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:11px 12px}
+    .search input{flex:1;min-width:180px}
+    .list{max-height:calc(100vh - 240px);overflow:auto}
+    .item{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer}
+    .item:hover,.item.active{background:rgba(56,189,248,.08)}
+    .row{display:flex;justify-content:space-between;gap:10px;align-items:center}
+    .badge{display:inline-flex;gap:6px;align-items:center;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);font-size:11px;color:var(--muted)}
+    .thread{padding:16px;display:flex;flex-direction:column;gap:12px;max-height:460px;overflow:auto}
+    .msg{max-width:88%;padding:12px 14px;border-radius:14px;line-height:1.45;white-space:pre-wrap;border:1px solid rgba(255,255,255,.08);background:rgba(6,11,20,.45)}
+    .msg.user{margin-left:auto;background:rgba(56,189,248,.12)}
+    .msg-foot{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:11px;color:var(--muted)}
+    .empty{padding:22px;color:var(--muted)}
+    .pane-toolbar{padding:14px 16px;border-top:1px solid rgba(255,255,255,.06);display:flex;gap:10px;flex-wrap:wrap}
+    .kpis{padding:16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    @media (max-width:1080px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    .kpi{padding:14px;border-radius:14px;background:rgba(6,11,20,.45);border:1px solid rgba(255,255,255,.06)}
+    .kpi .label{font-size:12px;color:var(--muted)} .kpi .value{font-size:28px;font-weight:900;margin-top:6px}
+    .split{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 16px 16px}
+    @media (max-width:1080px){.split{grid-template-columns:1fr}}
+    .subcard{background:rgba(6,11,20,.45);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px}
+    .mini{font-size:12px;color:var(--muted)}
+    .lead-list{display:grid;gap:10px}
+    .lead{padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)}
+    .hot{color:#86efac}.warm{color:#fde68a}.cold{color:#93c5fd}
+    pre{margin:0;white-space:pre-wrap;font-family:Consolas,monospace;font-size:11px;color:#cdd9f0}
   </style>
 </head>
-
 <body>
-  <div class="topbar">
-    <div class="topbar-inner">
-      <div class="brand">
-        <div class="logo" aria-hidden="true"></div>
-        <div>
-          <div style="font-size:14px; font-weight:900;">Admin Retroworld IA</div>
-          <div class="small">Conversations en 1 seul fil (format v2)</div>
-        </div>
+  <div class="top">
+    <div class="top-inner">
+      <div>
+        <div class="brand">Admin Retroworld IA</div>
+        <div class="muted" id="sessionMeta">Chargement de session...</div>
       </div>
-
-      <div class="controls">
-        <span class="pill" id="pillStatus">Statut: <strong id="statusText">…</strong></span>
-        <span class="pill">Serveur: <strong id="originText"></strong></span>
-        <a class="btn secondary" href="/admin/faq" title="Gérer la FAQ">FAQ</a>
-        <button class="btn secondary" id="btnDiag">Diag</button>
-        <button class="btn secondary" id="btnExport">Export CSV</button>
-        <button class="btn" id="btnRefresh">Rafraîchir</button>
+      <div class="actions">
+        <a class="btn secondary" href="/admin/faq">FAQ</a>
+        <a class="btn secondary" href="/admin/knowledge">Base metier</a>
+        <button class="secondary" id="btnExport">Export CSV</button>
+        <button class="secondary" id="btnLogout">Deconnexion</button>
+        <button class="primary" id="btnRefresh">Rafraichir</button>
       </div>
     </div>
   </div>
 
   <div class="wrap">
-    <div class="grid">
-      <!-- LEFT: conversations list -->
+    <div class="card">
+      <div class="card-h"><div class="title">Conversations</div><div class="badge" id="countBadge">0</div></div>
+      <div class="search">
+        <input id="searchInput" placeholder="Recherche par id, marque, flags, preview..." />
+        <select id="flagFilter">
+          <option value="all">Tous les flags</option>
+          <option value="a_valider">A valider</option>
+          <option value="devis">Devis</option>
+          <option value="reservation">Reservation</option>
+          <option value="reclamation">Reclamation</option>
+          <option value="croise">Croise</option>
+          <option value="promesse_resa">Promesse resa</option>
+        </select>
+      </div>
+      <div class="list" id="conversationList"></div>
+    </div>
+
+    <div class="stack">
       <div class="card">
-        <div class="card-header">
-          <div class="card-title">Conversations</div>
-          <span class="chip" id="countChip">0</span>
+        <div class="card-h">
+          <div class="title">Dashboard</div>
+          <div class="badge" id="diagBadge">Analytics</div>
         </div>
-
-        <div class="search">
-          <input id="searchInput" placeholder="Rechercher (id, user_id, preview, flags)…" />
-          <select id="flagSel" style="padding:11px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.10); background:#0b1220; color:var(--text); outline:none;">
-            <option value="all">Tous</option>
-            <option value="a_valider">À valider</option>
-            <option value="devis">Devis</option>
-            <option value="reservation">Réservation</option>
-            <option value="reclamation">Réclamation</option>
-            <option value="croise">Croisé</option>
-            <option value="promesse_resa">Promesse résa</option>
-            <option value="a_relire">À relire</option>
-          </select>
-          <button class="btn ghost" id="btnClear">Effacer</button>
+        <div class="kpis" id="kpis"></div>
+        <div class="split">
+          <div class="subcard">
+            <div class="title">Par marque</div>
+            <pre id="brandsStats">-</pre>
+          </div>
+          <div class="subcard">
+            <div class="title">Par flag</div>
+            <pre id="flagsStats">-</pre>
+          </div>
+          <div class="subcard">
+            <div class="title">Leads recents</div>
+            <div class="lead-list" id="leadList"></div>
+          </div>
+          <div class="subcard">
+            <div class="title">Logs recents</div>
+            <pre id="recentLogs">-</pre>
+          </div>
+          <div class="subcard">
+            <div class="title">Utilisateurs admin</div>
+            <div class="lead-list" id="userList"></div>
+            <div style="display:grid;gap:8px;margin-top:12px">
+              <input id="newUserName" placeholder="Nouvel utilisateur" style="background:var(--panel2);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 12px" />
+              <input id="newUserPassword" type="password" placeholder="Mot de passe" style="background:var(--panel2);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 12px" />
+              <button class="primary" id="btnCreateUser">Creer l'utilisateur</button>
+            </div>
+          </div>
         </div>
-
-        <div class="list" id="convList"></div>
       </div>
 
-      <!-- RIGHT: thread -->
-      <div class="card pane">
-        <div class="card-header">
-          <div class="card-title">Fil complet</div>
-          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <span class="chip" id="brandChip">brand: —</span>
-            <span class="chip" id="userChip">user_id: —</span>
-          </div>
+      <div class="card">
+        <div class="card-h">
+          <div class="title">Conversation</div>
+          <div class="badge" id="activeMeta">Aucune selection</div>
         </div>
-
-        <div class="pane-body">
-          <div class="empty" id="emptyState">
-            Sélectionnez une conversation à gauche.
-            <div style="margin-top:10px" class="small">
-              Astuce: si le token admin n’est pas en URL, vous pouvez le mettre via le champ en bas, puis <span class="kbd">Rafraîchir</span>.
-            </div>
-          </div>
-
-          <div class="diag-panel" id="diagPanel">
-            <div class="diag-actions">
-              <div class="diag-title">Diagnostic serveur & journaux d'erreurs</div>
-              <button class="btn ghost" id="btnCopyDiag">Copier diag</button>
-            </div>
-
-            <div class="diag-grid" id="diagGrid">
-              <div class="diag-kpi"><div class="k">État OpenAI</div><div class="v" id="diagOpenai">—</div></div>
-              <div class="diag-kpi"><div class="k">Mode serveur</div><div class="v" id="diagMode">—</div></div>
-              <div class="diag-kpi"><div class="k">Conversations</div><div class="v" id="diagConversations">—</div></div>
-              <div class="diag-kpi"><div class="k">Origines autorisées</div><div class="v" id="diagOrigins">—</div></div>
-            </div>
-
-            <div class="diag-kpi" style="margin-bottom:8px;">
-              <div class="k">FAQ détectées</div>
-              <ul class="diag-list" id="diagFaqList"><li>Aucune donnée.</li></ul>
-            </div>
-
-            <div class="diag-kpi">
-              <div class="k">Logs récents</div>
-              <div class="diag-log-list" id="diagLogs"><div class="diag-log-item">Aucun log chargé.</div></div>
-            </div>
-          </div>
-
-          <div class="thread" id="thread" style="display:none;"></div>
-        </div>
-
-        <div class="toolbar">
-          <div class="field" title="Token admin (X-Admin-Token / ?token=...)">
-            <span style="opacity:.8;">🔑</span>
-            <input id="tokenInput" placeholder="ADMIN_DASHBOARD_TOKEN (optionnel si déjà en URL)" />
-          </div>
-
-          <button class="btn secondary" id="btnCopyId">Copier conv_id</button>
-          <button class="btn secondary" id="btnCopyJson">Copier JSON</button>
-          <button class="btn" id="btnReload">Recharger la conversation</button>
+        <div class="thread" id="thread"></div>
+        <div class="empty" id="emptyState">Selectionnez une conversation a gauche.</div>
+        <div class="pane-toolbar">
+          <button class="secondary" id="btnCopyId">Copier id</button>
+          <button class="secondary" id="btnCopyJson">Copier JSON</button>
+          <button class="primary" id="btnReloadOne">Recharger la conversation</button>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="toast" id="toast"></div>
-
   <script>
     const $ = (id) => document.getElementById(id);
+    const state = { csrfToken: "", username: "", conversations: [], filtered: [], activeId: "", activeConversation: null };
 
-    const state = {
-      adminToken: "",
-      conversations: [],
-      filtered: [],
-      activeId: "",
-      activeObj: null,
-      activeMessages: [],
-      flagFilter: "all",
-      diagText: "",
-    };
-
-    function toast(msg){
-      const t = $("toast");
-      t.textContent = msg;
-      t.classList.add("show");
-      setTimeout(() => t.classList.remove("show"), 2200);
-    }
-
-    function qs(name){
-      return new URL(location.href).searchParams.get(name);
-    }
-
-    function setQs(name, value){
-      const u = new URL(location.href);
-      if(value) u.searchParams.set(name, value);
-      else u.searchParams.delete(name);
-      history.replaceState({}, "", u.toString());
-    }
-
-    function escapeHtml(str){
-      return String(str)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    function fmtTs(ts){
-      if(!ts) return "—";
-      return String(ts);
-    }
-
-    function brandChipClass(brand){
-      const b = String(brand||"").toLowerCase();
-      if(b === "runningman") return "chip runningman";
-      if(b === "enigmaniac") return "chip enigmaniac";
-      if(b === "retroworld") return "chip retroworld";
-      return "chip";
-    }
-
-    function flagsHtml(flags){
-      if(!Array.isArray(flags) || !flags.length) return "";
-      return flags.map(f=>`<span class="chip">${escapeHtml(String(f))}</span>`).join(" ");
-    }
-
-    async function apiGet(path){
-      const token = (state.adminToken || "").trim();
-      const url = new URL(location.origin + path);
-      if(token) url.searchParams.set("token", token);
-      const headers = token ? {"X-Admin-Token": token} : {};
-      const res = await fetch(url.toString(), {headers});
-      let data = null;
-      try { data = await res.json(); } catch(e){}
-      if(!res.ok || (data && data.ok === false)){
-        const msg = (data && (data.error || data.message)) || `HTTP ${res.status}`;
-        throw new Error(msg);
-      }
+    async function api(path, options = {}) {
+      const headers = Object.assign({}, options.headers || {});
+      if (state.csrfToken && ["POST", "PUT", "DELETE"].includes((options.method || "GET").toUpperCase())) headers["X-CSRF-Token"] = state.csrfToken;
+      const response = await fetch(path, Object.assign({ credentials: "same-origin" }, options, { headers }));
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error((data && (data.error || data.message)) || ("HTTP " + response.status));
       return data;
     }
 
-    function applyFilter(){
-      const q = ($("searchInput").value || "").trim().toLowerCase();
-      const wantedFlag = state.flagFilter;
-      state.filtered = state.conversations.filter(c => {
-        const id = String(c.id || "").toLowerCase();
-        const brand = String(c.brand_id || "").toLowerCase();
-        const flags = Array.isArray(c.flags) ? c.flags.map(f=>String(f).toLowerCase()) : [];
-        const hay = [id, brand, flags.join(" ")].join(" ");
-        const textMatch = !q || hay.includes(q);
-        const flagMatch = (wantedFlag === "all") || flags.includes(wantedFlag);
-        return textMatch && flagMatch;
+    function escapeHtml(value) {
+      return String(value || "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+    }
+
+    function applyFilters() {
+      const query = ($("searchInput").value || "").trim().toLowerCase();
+      const flag = $("flagFilter").value;
+      state.filtered = state.conversations.filter((item) => {
+        const hay = [item.id, item.brand_id, item.preview, (item.flags || []).join(" ")].join(" ").toLowerCase();
+        return (!query || hay.includes(query)) && (flag === "all" || (item.flags || []).includes(flag));
       });
     }
 
-    function renderList(){
-      const list = $("convList");
+    function renderConversationList() {
+      const list = $("conversationList");
       list.innerHTML = "";
-      if(!state.filtered.length){
-        list.innerHTML = `<div class="conv"><div class="preview">Aucune conversation.</div></div>`;
-        $("countChip").textContent = "0";
+      $("countBadge").textContent = String(state.filtered.length);
+      if (!state.filtered.length) {
+        list.innerHTML = '<div class="empty">Aucune conversation.</div>';
         return;
       }
-
-      for(const c of state.filtered){
-        const div = document.createElement("div");
-        div.className = "conv" + (c.id === state.activeId ? " active" : "");
-        const brand = c.brand_id || "—";
-        div.innerHTML = `
-          <div class="conv-top">
-            <div class="conv-id">${escapeHtml(c.id || "")}</div>
-            <span class="${brandChipClass(brand)}">${escapeHtml(brand)}</span>
+      state.filtered.forEach((item) => {
+        const node = document.createElement("div");
+        node.className = "item" + (item.id === state.activeId ? " active" : "");
+        node.innerHTML = `
+          <div class="row">
+            <div><div>${escapeHtml(item.id)}</div><div class="mini">${escapeHtml(item.brand_id || "-")}</div></div>
+            <div class="badge">${escapeHtml((item.flags || []).join(", ") || "aucun flag")}</div>
           </div>
-          <div class="preview">Dernière activité: ${escapeHtml(fmtTs(c.last || c.created))}</div>
-          <div class="meta">
-            <span class="chip">msgs <code>${escapeHtml(c.count || 0)}</code></span>
-            ${flagsHtml(c.flags)}
-          </div>
+          <div class="mini" style="margin-top:8px">${escapeHtml(item.preview || "Pas encore de message")}</div>
+          <div class="mini" style="margin-top:8px">${escapeHtml(item.last || item.created || "")}</div>
         `;
-        div.addEventListener("click", async ()=>{
-          state.activeId = c.id;
-          renderList();
-          await loadConversationDetail(c.id);
+        node.addEventListener("click", async () => {
+          state.activeId = item.id;
+          renderConversationList();
+          await loadConversation(item.id);
         });
-        list.appendChild(div);
-      }
-      $("countChip").textContent = String(state.filtered.length);
+        list.appendChild(node);
+      });
     }
 
-    function renderThread(){
+    function renderThread() {
       const thread = $("thread");
       const empty = $("emptyState");
-      if(!state.activeId){
+      thread.innerHTML = "";
+      if (!state.activeConversation) {
         empty.style.display = "block";
-        thread.style.display = "none";
         return;
       }
       empty.style.display = "none";
-      thread.style.display = "block";
-      thread.innerHTML = "";
-
-      const conv = state.activeObj || {};
-      const meta = conv.meta || {};
-      const brand = meta.brand_id || "—";
-      $("brandChip").className = brandChipClass(brand);
-      $("brandChip").textContent = "brand: " + brand;
-      $("userChip").textContent = "user_id: " + (meta.user_id || "—");
-
-      if(!state.activeMessages.length){
-        thread.innerHTML = `<div class="empty">Conversation vide.</div>`;
-        return;
-      }
-
-      for(const m of state.activeMessages){
-        const role = String(m.role || "assistant");
-        const wrap = document.createElement("div");
-        wrap.className = "msg " + (role === "user" ? "user" : "assistant");
-        wrap.innerHTML = `
-          <div>${escapeHtml(String(m.content || ""))}</div>
-          <div class="msg-footer">
-            <span class="role">${escapeHtml(role)}</span>
-            <span class="ts">${escapeHtml(fmtTs(m.ts))}</span>
-          </div>
-        `;
-        thread.appendChild(wrap);
-      }
-      thread.scrollTop = thread.scrollHeight;
+      $("activeMeta").textContent = `${state.activeConversation.id} | ${(state.activeConversation.meta || {}).brand_id || "-"} | ${(state.activeConversation.flags || []).join(", ") || "aucun flag"}`;
+      (state.activeConversation.messages || []).forEach((message) => {
+        const node = document.createElement("div");
+        node.className = "msg " + (message.role === "user" ? "user" : "assistant");
+        node.innerHTML = `<div>${escapeHtml(message.content)}</div><div class="msg-foot"><span>${escapeHtml(message.role)}</span><span>${escapeHtml(message.ts)}</span></div>`;
+        thread.appendChild(node);
+      });
     }
 
-    function formatDiagText(d){
-      const lines = [];
-      lines.push(`ok: ${d.ok}`);
-      lines.push(`time: ${d.time || ""}`);
-      lines.push(`openai_configured: ${d.openai_configured}`);
-      lines.push(`server_mode: ${d.server_mode}`);
-      lines.push(`running_on_render: ${d.running_on_render}`);
-      lines.push(`brands: ${(d.brands || []).join(", ")}`);
-      lines.push(`faq_enabled_brands: ${(d.faq_enabled_brands || []).join(", ")}`);
-      lines.push(`public_brands: ${(d.public_brands || []).join(", ")}`);
-      lines.push(`conversations_count: ${d.conversations_count ?? "?"}`);
-      lines.push(`allowed_origins: ${(d.allowed_origins || []).join(", ") || "*"}`);
-      lines.push("");
-      lines.push("FAQ files:");
-      for(const f of (d.faq_files || [])){
-        lines.push(`- ${f.file}: ${f.exists ? "OK" : "MISSING"} (${f.size_bytes} bytes)`);
-      }
-      lines.push("");
-      lines.push("Recent logs:");
-      const logs = Array.isArray(d.recent_logs) ? d.recent_logs : [];
-      if(!logs.length) lines.push("- no logs captured yet");
-      for(const l of logs){
-        lines.push(`- [${l.ts}] ${String(l.level || "info").toUpperCase()} ${l.message || ""}`);
-      }
-      return lines.join("\n");
+    async function loadSession() {
+      const sessionData = await api("/admin/api/session");
+      if (!sessionData.authenticated) { location.href = "/admin/login"; return; }
+      state.username = sessionData.username;
+      state.csrfToken = sessionData.csrf_token;
+      $("sessionMeta").textContent = `Connecte en tant que ${sessionData.username}`;
     }
 
-    function renderDiagPanel(d){
-      const openaiOk = Boolean(d.openai_configured);
-      const runMode = `${d.server_mode || "?"}${d.running_on_render ? " (Render)" : ""}`;
-      $("diagOpenai").innerHTML = `<span class="diag-pill ${openaiOk ? "ok" : "warn"}">${openaiOk ? "Configuré" : "Non configuré"}</span>`;
-      $("diagMode").textContent = runMode;
-      $("diagConversations").textContent = String(d.conversations_count ?? "?");
-      $("diagOrigins").textContent = (d.allowed_origins || []).join(", ") || "*";
-
-      const faqList = $("diagFaqList");
-      const faqFiles = Array.isArray(d.faq_files) ? d.faq_files : [];
-      faqList.innerHTML = faqFiles.length ? faqFiles.map((f)=>{
-        const badgeClass = f.exists ? "ok" : "bad";
-        const badgeText = f.exists ? "OK" : "MISSING";
-        return `<li>${escapeHtml(f.file)} — <span class="diag-pill ${badgeClass}">${badgeText}</span> (${escapeHtml(f.size_bytes)} bytes)</li>`;
-      }).join("") : "<li>Aucune FAQ trouvée.</li>";
-
-      const logsWrap = $("diagLogs");
-      const logs = Array.isArray(d.recent_logs) ? d.recent_logs : [];
-      logsWrap.innerHTML = "";
-      if(!logs.length){
-        logsWrap.innerHTML = '<div class="diag-log-item">Aucun log capturé pour le moment.</div>';
-        return;
-      }
-      const lastLogs = logs.slice(-25).reverse();
-      for(const l of lastLogs){
-        const level = String(l.level || "info").toLowerCase();
-        const lvlClass = level === "error" ? "bad" : (level === "debug" ? "warn" : "ok");
-        const item = document.createElement("div");
-        item.className = "diag-log-item";
-        const ctx = l.context ? JSON.stringify(l.context, null, 2) : "";
-        item.innerHTML = `
-          <div class="diag-log-head">
-            <span>${escapeHtml(l.ts || "")}</span>
-            <span class="diag-pill ${lvlClass}">${escapeHtml(level.toUpperCase())}</span>
-          </div>
-          <div class="diag-log-msg">${escapeHtml(l.message || "")}</div>
-          ${ctx ? `<div class="diag-log-ctx">${escapeHtml(ctx)}</div>` : ""}
-        `;
-        logsWrap.appendChild(item);
-      }
+    async function loadConversations() {
+      const data = await api("/admin/api/conversations");
+      state.conversations = data.items || [];
+      applyFilters();
+      renderConversationList();
     }
 
-    async function loadConversations(){
-      const data = await apiGet("/admin/api/conversations");
-      state.conversations = Array.isArray(data.items) ? data.items : [];
-      applyFilter();
-      renderList();
-      $("statusText").textContent = "OK";
-    }
-
-    async function loadConversationDetail(convId){
-      const data = await apiGet("/admin/api/conversation/" + encodeURIComponent(convId));
-      state.activeObj = data.conversation || null;
-      state.activeMessages = Array.isArray((data.conversation || {}).messages) ? data.conversation.messages : [];
+    async function loadConversation(id) {
+      const data = await api("/admin/api/conversation/" + encodeURIComponent(id));
+      state.activeConversation = data.conversation;
       renderThread();
     }
 
-    async function loadDiag(){
-      const d = await apiGet("/admin/api/diag");
-      const txt = formatDiagText(d);
-      state.diagText = txt;
-      renderDiagPanel(d);
-      $("diagPanel").classList.add("show");
-      const ok = Boolean(d.openai_configured);
-      $("statusText").textContent = ok ? "OK" : "Dégradé";
-      $("pillStatus").style.borderColor = ok ? "rgba(34,197,94,.35)" : "rgba(245,158,11,.35)";
-      $("pillStatus").style.background = ok ? "rgba(34,197,94,.10)" : "rgba(245,158,11,.10)";
-      toast("Diagnostic chargé");
+    async function loadAnalytics() {
+      const [analyticsData, diagData, usersData] = await Promise.all([api("/admin/api/analytics"), api("/admin/api/diag"), api("/admin/api/users")]);
+      const a = analyticsData.analytics || {};
+      $("kpis").innerHTML = `
+        <div class="kpi"><div class="label">Conversations</div><div class="value">${a.conversations_total || 0}</div></div>
+        <div class="kpi"><div class="label">Leads</div><div class="value">${a.leads_total || 0}</div></div>
+        <div class="kpi"><div class="label">Leads chauds</div><div class="value">${a.hot_leads || 0}</div></div>
+        <div class="kpi"><div class="label">Utilisateurs admin</div><div class="value">${diagData.users_count || 0}</div></div>
+      `;
+      $("brandsStats").textContent = JSON.stringify(a.brands || {}, null, 2);
+      $("flagsStats").textContent = JSON.stringify(a.flags || {}, null, 2);
+      $("recentLogs").textContent = JSON.stringify((diagData.recent_logs || []).slice(-12), null, 2);
+      const leads = a.recent_leads || [];
+      $("leadList").innerHTML = leads.length ? leads.map((lead) => {
+        const temp = ((lead.payload || {}).temperature || "cold");
+        return `<div class="lead"><div class="row"><strong>${escapeHtml(lead.lead_type)}</strong><span class="${temp}">${escapeHtml(temp)}</span></div><div class="mini">${escapeHtml(lead.conversation_id)} | score ${escapeHtml(lead.score)}</div></div>`;
+      }).join("") : '<div class="mini">Aucun lead qualifie pour le moment.</div>';
+      const users = usersData.items || [];
+      $("userList").innerHTML = users.length ? users.map((user) => `<div class="lead"><div class="row"><strong>${escapeHtml(user.username)}</strong><span class="${user.is_active ? 'hot' : 'cold'}">${user.is_active ? 'actif' : 'inactif'}</span></div><div class="mini">id ${escapeHtml(user.id)} | maj ${escapeHtml(user.updated_at)}</div><div style="margin-top:8px;display:flex;gap:8px"><button class="secondary" data-toggle-user="${user.id}" data-next="${user.is_active ? 0 : 1}">${user.is_active ? 'Desactiver' : 'Activer'}</button></div></div>`).join("") : '<div class="mini">Aucun utilisateur.</div>';
+      document.querySelectorAll('[data-toggle-user]').forEach((button) => button.addEventListener('click', async () => {
+        await api('/admin/api/users/' + button.dataset.toggleUser, { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ is_active: Number(button.dataset.next) }) });
+        await loadAnalytics();
+      }));
     }
 
-    function syncToken(){
-      state.adminToken = ($("tokenInput").value || "").trim();
-      const LS_KEY = "rw_admin_token";
-      if(state.adminToken){
-        localStorage.setItem(LS_KEY, state.adminToken);
-        setQs("token", state.adminToken);
-      } else {
-        localStorage.removeItem(LS_KEY);
-        setQs("token", "");
-      }
-    }
-
-    // init token
-    const LS_KEY = "rw_admin_token";
-    state.adminToken = qs("token") || localStorage.getItem(LS_KEY) || "";
-    $("tokenInput").value = state.adminToken;
-    $("originText").textContent = location.origin;
-
-    $("btnRefresh").addEventListener("click", async ()=>{
-      syncToken();
-      try{
-        await loadConversations();
-        if(state.activeId) await loadConversationDetail(state.activeId);
-        toast("Conversations chargées");
-      }catch(e){
-        $("statusText").textContent = "Erreur";
-        toast("Erreur: " + (e.message || e));
-      }
+    $("searchInput").addEventListener("input", () => { applyFilters(); renderConversationList(); });
+    $("flagFilter").addEventListener("change", () => { applyFilters(); renderConversationList(); });
+    $("btnRefresh").addEventListener("click", async () => { await loadConversations(); await loadAnalytics(); if (state.activeId) await loadConversation(state.activeId); });
+    $("btnReloadOne").addEventListener("click", async () => { if (state.activeId) await loadConversation(state.activeId); });
+    $("btnExport").addEventListener("click", () => window.open("/admin/api/export.csv", "_blank"));
+    $("btnLogout").addEventListener("click", async () => { await api("/admin/api/auth/logout", { method: "POST" }); location.href = "/admin/login"; });
+    $("btnCopyId").addEventListener("click", async () => { if (state.activeId) await navigator.clipboard.writeText(state.activeId); });
+    $("btnCopyJson").addEventListener("click", async () => { if (state.activeConversation) await navigator.clipboard.writeText(JSON.stringify(state.activeConversation, null, 2)); });
+    $("btnCreateUser").addEventListener("click", async () => {
+      const username = $("newUserName").value.trim();
+      const password = $("newUserPassword").value;
+      if (!username || !password) return;
+      await api('/admin/api/users', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ username, password }) });
+      $("newUserName").value = '';
+      $("newUserPassword").value = '';
+      await loadAnalytics();
     });
 
-    $("btnReload").addEventListener("click", async ()=>{
-      if(!state.activeId) return toast("Aucune conversation sélectionnée");
-      syncToken();
-      try{ await loadConversationDetail(state.activeId); toast("Conversation rechargée"); }
-      catch(e){ toast("Erreur: " + (e.message || e)); }
-    });
-
-    $("btnDiag").addEventListener("click", async ()=>{
-      syncToken();
-      try{ await loadDiag(); }
-      catch(e){ $("statusText").textContent = "Erreur"; toast("Diag erreur: " + (e.message || e)); }
-    });
-
-    $("btnExport").addEventListener("click", ()=>{
-      syncToken();
-      if(!state.adminToken) return toast("Token manquant");
-      const url = new URL(location.origin + "/admin/api/export.csv");
-      url.searchParams.set("token", state.adminToken);
-      window.open(url.toString(), "_blank");
-    });
-
-    $("btnClear").addEventListener("click", ()=>{
-      $("searchInput").value = "";
-      applyFilter();
-      renderList();
-    });
-
-    $("searchInput").addEventListener("input", ()=>{ applyFilter(); renderList(); });
-    $("flagSel").addEventListener("change", ()=>{ state.flagFilter = $("flagSel").value; applyFilter(); renderList(); });
-
-    $("btnCopyId").addEventListener("click", async ()=>{
-      if(!state.activeId) return toast("Aucune conversation sélectionnée");
-      try{ await navigator.clipboard.writeText(state.activeId); toast("conv_id copié"); }
-      catch(e){ toast("Impossible de copier"); }
-    });
-
-    $("btnCopyJson").addEventListener("click", async ()=>{
-      if(!state.activeObj) return toast("Aucune conversation sélectionnée");
-      try{ await navigator.clipboard.writeText(JSON.stringify(state.activeObj, null, 2)); toast("JSON copié"); }
-      catch(e){ toast("Impossible de copier"); }
-    });
-
-    $("btnCopyDiag").addEventListener("click", async ()=>{
-      if(!state.diagText) return toast("Aucun diagnostic chargé");
-      try{ await navigator.clipboard.writeText(state.diagText); toast("Diagnostic copié"); }
-      catch(e){ toast("Impossible de copier"); }
-    });
-
-    (async function init(){
-      $("statusText").textContent = "…";
-      try{
-        await loadConversations();
-        const conv = qs("conv");
-        if(conv){
-          state.activeId = conv;
-          await loadConversationDetail(conv);
-          renderList();
-        }
-      }catch(e){
-        $("statusText").textContent = "Erreur";
-        toast("Erreur chargement: " + (e.message || e));
+    (async function init() {
+      try {
+        await loadSession();
+        await Promise.all([loadConversations(), loadAnalytics()]);
+      } catch (error) {
+        $("sessionMeta").textContent = "Erreur: " + error.message;
       }
     })();
   </script>

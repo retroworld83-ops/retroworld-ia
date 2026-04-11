@@ -13,7 +13,11 @@ required_files = [
     "requirements.txt",
     "app.py",
     "static/admin.html",
+    "static/admin-login.html",
+    "static/admin-knowledge.html",
     "static/chat-widget.html",
+    "src/data/knowledge_base.json",
+    "src/retroworld_ia/app_factory.py",
 ]
 
 print("[check] required files")

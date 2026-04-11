@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Connexion Admin</title>
+  <style>
+    :root{--bg:#09111f;--card:#121c2e;--line:#22304a;--text:#edf3ff;--muted:#96a6c4;--accent:#38bdf8;--radius:18px}
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:Segoe UI,system-ui,sans-serif;background:radial-gradient(circle at top left,rgba(56,189,248,.14),transparent 30%),radial-gradient(circle at bottom right,rgba(99,102,241,.14),transparent 28%),var(--bg);color:var(--text)}
+    .card{width:min(440px,92vw);background:rgba(18,28,46,.94);border:1px solid rgba(255,255,255,.08);border-radius:var(--radius);padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+    h1{margin:0 0 8px;font-size:24px} p{margin:0 0 20px;color:var(--muted);line-height:1.5}
+    label{display:block;margin:12px 0 6px;color:var(--muted);font-size:13px}
+    input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.1);background:#0c1525;color:var(--text);outline:none}
+    button{margin-top:16px;width:100%;padding:12px 14px;border:0;border-radius:12px;background:linear-gradient(135deg,var(--accent),#6366f1);color:#07111f;font-weight:900;cursor:pointer}
+    .status{margin-top:14px;font-size:13px;color:var(--muted);min-height:18px}
+  </style>
+</head>
+<body>
+  <form class="card" id="loginForm">
+    <h1>Admin Retroworld IA</h1>
+    <p>Connexion securisee par utilisateur, mot de passe et session HTTP.</p>
+    <label for="username">Utilisateur</label>
+    <input id="username" autocomplete="username" value="admin" />
+    <label for="password">Mot de passe</label>
+    <input id="password" type="password" autocomplete="current-password" />
+    <button type="submit">Se connecter</button>
+    <div class="status" id="status">Pret.</div>
+  </form>
+
+  <script>
+    const form = document.getElementById("loginForm");
+    const statusEl = document.getElementById("status");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      statusEl.textContent = "Connexion...";
+      try {
+        const response = await fetch("/admin/api/auth/login", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: document.getElementById("username").value.trim(),
+            password: document.getElementById("password").value
+          })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Connexion refusee");
+        statusEl.textContent = "Connexion reussie.";
+        location.href = "/admin";
+      } catch (error) {
+        statusEl.textContent = "Erreur: " + error.message;
+      }
+    });
+  </script>
+</body>
+</html>

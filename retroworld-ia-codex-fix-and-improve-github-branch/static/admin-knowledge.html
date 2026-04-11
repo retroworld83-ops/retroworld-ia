@@ -3,23 +3,22 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Admin FAQ</title>
+  <title>Base Metier</title>
   <style>
-    :root{--bg:#0a1220;--panel:#111b2c;--line:#22314a;--text:#edf3ff;--muted:#95a7c7;--accent:#38bdf8;--radius:16px}
+    :root{--bg:#0a1220;--panel:#111b2c;--text:#edf3ff;--muted:#95a7c7;--accent:#38bdf8;--radius:16px}
     *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:var(--bg);color:var(--text)}
     .top{position:sticky;top:0;background:rgba(10,18,32,.92);backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,.06)}
-    .top-inner,.wrap{max-width:1100px;margin:0 auto;padding:16px}
+    .top-inner,.wrap{max-width:1200px;margin:0 auto;padding:16px}
     .top-inner{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
     .actions{display:flex;gap:10px;flex-wrap:wrap}
     button,a.btn,select{border:0;border-radius:12px;padding:10px 14px;font:inherit}
     button,a.btn{cursor:pointer;text-decoration:none}
-    select,textarea{background:#0d1524;color:var(--text);border:1px solid rgba(255,255,255,.1)}
     .primary{background:linear-gradient(135deg,var(--accent),#6366f1);color:#08111d;font-weight:900}
     .secondary{background:var(--panel);color:var(--text);border:1px solid rgba(255,255,255,.08)}
     .card{background:var(--panel);border:1px solid rgba(255,255,255,.06);border-radius:var(--radius);overflow:hidden}
     .card-h,.bar{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
     .bar{border-top:1px solid rgba(255,255,255,.06);border-bottom:0}
-    textarea{width:100%;min-height:65vh;padding:16px;border:0;outline:none;resize:vertical;font-family:Consolas,monospace;font-size:12px;line-height:1.45}
+    textarea{width:100%;min-height:72vh;padding:16px;border:0;outline:none;resize:vertical;background:#0d1524;color:var(--text);font-family:Consolas,monospace;font-size:12px;line-height:1.45}
     .meta,.status{color:var(--muted);font-size:13px}
   </style>
 </head>
@@ -27,23 +26,22 @@
   <div class="top">
     <div class="top-inner">
       <div>
-        <div style="font-weight:900">Admin FAQ</div>
+        <div style="font-weight:900">Base metier</div>
         <div class="meta" id="sessionMeta">Chargement...</div>
       </div>
       <div class="actions">
-        <a class="btn secondary" href="/admin">Conversations</a>
+        <a class="btn secondary" href="/admin">Dashboard</a>
+        <a class="btn secondary" href="/admin/faq">FAQ</a>
         <select id="brandSelect"></select>
         <button class="secondary" id="btnLoad">Charger</button>
         <button class="primary" id="btnSave">Enregistrer</button>
-        <button class="secondary" id="btnLogout">Deconnexion</button>
       </div>
     </div>
   </div>
-
   <div class="wrap">
     <div class="card">
       <div class="card-h">
-        <div>Editeur JSON</div>
+        <div>Edition de la base metier de la marque</div>
         <div class="meta" id="meta">-</div>
       </div>
       <textarea id="editor" spellcheck="false"></textarea>
@@ -56,91 +54,59 @@
       </div>
     </div>
   </div>
-
   <script>
     const $ = (id) => document.getElementById(id);
-    const state = { csrfToken: "", username: "" };
-
+    const state = { csrfToken: "" };
     async function api(path, options = {}) {
       const headers = Object.assign({}, options.headers || {});
-      if (state.csrfToken && ["POST", "PUT", "DELETE"].includes((options.method || "GET").toUpperCase())) {
-        headers["X-CSRF-Token"] = state.csrfToken;
-      }
+      if (state.csrfToken && ["POST", "PUT", "DELETE"].includes((options.method || "GET").toUpperCase())) headers["X-CSRF-Token"] = state.csrfToken;
       const response = await fetch(path, Object.assign({ credentials: "same-origin" }, options, { headers }));
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error((data && (data.error || data.message)) || ("HTTP " + response.status));
       return data;
     }
-
-    function setStatus(message) { $("status").textContent = message; }
-
-    async function loadSession() {
+    function setStatus(message){ $("status").textContent = message; }
+    function currentBrand(){ return $("brandSelect").value || "retroworld"; }
+    async function loadSession(){
       const data = await api("/admin/api/session");
-      if (!data.authenticated) {
-        location.href = "/admin/login";
-        return;
-      }
+      if (!data.authenticated) { location.href = "/admin/login"; return; }
       state.csrfToken = data.csrf_token;
-      state.username = data.username;
       $("sessionMeta").textContent = `Connecte en tant que ${data.username}`;
     }
-
-    async function loadBrands() {
-      const data = await api("/admin/api/brands?faq_only=1");
+    async function loadBrands(){
+      const data = await api("/admin/api/brands");
       $("brandSelect").innerHTML = "";
       (data.brands || []).forEach((brand) => {
-        const option = document.createElement("option");
-        option.value = brand.id;
-        option.textContent = brand.display_name || brand.name || brand.id;
-        $("brandSelect").appendChild(option);
+        const opt = document.createElement("option");
+        opt.value = brand.id;
+        opt.textContent = brand.display_name || brand.name || brand.id;
+        $("brandSelect").appendChild(opt);
       });
     }
-
-    function currentBrand() { return $("brandSelect").value || "retroworld"; }
-
-    async function loadFaq() {
+    async function loadKnowledge(){
       setStatus("Chargement...");
-      const data = await api("/admin/api/faq/" + encodeURIComponent(currentBrand()));
-      $("editor").value = JSON.stringify(data, null, 2);
-      $("meta").textContent = `brand=${data.brand} | items=${(data.items || []).length}`;
+      const data = await api("/admin/api/knowledge/" + encodeURIComponent(currentBrand()));
+      $("editor").value = JSON.stringify(data.brand || {}, null, 2);
+      $("meta").textContent = `brand=${(data.brand || {}).id || currentBrand()}`;
       setStatus("Charge.");
     }
-
-    async function saveFaq() {
-      setStatus("Validation...");
+    async function saveKnowledge(){
       const payload = JSON.parse($("editor").value || "{}");
       setStatus("Enregistrement...");
-      const data = await api("/admin/api/faq/" + encodeURIComponent(currentBrand()), {
+      const data = await api("/admin/api/knowledge/" + encodeURIComponent(currentBrand()), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      $("editor").value = JSON.stringify(data, null, 2);
-      $("meta").textContent = `brand=${data.brand} | items=${(data.items || []).length}`;
+      $("editor").value = JSON.stringify(data.brand || {}, null, 2);
+      $("meta").textContent = `brand=${(data.brand || {}).id || currentBrand()}`;
       setStatus("Enregistre.");
     }
-
-    $("btnLoad").addEventListener("click", () => loadFaq().catch((error) => setStatus("Erreur: " + error.message)));
-    $("btnSave").addEventListener("click", () => saveFaq().catch((error) => setStatus("Erreur: " + error.message)));
-    $("btnPretty").addEventListener("click", () => {
-      try { $("editor").value = JSON.stringify(JSON.parse($("editor").value || "{}"), null, 2); setStatus("JSON formate."); }
-      catch (error) { setStatus("JSON invalide: " + error.message); }
-    });
-    $("btnValidate").addEventListener("click", () => {
-      try { JSON.parse($("editor").value || "{}"); setStatus("JSON valide."); }
-      catch (error) { setStatus("JSON invalide: " + error.message); }
-    });
-    $("btnLogout").addEventListener("click", async () => { await api("/admin/api/auth/logout", { method: "POST" }); location.href = "/admin/login"; });
-
-    (async function init() {
-      try {
-        await loadSession();
-        await loadBrands();
-        await loadFaq();
-      } catch (error) {
-        setStatus("Erreur: " + error.message);
-      }
-    })();
+    $("btnLoad").addEventListener("click", () => loadKnowledge().catch((e) => setStatus("Erreur: " + e.message)));
+    $("btnSave").addEventListener("click", () => saveKnowledge().catch((e) => setStatus("Erreur: " + e.message)));
+    $("btnPretty").addEventListener("click", () => { try { $("editor").value = JSON.stringify(JSON.parse($("editor").value || "{}"), null, 2); setStatus("JSON formate."); } catch (e) { setStatus("JSON invalide: " + e.message); } });
+    $("btnValidate").addEventListener("click", () => { try { JSON.parse($("editor").value || "{}"); setStatus("JSON valide."); } catch (e) { setStatus("JSON invalide: " + e.message); } });
+    (async function init(){ try { await loadSession(); await loadBrands(); await loadKnowledge(); } catch (e) { setStatus("Erreur: " + e.message); } })();
   </script>
 </body>
 </html>
