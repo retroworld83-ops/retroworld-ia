@@ -31,54 +31,13 @@ def build_openai_messages(system_prompt: str, history: List[Dict[str, Any]], use
 def openai_answer(messages: List[Dict[str, Any]]) -> str:
     if not openai_ready():
         return ""
-    payload: Dict[str, Any] = {
-        "model": config.OPENAI_MODEL,
-        "input": messages,
-        "max_output_tokens": config.OPENAI_MAX_OUTPUT_TOKENS,
-    }
-    effort = (config.OPENAI_REASONING_EFFORT or "").lower().strip()
-    if effort in {"low", "medium", "high"}:
-        payload["reasoning"] = {"effort": effort}
-    elif effort in {"", "none"}:
-        payload["temperature"] = config.OPENAI_TEMPERATURE
-
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/responses",
-            headers={"Authorization": f"Bearer {config.OPENAI_API_KEY}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json() or {}
-        texts: List[str] = []
-        for item in data.get("output", []):
-            for content in item.get("content", []):
-                if content.get("type") == "output_text":
-                    texts.append(content.get("text", ""))
-        return "\n".join(texts).strip()
-    except Exception as err:
-        response_obj = getattr(err, "response", None)
-        response_text = ""
-        status_code = None
-        if response_obj is not None:
-            status_code = getattr(response_obj, "status_code", None)
-            try:
-                response_text = response_obj.text[:2000]
-            except Exception:
-                response_text = ""
-        log_error("OpenAI error", err, {"model": config.OPENAI_MODEL, "status_code": status_code, "response_text": response_text})
-
-        # Fallback pragmatique: certains comptes/modeles refusent Responses API avec cette forme.
-        # On retente via Chat Completions avec un payload simplifie.
-        if status_code == 400:
-            fallback = fallback_chat_completions(messages)
-            if fallback:
-                return fallback
-        return "Desole, je rencontre un souci technique. Pouvez-vous reessayer ou contacter l'equipe ?"
+    primary = fallback_chat_completions(messages, primary=True)
+    if primary:
+        return primary
+    return "Desole, je rencontre un souci technique. Pouvez-vous reessayer ou contacter l'equipe ?"
 
 
-def fallback_chat_completions(messages: List[Dict[str, Any]]) -> str:
+def fallback_chat_completions(messages: List[Dict[str, Any]], primary: bool = False) -> str:
     try:
         simple_messages = []
         for message in messages:
@@ -120,7 +79,7 @@ def fallback_chat_completions(messages: List[Dict[str, Any]]) -> str:
                 response_text = response_obj.text[:2000]
             except Exception:
                 response_text = ""
-        log_error("OpenAI fallback error", err, {"model": config.OPENAI_MODEL, "status_code": status_code, "response_text": response_text})
+        log_error("OpenAI chat.completions error" if primary else "OpenAI fallback error", err, {"model": config.OPENAI_MODEL, "status_code": status_code, "response_text": response_text})
         return ""
 
 

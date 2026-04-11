@@ -94,7 +94,8 @@
     const qs = new URLSearchParams(location.search);
     const brand = (qs.get('brand') || qs.get('brand_id') || localStorage.getItem('rw_widget_brand') || 'retroworld').toLowerCase();
     const normalizeBase = (v) => (v || '').trim().replace(/\/$/, '');
-    const API_BASE = normalizeBase(qs.get('api') || qs.get('api_base') || qs.get('base_url') || window.RW_IA_API_BASE || localStorage.getItem('rw_widget_api_base') || '');
+    const DEFAULT_API_BASE = 'https://retroworld-ia.onrender.com';
+    const API_BASE = normalizeBase(qs.get('api') || qs.get('api_base') || qs.get('base_url') || window.RW_IA_API_BASE || localStorage.getItem('rw_widget_api_base') || DEFAULT_API_BASE);
     if (API_BASE) localStorage.setItem('rw_widget_api_base', API_BASE);
     const safeBrand = ['retroworld','runningman','enigmaniac'].includes(brand) ? brand : 'retroworld';
     localStorage.setItem('rw_widget_brand', safeBrand);
