@@ -1,21 +1,191 @@
 {
   "brand": "runningman",
-  "updated": "2026-02-23 00:00:00",
+  "updated": "2026-04-11 00:00:00",
   "items": [
     {
-      "question": "Runningman est‑il dans le même bâtiment que Retroworld ?",
-      "answer": "Oui, Runningman Games est dans le même bâtiment. Pour l’action game, les réservations se font directement auprès de Runningman.",
-      "tags": [
-        "localisation",
-        "partenariat"
-      ]
+      "question": "Qu’est-ce que Running Man à Draguignan ?",
+      "answer": "Running Man est un complexe de loisirs immersif à Draguignan proposant des jeux d’action, escape games, quiz et activités de groupe dans une arène unique mêlant défis physiques et réflexion.",
+      "tags": ["concept", "loisir", "draguignan"]
     },
     {
-      "question": "Comment contacter Runningman ?",
-      "answer": "Téléphone Runningman : 04 98 09 30 59. Site : https://www.runningmangames.fr",
-      "tags": [
-        "contact"
-      ]
+      "question": "Quelles activités sont proposées chez Running Man ?",
+      "answer": "Running Man propose plusieurs activités : Action Game (défis physiques et mentaux), Escape Game, Quiz interactif, Escape Game extérieur et événements pour groupes comme anniversaires, EVG/EVJF et team building.",
+      "tags": ["activités", "escape game", "quiz", "action game"]
+    },
+    {
+      "question": "Qu’est-ce que l’Action Game ?",
+      "answer": "L’Action Game est un parcours de défis physiques et mentaux inspiré de jeux télévisés, où les joueurs doivent coopérer pour réussir des épreuves dans différentes salles.",
+      "tags": ["action game", "jeu", "physique"]
+    },
+    {
+      "question": "Le jeu est-il physique ?",
+      "answer": "Oui, certaines épreuves demandent de bouger, courir ou être agile, mais il reste accessible à la majorité des joueurs et adaptable selon le niveau.",
+      "tags": ["physique", "sport", "niveau"]
+    },
+    {
+      "question": "À partir de quel âge peut-on jouer ?",
+      "answer": "Les activités sont accessibles dès 7 ans. Certaines épreuves peuvent être adaptées selon l’âge des participants.",
+      "tags": ["âge", "enfants"]
+    },
+    {
+      "question": "Faut-il être sportif pour participer ?",
+      "answer": "Non, les activités sont conçues pour être accessibles à tous, même sans condition physique particulière.",
+      "tags": ["accessibilité", "sport"]
+    },
+    {
+      "question": "Peut-on venir en famille ?",
+      "answer": "Oui, Running Man est adapté aux familles avec enfants, adolescents et adultes.",
+      "tags": ["famille"]
+    },
+    {
+      "question": "Peut-on venir entre amis ?",
+      "answer": "Oui, c’est une activité idéale entre amis avec des défis en équipe et une ambiance compétitive.",
+      "tags": ["amis", "groupe"]
+    },
+    {
+      "question": "Combien de personnes peuvent jouer ?",
+      "answer": "Les activités sont conçues pour les groupes, avec plusieurs joueurs en simultané selon le type de jeu.",
+      "tags": ["joueurs", "groupe"]
+    },
+    {
+      "question": "Est-ce adapté aux groupes ?",
+      "answer": "Oui, Running Man est spécialement conçu pour les groupes : anniversaires, EVG, EVJF, team building.",
+      "tags": ["groupes", "team building"]
+    },
+    {
+      "question": "Faut-il réserver à l’avance ?",
+      "answer": "Oui, il est fortement conseillé de réserver, surtout les week-ends et vacances.",
+      "tags": ["réservation"]
+    },
+    {
+      "question": "Quel est le tarif de l’Action Game ?",
+      "answer": "Le tarif est de 15 € pour les enfants et 20 € pour les adultes.",
+      "tags": ["tarifs", "action game"]
+    },
+    {
+      "question": "Quel est le tarif de l’Escape Game ?",
+      "answer": "15 € enfant, 25 € adulte (jusqu’à 4 joueurs), puis 20 € adulte à partir de 4 joueurs.",
+      "tags": ["tarifs", "escape game"]
+    },
+    {
+      "question": "Quel est le tarif du Quiz ?",
+      "answer": "Le quiz coûte environ 15 € pour 1 heure de jeu.",
+      "tags": ["quiz", "tarifs"]
+    },
+    {
+      "question": "Combien de temps dure une activité ?",
+      "answer": "Les activités durent généralement entre 30 minutes et 1 heure selon le type de jeu.",
+      "tags": ["durée"]
+    },
+    {
+      "question": "Qu’est-ce que le Quiz Game ?",
+      "answer": "Le quiz est un jeu interactif avec buzzers et questions sur différents thèmes, à jouer en équipe.",
+      "tags": ["quiz"]
+    },
+    {
+      "question": "Y a-t-il des activités en extérieur ?",
+      "answer": "Oui, un escape game extérieur est proposé avec une aventure immersive dans Draguignan.",
+      "tags": ["extérieur"]
+    },
+    {
+      "question": "Combien de temps dure l’escape game extérieur ?",
+      "answer": "Entre 1h30 et 2h environ selon la progression du groupe.",
+      "tags": ["extérieur", "durée"]
+    },
+    {
+      "question": "Peut-on organiser un anniversaire ?",
+      "answer": "Oui, Running Man propose des formules anniversaire avec activités et salle dédiée.",
+      "tags": ["anniversaire"]
+    },
+    {
+      "question": "Proposez-vous des EVG / EVJF ?",
+      "answer": "Oui, avec des packs dédiés incluant activités, options traiteur et prestations personnalisées.",
+      "tags": ["evg", "evjf"]
+    },
+    {
+      "question": "Le team building est-il possible ?",
+      "answer": "Oui, des formules sont disponibles pour les entreprises avec défis en équipe et activités sur mesure.",
+      "tags": ["team building"]
+    },
+    {
+      "question": "Y a-t-il des options supplémentaires ?",
+      "answer": "Oui, des options comme traiteur, vidéo/photo ou activités supplémentaires peuvent être ajoutées sur devis.",
+      "tags": ["options"]
+    },
+    {
+      "question": "Peut-on manger sur place ?",
+      "answer": "Oui, des options gourmandes peuvent être proposées selon les formules.",
+      "tags": ["snack"]
+    },
+    {
+      "question": "Où se situe Running Man ?",
+      "answer": "815 avenue Pierre Brossolette à Draguignan, dans le même bâtiment que Retroworld.",
+      "tags": ["adresse"]
+    },
+    {
+      "question": "Comment contacter Running Man ?",
+      "answer": "Par téléphone au 04 98 09 30 59 ou via leur site runningmangames.fr.",
+      "tags": ["contact"]
+    },
+    {
+      "question": "Proposez-vous de la VR ?",
+      "answer": "La réalité virtuelle est proposée chez Retroworld, partenaire situé dans le même bâtiment.",
+      "tags": ["vr", "retroworld"]
+    },
+    {
+      "question": "Pourquoi faire VR chez Retroworld ?",
+      "answer": "Retroworld propose des jeux VR immersifs en solo ou en groupe, complémentaires à Running Man.",
+      "tags": ["vr"]
+    },
+    {
+      "question": "Combien coûte la VR ?",
+      "answer": "À partir de 15 € pour une session de 20 à 30 minutes.",
+      "tags": ["vr", "tarifs"]
+    },
+    {
+      "question": "Peut-on enchaîner Running Man + VR ?",
+      "answer": "Oui, c’est une combinaison idéale pour une sortie complète.",
+      "tags": ["combo"]
+    },
+    {
+      "question": "Quel est l’objectif des jeux ?",
+      "answer": "S’amuser, coopérer et relever des défis en équipe dans une ambiance immersive.",
+      "tags": ["objectif"]
+    },
+    {
+      "question": "Les jeux sont-ils compétitifs ?",
+      "answer": "Oui, certains défis peuvent être réalisés en compétition entre équipes.",
+      "tags": ["compétition"]
+    },
+    {
+      "question": "Est-ce encadré ?",
+      "answer": "Oui, les activités sont encadrées par une équipe professionnelle.",
+      "tags": ["encadrement"]
+    },
+    {
+      "question": "Faut-il une tenue spécifique ?",
+      "answer": "Une tenue confortable ou de sport est recommandée.",
+      "tags": ["tenue"]
+    },
+    {
+      "question": "Les activités sont-elles sécurisées ?",
+      "answer": "Oui, elles sont encadrées et conçues pour être accessibles en toute sécurité.",
+      "tags": ["sécurité"]
+    },
+    {
+      "question": "Est-ce adapté aux entreprises ?",
+      "answer": "Oui, les activités sont parfaites pour renforcer la cohésion d’équipe.",
+      "tags": ["entreprise"]
+    },
+    {
+      "question": "Combien de temps prévoir sur place ?",
+      "answer": "Comptez entre 1h et 2h selon l’activité choisie.",
+      "tags": ["durée"]
+    },
+    {
+      "question": "Pourquoi choisir Running Man ?",
+      "answer": "Pour une expérience immersive, fun et originale mêlant action, réflexion et esprit d’équipe.",
+      "tags": ["avantages"]
     }
   ]
 }

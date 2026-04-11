@@ -20,6 +20,11 @@ FAQ_RETROWORLD_PATH = os.path.join(
     "static",
     "faq_retroworld.json",
 )
+FAQ_RUNNINGMAN_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "static",
+    "faq_runningman.json",
+)
 KNOWLEDGE_BASE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
     "src",
@@ -33,6 +38,8 @@ class SmokeTests(unittest.TestCase):
     def setUpClass(cls):
         with open(FAQ_RETROWORLD_PATH, "r", encoding="utf-8") as handle:
             cls.original_retroworld_faq = handle.read()
+        with open(FAQ_RUNNINGMAN_PATH, "r", encoding="utf-8") as handle:
+            cls.original_runningman_faq = handle.read()
         with open(KNOWLEDGE_BASE_PATH, "r", encoding="utf-8") as handle:
             cls.original_knowledge_base = handle.read()
 
@@ -40,6 +47,8 @@ class SmokeTests(unittest.TestCase):
     def tearDownClass(cls):
         with open(FAQ_RETROWORLD_PATH, "w", encoding="utf-8") as handle:
             handle.write(cls.original_retroworld_faq)
+        with open(FAQ_RUNNINGMAN_PATH, "w", encoding="utf-8") as handle:
+            handle.write(cls.original_runningman_faq)
         with open(KNOWLEDGE_BASE_PATH, "w", encoding="utf-8") as handle:
             handle.write(cls.original_knowledge_base)
         shutil.rmtree(TMP_DIR, ignore_errors=True)
@@ -66,6 +75,17 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(self.client.get("/faq/runningman").status_code, 200)
         self.assertEqual(self.client.get("/faq/runningman/").status_code, 200)
         self.assertEqual(self.client.get("/robots.txt").status_code, 200)
+
+    def test_runningman_faq_is_useful(self):
+        response = self.client.get("/faq.json?brand_id=runningman")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        items = payload.get("items", [])
+        self.assertGreaterEqual(len(items), 6)
+        questions = " ".join(item.get("question", "") for item in items)
+        answers = " ".join(item.get("answer", "") for item in items)
+        self.assertTrue("Runningman" in questions or "Running Man" in questions)
+        self.assertIn("04 98 09 30 59", answers)
 
     def test_chat_without_openai_key_returns_graceful_message(self):
         response = self.client.post("/chat", json={"message": "bonjour"})
