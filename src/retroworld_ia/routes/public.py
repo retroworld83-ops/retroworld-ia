@@ -108,8 +108,9 @@ def faq_page():
 def faq_page_by_brand(brand_id: str):
     bid = normalize_brand(brand_id)
     if bid not in FAQ_ENABLED_BRANDS:
-        return make_response("FAQ indisponible pour le moment.", 404)
-    return redirect(f"/static/chat-widget.html?tab=faq&brand={bid}")
+        return jsonify({"brand": bid, "items": [], "updated": now_str()}), 404
+    data = load_public_faq(bid)
+    return jsonify({"brand": bid, "updated": data.get("updated", now_str()), "items": data.get("items", [])})
 
 
 @public_bp.route("/faq.json", methods=["GET"])

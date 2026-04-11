@@ -20,6 +20,12 @@ FAQ_RETROWORLD_PATH = os.path.join(
     "static",
     "faq_retroworld.json",
 )
+KNOWLEDGE_BASE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "src",
+    "data",
+    "knowledge_base.json",
+)
 
 
 class SmokeTests(unittest.TestCase):
@@ -27,11 +33,15 @@ class SmokeTests(unittest.TestCase):
     def setUpClass(cls):
         with open(FAQ_RETROWORLD_PATH, "r", encoding="utf-8") as handle:
             cls.original_retroworld_faq = handle.read()
+        with open(KNOWLEDGE_BASE_PATH, "r", encoding="utf-8") as handle:
+            cls.original_knowledge_base = handle.read()
 
     @classmethod
     def tearDownClass(cls):
         with open(FAQ_RETROWORLD_PATH, "w", encoding="utf-8") as handle:
             handle.write(cls.original_retroworld_faq)
+        with open(KNOWLEDGE_BASE_PATH, "w", encoding="utf-8") as handle:
+            handle.write(cls.original_knowledge_base)
         shutil.rmtree(TMP_DIR, ignore_errors=True)
 
     def setUp(self):
@@ -50,9 +60,11 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(self.client.get("/brands.json").status_code, 200)
         self.assertEqual(self.client.get("/faq.json?brand_id=retroworld").status_code, 200)
         self.assertEqual(self.client.get("/faq_enigmaniac.json").status_code, 200)
-        self.assertEqual(self.client.get("/faq/retroworld").status_code, 302)
-        self.assertEqual(self.client.get("/faq/runningman").status_code, 302)
-        self.assertEqual(self.client.get("/faq/runningman/").status_code, 302)
+        faq_brand = self.client.get("/faq/retroworld")
+        self.assertEqual(faq_brand.status_code, 200)
+        self.assertTrue(faq_brand.is_json)
+        self.assertEqual(self.client.get("/faq/runningman").status_code, 200)
+        self.assertEqual(self.client.get("/faq/runningman/").status_code, 200)
         self.assertEqual(self.client.get("/robots.txt").status_code, 200)
 
     def test_chat_without_openai_key_returns_graceful_message(self):
