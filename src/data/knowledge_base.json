@@ -16,84 +16,15 @@
   },
   "brands": {
     "retroworld": {
-      "id": "retroworld",
-      "name": "Retroworld",
-      "short": "Retroworld",
-      "contact_phone": "04 94 47 94 64",
-      "contact_email": "contact@retroworldfrance.com",
-      "website": "https://www.retroworldfrance.com",
-      "domains": [
-        "retroworldfrance.com",
-        "www.retroworldfrance.com"
-      ],
-      "summary": "Centre de loisirs axe VR, quiz et anniversaires.",
-      "highlights": [
-        "Jeux VR arcade",
-        "Escape game VR",
-        "Quiz immersifs",
-        "Anniversaires et gouters"
-      ],
-      "quick_actions": [
-        {
-          "label": "Tarifs VR",
-          "prompt": "Je veux connaitre les tarifs VR Retroworld"
-        },
-        {
-          "label": "Escape VR",
-          "prompt": "Je veux des infos sur les escape game VR Retroworld"
-        },
-        {
-          "label": "Anniversaire",
-          "prompt": "Je veux organiser un anniversaire chez Retroworld"
-        },
-        {
-          "label": "Contact",
-          "prompt": "Comment contacter Retroworld ?"
-        }
-      ],
       "knowledge_cards": [
         {
-          "title": "Jeux VR arcade",
-          "summary": "Formats courts, accessibles et adaptes aux groupes, familles et joueurs reguliers."
-        },
-        {
-          "title": "Escape game VR",
-          "summary": "Sessions plus longues, immersives, ideales pour les groupes en recherche de challenge."
-        },
-        {
-          "title": "Quiz",
-          "summary": "Activite sociale et competitive adaptee aux anniversaires et petits groupes."
-        },
-        {
-          "title": "Anniversaire",
-          "summary": "Le bot peut qualifier la demande, recueillir les infos et orienter vers l'equipe pour validation."
+          "summary": "Carte",
+          "title": "Test"
         }
       ],
-      "booking_links": [
-        "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr",
-        "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr",
-        "https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr"
-      ],
-      "offers": [
-        {
-          "name": "Jeux VR arcade",
-          "category": "VR",
-          "price": "15 EUR / joueur / 30 min",
-          "details": "Selection familiale, arcade, rythme, action et quelques experiences plus intenses."
-        },
-        {
-          "name": "Escape Game VR",
-          "category": "VR",
-          "price": "30 EUR / joueur / 1h",
-          "details": "Ubisoft, aventure, fantastique, horreur et thriller."
-        },
-        {
-          "name": "Quiz",
-          "category": "Quiz",
-          "price": "Selon formule",
-          "details": "Activite de groupe et anniversaires sur reservation."
-        }
-      ]
+      "name": "Retroworld",
+      "short": "Retroworld",
+      "id": "retroworld"
     },
     "runningman": {
       "id": "runningman",

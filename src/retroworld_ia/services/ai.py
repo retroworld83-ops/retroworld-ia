@@ -58,8 +58,70 @@ def openai_answer(messages: List[Dict[str, Any]]) -> str:
                     texts.append(content.get("text", ""))
         return "\n".join(texts).strip()
     except Exception as err:
-        log_error("OpenAI error", err, {"model": config.OPENAI_MODEL})
+        response_obj = getattr(err, "response", None)
+        response_text = ""
+        status_code = None
+        if response_obj is not None:
+            status_code = getattr(response_obj, "status_code", None)
+            try:
+                response_text = response_obj.text[:2000]
+            except Exception:
+                response_text = ""
+        log_error("OpenAI error", err, {"model": config.OPENAI_MODEL, "status_code": status_code, "response_text": response_text})
+
+        # Fallback pragmatique: certains comptes/modeles refusent Responses API avec cette forme.
+        # On retente via Chat Completions avec un payload simplifie.
+        if status_code == 400:
+            fallback = fallback_chat_completions(messages)
+            if fallback:
+                return fallback
         return "Desole, je rencontre un souci technique. Pouvez-vous reessayer ou contacter l'equipe ?"
+
+
+def fallback_chat_completions(messages: List[Dict[str, Any]]) -> str:
+    try:
+        simple_messages = []
+        for message in messages:
+            role = message.get("role") or "user"
+            content_blocks = message.get("content") or []
+            text = ""
+            if isinstance(content_blocks, list):
+                text = "\n".join(block.get("text", "") for block in content_blocks if isinstance(block, dict))
+            elif isinstance(content_blocks, str):
+                text = content_blocks
+            if role in {"system", "user", "assistant"} and text.strip():
+                simple_messages.append({"role": role, "content": text})
+
+        payload: Dict[str, Any] = {
+            "model": config.OPENAI_MODEL,
+            "messages": simple_messages,
+        }
+        if config.OPENAI_MAX_OUTPUT_TOKENS:
+            payload["max_tokens"] = config.OPENAI_MAX_OUTPUT_TOKENS
+        if (config.OPENAI_REASONING_EFFORT or "").lower().strip() in {"", "none"}:
+            payload["temperature"] = config.OPENAI_TEMPERATURE
+
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {config.OPENAI_API_KEY}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json() or {}
+        return (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+    except Exception as err:
+        response_obj = getattr(err, "response", None)
+        response_text = ""
+        status_code = None
+        if response_obj is not None:
+            status_code = getattr(response_obj, "status_code", None)
+            try:
+                response_text = response_obj.text[:2000]
+            except Exception:
+                response_text = ""
+        log_error("OpenAI fallback error", err, {"model": config.OPENAI_MODEL, "status_code": status_code, "response_text": response_text})
+        return ""
 
 
 RESERVATION_FORBIDDEN_PATTERNS = [
