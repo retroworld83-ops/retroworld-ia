@@ -4,6 +4,7 @@ import uuid
 from typing import Any, Dict, List
 
 from src.retroworld_ia import config
+from src.retroworld_ia.services.corrections import init_corrections_db
 from src.retroworld_ia.services.knowledge import BRAND_ID_DEFAULT, intent_tags, normalize_brand
 from src.retroworld_ia.services.logging_store import log_error, now_str
 
@@ -79,6 +80,7 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_leads_conversation ON leads(conversation_id);
             """
         )
+    init_corrections_db()
 
 
 def compute_flags(conv: Dict[str, Any]) -> List[str]:

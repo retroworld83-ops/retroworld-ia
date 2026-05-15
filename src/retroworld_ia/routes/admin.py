@@ -12,6 +12,7 @@ from src.retroworld_ia.services.auth import (
     update_admin_user,
 )
 from src.retroworld_ia.services.conversations import analytics_snapshot, fetch_conversation, get_db, list_admin_users, list_conversations, list_leads
+from src.retroworld_ia.services.corrections import create_correction, list_corrections, update_correction
 from src.retroworld_ia.services.knowledge import BRANDS, FAQ_ENABLED_BRANDS, PUBLIC_BRANDS, get_knowledge_editor_payload, load_public_faq, normalize_brand, save_knowledge_brand
 from src.retroworld_ia.services.logging_store import APP_LOGS, now_str
 
@@ -138,6 +139,52 @@ def admin_get_conversation(conv_id: str):
     if auth is not None:
         return auth
     return jsonify({"ok": True, "conversation": fetch_conversation(conv_id)})
+
+
+@admin_bp.route("/admin/api/corrections", methods=["GET", "POST"])
+def admin_corrections():
+    auth = require_admin_auth(api=True)
+    if auth is not None:
+        return auth
+    if request.method == "GET":
+        bid = normalize_brand(request.args.get("brand_id") or "")
+        active_only = (request.args.get("active_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if bid and bid not in BRANDS:
+            return jsonify({"ok": False, "error": "unknown_brand"}), 400
+        return jsonify({"ok": True, "items": list_corrections(brand_id=bid, active_only=active_only)})
+
+    csrf = require_csrf()
+    if csrf is not None:
+        return csrf
+    payload = request.get_json(silent=True) or {}
+    bid = normalize_brand(payload.get("brand_id") or "retroworld")
+    if bid not in BRANDS:
+        return jsonify({"ok": False, "error": "unknown_brand"}), 400
+    payload["brand_id"] = bid
+    correction, error = create_correction(payload, default_brand_id=bid)
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    return jsonify({"ok": True, "correction": correction})
+
+
+@admin_bp.route("/admin/api/corrections/<int:correction_id>", methods=["PUT"])
+def admin_correction_update(correction_id: int):
+    auth = require_admin_auth(api=True)
+    if auth is not None:
+        return auth
+    csrf = require_csrf()
+    if csrf is not None:
+        return csrf
+    payload = request.get_json(silent=True) or {}
+    bid = normalize_brand(payload.get("brand_id") or "retroworld")
+    if bid not in BRANDS:
+        return jsonify({"ok": False, "error": "unknown_brand"}), 400
+    correction, error = update_correction(correction_id, payload, default_brand_id=bid)
+    if error == "not_found":
+        return jsonify({"ok": False, "error": error}), 404
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+    return jsonify({"ok": True, "correction": correction})
 
 
 @admin_bp.route("/admin/api/analytics", methods=["GET"])

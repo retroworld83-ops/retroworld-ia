@@ -52,6 +52,8 @@ tests/test_smoke.py
 - `FAQ_ENABLED_BRANDS`
 - `PUBLIC_BRANDS`
 - `CHAT_HISTORY_MESSAGES`
+- `CORRECTION_MEMORY_MAX` nombre maximum de corrections reinjectees dans un prompt
+- `OPENAI_CORRECTIONS_VECTOR_STORE_ID` optionnel, pour synchroniser les corrections approuvees vers un Vector Store OpenAI
 - `APP_DB_PATH`
 - `APP_DATA_DIR`
 - `LEAD_WEBHOOK_URL` pour une integration future
@@ -62,6 +64,7 @@ tests/test_smoke.py
 - `/admin` : dashboard, conversations, analytics, leads
 - `/admin/faq` : edition FAQ
 - `/admin/knowledge` : edition de la base metier par marque
+- `/admin/api/corrections` : memoire de corrections de reponses, separee de la FAQ
 
 ## Widget
 
@@ -70,6 +73,12 @@ Le widget public charge maintenant :
 - les FAQ via `/faq.json`
 - les cartes de contenu metier via `/knowledge.json`
 - le chat via `/chat`
+
+## Memoire de corrections
+
+Depuis l'admin, une correction peut etre enregistree avec un declencheur et une reponse corrigee. Les prochaines questions proches recuperent ces corrections et les ajoutent au prompt OpenAI, sans modifier les fichiers FAQ publics.
+
+OpenAI ne "reapprend" pas automatiquement sur une correction ponctuelle. Si `OPENAI_CORRECTIONS_VECTOR_STORE_ID` est configure, la correction est aussi envoyee dans le Vector Store OpenAI indique, et le chat peut rechercher dans ce Vector Store si la base locale ne suffit pas. Si la synchronisation ou la recherche OpenAI echoue, la correction locale reste active et le chat continue de fonctionner.
 
 ## Tests
 

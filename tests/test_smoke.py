@@ -14,6 +14,8 @@ os.environ["SECRET_KEY"] = "test-secret-key"
 
 from app import app  # noqa: E402
 from src.retroworld_ia.services.ai import build_openai_messages  # noqa: E402
+from src.retroworld_ia.services.corrections import find_relevant_corrections  # noqa: E402
+from src.retroworld_ia.services.knowledge import build_system_prompt  # noqa: E402
 
 FAQ_RETROWORLD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)),
@@ -199,6 +201,35 @@ class SmokeTests(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["count"], 1)
+
+    def test_admin_correction_save_requires_csrf(self):
+        self.login()
+        response = self.client.post(
+            "/admin/api/corrections",
+            json={"brand_id": "retroworld", "trigger_text": "Age minimum", "corrected_answer": "A partir de 7 ans."},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_correction_memory_is_reused_in_prompt(self):
+        csrf_token = self.login()
+        response = self.client.post(
+            "/admin/api/corrections",
+            json={
+                "brand_id": "retroworld",
+                "trigger_text": "age minimum enfant activite",
+                "corrected_answer": "Retroworld accueille les enfants a partir de 7 ans pour les activites adaptees.",
+                "priority": 80,
+            },
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["ok"])
+
+        corrections = find_relevant_corrections("retroworld", "A partir de quel age peut venir mon enfant ?", limit=3)
+        self.assertGreaterEqual(len(corrections), 1)
+        prompt = build_system_prompt("retroworld", "A partir de quel age peut venir mon enfant ?", corrections=corrections)
+        self.assertIn("Corrections approuvees", prompt)
+        self.assertIn("Retroworld accueille les enfants", prompt)
 
     def test_build_openai_messages_includes_history(self):
         history = [

@@ -1,57 +1,51 @@
 {
   "brand": "retroworld",
-  "updated": "2026-02-23 00:00:00",
+  "updated": "2026-04-11 00:00:00",
   "items": [
     {
       "question": "Quels sont vos horaires ?",
       "answer": "Retroworld est ouvert du mardi au dimanche, de 11h à 22h.",
-      "tags": [
-        "horaires"
-      ]
+      "tags": ["horaires"]
     },
     {
       "question": "Où se situe Retroworld ?",
       "answer": "Retroworld France se situe au 815 avenue Pierre Brossolette, 83300 Draguignan.",
-      "tags": [
-        "adresse"
-      ]
+      "tags": ["adresse", "contact"]
     },
     {
       "question": "Quels sont vos tarifs VR ?",
-      "answer": "Jeux VR : 15 € / joueur (jusqu’à 5 joueurs). Escape Game VR : 30 € / joueur.",
-      "tags": [
-        "tarifs",
-        "vr"
-      ]
+      "answer": "Jeux VR : 15 € par joueur pour 30 minutes. Escape Game VR : 30 € par joueur pour 1 heure.",
+      "tags": ["tarifs", "vr"]
     },
     {
-      "question": "Faites‑vous des anniversaires ?",
-      "answer": "Oui. Selon la formule, les points fidélité ne s’appliquent pas aux anniversaires. Pour organiser un anniversaire, l’équipe vous confirmera les disponibilités.",
-      "tags": [
-        "anniversaire"
-      ]
+      "question": "À partir de quel âge peut-on jouer ?",
+      "answer": "Retroworld propose des activités dès 7 ans, avec accompagnement sur place pour guider les plus jeunes.",
+      "tags": ["enfants", "famille"]
+    },
+    {
+      "question": "Faites-vous des anniversaires ?",
+      "answer": "Oui. Retroworld propose des formules anniversaire. L’assistant peut vous orienter, mais l’équipe confirme toujours les disponibilités et la réservation.",
+      "tags": ["anniversaire", "reservation"]
     },
     {
       "question": "Comment fonctionne la fidélité ?",
-      "answer": "1 partie VR = 1 point, 1 escape game VR = 2 points. 10 points = 1 partie VR offerte. 20 points = 1 escape game VR offert. Pour cumuler/consommer vos points, informez l’équipe avant de jouer et présentez votre QR code.",
-      "tags": [
-        "fidelite"
-      ]
+      "answer": "1 partie VR = 1 point. 1 escape game VR = 2 points. 10 points = 1 partie VR offerte. 20 points = 1 escape game VR offert. Pensez à présenter votre QR code avant de jouer.",
+      "tags": ["fidelite"]
     },
     {
-      "question": "Proposez‑vous une salle d’attente ?",
-      "answer": "Oui : canapés, café/thé/chocolat, snacks/boissons, baby‑foot, air hockey et borne de basket. Salle climatisée.",
-      "tags": [
-        "salle_attente"
-      ]
+      "question": "Comment est gérée l’hygiène du matériel VR ?",
+      "answer": "Le matériel VR est soigneusement nettoyé et désinfecté entre chaque session pour garantir une expérience confortable et sereine.",
+      "tags": ["hygiene", "vr"]
     },
     {
-      "question": "Hygiène des casques VR ?",
-      "answer": "Nous utilisons des casques VR professionnels (Vive Pro 2, Meta Quest 3) et tout le matériel est soigneusement nettoyé entre chaque session.",
-      "tags": [
-        "hygiene",
-        "vr"
-      ]
+      "question": "Quel matériel utilisez-vous ?",
+      "answer": "Retroworld utilise notamment des casques Vive Pro 2, Meta Quest 3 et Pimax Crystal, avec un parc régulièrement renouvelé.",
+      "tags": ["materiel", "vr"]
+    },
+    {
+      "question": "Avez-vous un espace d’attente ?",
+      "answer": "Oui. Vous trouverez un espace d’attente confortable avec boissons, snacks et jeux pour patienter dans de bonnes conditions.",
+      "tags": ["accueil", "confort"]
     }
   ]
 }

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from src.data.system_data import SYSTEM_PROMPT
 from src.retroworld_ia import config
+from src.retroworld_ia.services.corrections import correction_prompt_block
 from src.retroworld_ia.services.logging_store import log_error, now_str
 
 
@@ -68,7 +69,7 @@ def format_contact(brand_id: str) -> str:
     return " | ".join(parts)
 
 
-def build_system_prompt(brand_id: str, user_text: str) -> str:
+def build_system_prompt(brand_id: str, user_text: str, corrections: Optional[List[Dict[str, Any]]] = None) -> str:
     brand = BRANDS.get(brand_id, BRANDS.get(BRAND_ID_DEFAULT, {}))
     faq = load_public_faq(brand_id)
     global_cfg = KNOWLEDGE_BASE.get("global") or {}
@@ -122,6 +123,11 @@ def build_system_prompt(brand_id: str, user_text: str) -> str:
             answer = item.get("answer") or ""
             if question and answer:
                 lines.append(f"- Q: {question} | R: {answer}")
+
+    corrections_block = correction_prompt_block(corrections or [])
+    if corrections_block:
+        lines.append("")
+        lines.append(corrections_block)
 
     other_brand = detect_brand_from_text(user_text)
     if other_brand and other_brand != brand_id:

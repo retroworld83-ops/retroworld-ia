@@ -10,6 +10,7 @@ from src.retroworld_ia.services.ai import (
     openai_ready,
 )
 from src.retroworld_ia.services.conversations import append_message, create_or_load_conversation, new_conv_id, upsert_conversation
+from src.retroworld_ia.services.corrections import find_relevant_corrections
 from src.retroworld_ia.services.knowledge import (
     BRAND_ID_DEFAULT,
     BRANDS,
@@ -164,7 +165,8 @@ def chat():
         upsert_conversation(conversation)
         return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": answer})
 
-    system_prompt = build_system_prompt(brand_id, msg)
+    corrections = find_relevant_corrections(brand_id, msg)
+    system_prompt = build_system_prompt(brand_id, msg, corrections=corrections)
     history = conversation.get("messages", [])[:-1]
     raw_answer = openai_answer(build_openai_messages(system_prompt, history, msg))
     safe_answer, promised = enforce_no_reservation_promises(raw_answer)
@@ -172,7 +174,7 @@ def chat():
     if brand_id == "retroworld":
         safe_answer = append_retroworld_links_if_missing(msg, safe_answer)
     flags = ["promesse_resa"] if promised else []
-    append_message(conversation, "assistant", safe_answer, extra={"brand_id": brand_id, "flags": flags})
+    append_message(conversation, "assistant", safe_answer, extra={"brand_id": brand_id, "flags": flags, "correction_ids": [item.get("id") for item in corrections]})
     upsert_conversation(conversation)
     return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": safe_answer})
 

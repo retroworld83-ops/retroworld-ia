@@ -12,7 +12,7 @@
     .top-inner{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
     .brand{font-weight:900}.muted{color:var(--muted);font-size:13px}
     .actions{display:flex;gap:10px;flex-wrap:wrap}
-    button,a.btn,select,input{font:inherit}
+    button,a.btn,select,input,textarea{font:inherit}
     button,a.btn{border:0;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none}
     .primary{background:linear-gradient(135deg,var(--accent),#6366f1);color:#08111f}
     .secondary{background:var(--panel);color:var(--text);border:1px solid rgba(255,255,255,.08)}
@@ -36,6 +36,11 @@
     .msg-foot{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:11px;color:var(--muted)}
     .empty{padding:22px;color:var(--muted)}
     .pane-toolbar{padding:14px 16px;border-top:1px solid rgba(255,255,255,.06);display:flex;gap:10px;flex-wrap:wrap}
+    .correction-form{padding:16px;display:grid;gap:10px}
+    .correction-form textarea,.correction-form input,.correction-form select{width:100%;background:var(--panel2);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 12px}
+    .correction-form textarea{min-height:86px;resize:vertical}
+    .correction-grid{display:grid;grid-template-columns:1fr 110px;gap:10px}
+    @media (max-width:720px){.correction-grid{grid-template-columns:1fr}}
     .kpis{padding:16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
     @media (max-width:1080px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
     .kpi{padding:14px;border-radius:14px;background:rgba(6,11,20,.45);border:1px solid rgba(255,255,255,.06)}
@@ -134,12 +139,35 @@
           <button class="primary" id="btnReloadOne">Recharger la conversation</button>
         </div>
       </div>
+
+      <div class="card">
+        <div class="card-h">
+          <div class="title">Memoire de corrections IA</div>
+          <div class="badge" id="correctionBadge">0</div>
+        </div>
+        <div class="correction-form">
+          <div class="correction-grid">
+            <select id="correctionBrand"></select>
+            <input id="correctionPriority" type="number" min="0" max="100" value="60" title="Priorite" />
+          </div>
+          <textarea id="correctionTrigger" placeholder="Question ou declencheur a reconnaitre plus tard..."></textarea>
+          <textarea id="correctionAnswer" placeholder="Reponse corrigee que l'IA devra suivre quand le sujet revient..."></textarea>
+          <input id="correctionNotes" placeholder="Note interne optionnelle" />
+          <div class="actions">
+            <button class="secondary" id="btnUseLastUser">Derniere question</button>
+            <button class="secondary" id="btnUseLastAssistant">Reponse actuelle</button>
+            <button class="primary" id="btnSaveCorrection">Enregistrer correction</button>
+          </div>
+          <div class="mini" id="correctionStatus">Les corrections sont injectees dans le prompt IA sans modifier les fichiers FAQ.</div>
+          <div class="lead-list" id="correctionList"></div>
+        </div>
+      </div>
     </div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const state = { csrfToken: "", username: "", conversations: [], filtered: [], activeId: "", activeConversation: null };
+    const state = { csrfToken: "", username: "", conversations: [], filtered: [], activeId: "", activeConversation: null, brands: [], corrections: [] };
 
     async function api(path, options = {}) {
       const headers = Object.assign({}, options.headers || {});
@@ -201,12 +229,54 @@
       }
       empty.style.display = "none";
       $("activeMeta").textContent = `${state.activeConversation.id} | ${(state.activeConversation.meta || {}).brand_id || "-"} | ${(state.activeConversation.flags || []).join(", ") || "aucun flag"}`;
+      if ((state.activeConversation.meta || {}).brand_id && $("correctionBrand").value !== (state.activeConversation.meta || {}).brand_id) {
+        $("correctionBrand").value = (state.activeConversation.meta || {}).brand_id;
+      }
       (state.activeConversation.messages || []).forEach((message) => {
         const node = document.createElement("div");
         node.className = "msg " + (message.role === "user" ? "user" : "assistant");
         node.innerHTML = `<div>${escapeHtml(message.content)}</div><div class="msg-foot"><span>${escapeHtml(message.role)}</span><span>${escapeHtml(message.ts)}</span></div>`;
         thread.appendChild(node);
       });
+    }
+
+    function setCorrectionStatus(message) {
+      $("correctionStatus").textContent = message;
+    }
+
+    function lastMessage(role) {
+      const messages = (state.activeConversation && state.activeConversation.messages) || [];
+      for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
+        if (messages[idx].role === role) return messages[idx];
+      }
+      return null;
+    }
+
+    function renderCorrections() {
+      $("correctionBadge").textContent = String(state.corrections.length);
+      const items = state.corrections || [];
+      $("correctionList").innerHTML = items.length ? items.slice(0, 20).map((item) => `
+        <div class="lead">
+          <div class="row">
+            <strong>${escapeHtml(item.brand_id)} #${escapeHtml(item.id)}</strong>
+            <span class="${item.is_active ? 'hot' : 'cold'}">${item.is_active ? 'active' : 'inactive'}</span>
+          </div>
+          <div class="mini" style="margin-top:6px"><strong>Declencheur:</strong> ${escapeHtml(item.trigger_text)}</div>
+          <div class="mini" style="margin-top:6px"><strong>Correction:</strong> ${escapeHtml(item.corrected_answer)}</div>
+          <div class="mini" style="margin-top:6px">prio ${escapeHtml(item.priority)} | ${escapeHtml(item.updated_at || item.created_at || '')}${item.openai_synced_at ? ' | sync OpenAI ' + escapeHtml(item.openai_synced_at) : ''}${item.sync_error ? ' | sync erreur' : ''}</div>
+          <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="secondary" data-toggle-correction="${item.id}" data-next="${item.is_active ? 0 : 1}">${item.is_active ? 'Desactiver' : 'Activer'}</button>
+          </div>
+        </div>
+      `).join("") : '<div class="mini">Aucune correction memorisee pour cette marque.</div>';
+      document.querySelectorAll("[data-toggle-correction]").forEach((button) => button.addEventListener("click", async () => {
+        await api("/admin/api/corrections/" + button.dataset.toggleCorrection, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_active: Number(button.dataset.next) })
+        });
+        await loadCorrections();
+      }));
     }
 
     async function loadSession() {
@@ -228,6 +298,21 @@
       const data = await api("/admin/api/conversation/" + encodeURIComponent(id));
       state.activeConversation = data.conversation;
       renderThread();
+      await loadCorrections();
+    }
+
+    async function loadCorrectionBrands() {
+      const data = await api("/admin/api/brands");
+      state.brands = data.brands || [];
+      $("correctionBrand").innerHTML = state.brands.map((brand) => `<option value="${escapeHtml(brand.id)}">${escapeHtml(brand.display_name || brand.name || brand.id)}</option>`).join("");
+      if (!$("correctionBrand").value && state.brands.length) $("correctionBrand").value = state.brands[0].id;
+    }
+
+    async function loadCorrections() {
+      const brand = $("correctionBrand").value || "retroworld";
+      const data = await api("/admin/api/corrections?brand_id=" + encodeURIComponent(brand));
+      state.corrections = data.items || [];
+      renderCorrections();
     }
 
     async function loadAnalytics() {
@@ -263,6 +348,35 @@
     $("btnLogout").addEventListener("click", async () => { await api("/admin/api/auth/logout", { method: "POST" }); location.href = "/admin/login"; });
     $("btnCopyId").addEventListener("click", async () => { if (state.activeId) await navigator.clipboard.writeText(state.activeId); });
     $("btnCopyJson").addEventListener("click", async () => { if (state.activeConversation) await navigator.clipboard.writeText(JSON.stringify(state.activeConversation, null, 2)); });
+    $("correctionBrand").addEventListener("change", () => loadCorrections().catch((error) => setCorrectionStatus("Erreur: " + error.message)));
+    $("btnUseLastUser").addEventListener("click", () => {
+      const message = lastMessage("user");
+      if (message) $("correctionTrigger").value = message.content || "";
+    });
+    $("btnUseLastAssistant").addEventListener("click", () => {
+      const message = lastMessage("assistant");
+      if (message) $("correctionAnswer").value = message.content || "";
+    });
+    $("btnSaveCorrection").addEventListener("click", async () => {
+      const payload = {
+        brand_id: $("correctionBrand").value || "retroworld",
+        trigger_text: $("correctionTrigger").value.trim(),
+        corrected_answer: $("correctionAnswer").value.trim(),
+        notes: $("correctionNotes").value.trim(),
+        priority: Number($("correctionPriority").value || 60),
+        source_conversation_id: state.activeId || ""
+      };
+      if (!payload.trigger_text || !payload.corrected_answer) {
+        setCorrectionStatus("Ajoutez un declencheur et une reponse corrigee.");
+        return;
+      }
+      setCorrectionStatus("Enregistrement...");
+      await api("/admin/api/corrections", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
+      $("correctionAnswer").value = "";
+      $("correctionNotes").value = "";
+      setCorrectionStatus("Correction memorisee. Elle sera reinjectee sur les prochaines questions proches.");
+      await loadCorrections();
+    });
     $("btnCreateUser").addEventListener("click", async () => {
       const username = $("newUserName").value.trim();
       const password = $("newUserPassword").value;
@@ -276,7 +390,8 @@
     (async function init() {
       try {
         await loadSession();
-        await Promise.all([loadConversations(), loadAnalytics()]);
+        await loadCorrectionBrands();
+        await Promise.all([loadConversations(), loadAnalytics(), loadCorrections()]);
       } catch (error) {
         $("sessionMeta").textContent = "Erreur: " + error.message;
       }

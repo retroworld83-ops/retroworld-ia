@@ -3,52 +3,76 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Widget IA Pole Loisirs</title>
+  <title>Assistant IA Retroworld</title>
   <style>
-    :root{--rw-bg:#06101d;--rw-panel:#0c1525;--rw-panel2:#111f36;--rw-line:rgba(148,163,184,.22);--rw-text:#e8eefc;--rw-muted:#95a6c5;--rw-primary:#0ea5e9;--rw-accent:#22c55e;--rw-warm:#f59e0b;--rw-shadow:0 24px 60px rgba(0,0,0,.55)}
-    html,body{margin:0;padding:0;background:transparent;font-family:Segoe UI,system-ui,sans-serif;color:var(--rw-text)}
-    #rw-launcher{position:fixed;right:20px;bottom:20px;z-index:99999;display:flex;align-items:center;gap:10px;padding:12px 18px;border-radius:999px;background:linear-gradient(135deg,rgba(14,165,233,.95),rgba(34,197,94,.9));color:#04111c;font-weight:900;box-shadow:0 0 28px rgba(14,165,233,.45);cursor:pointer}
-    #rw-panel{position:fixed;right:20px;bottom:86px;z-index:99999;width:560px;max-width:calc(100vw - 32px);max-height:82vh;background:linear-gradient(180deg,var(--rw-bg),#030711);border:1px solid var(--rw-line);border-radius:24px;box-shadow:var(--rw-shadow);overflow:hidden;display:none}
+    :root{--rw-bg:#090c14;--rw-panel:#111525;--rw-panel2:#191f33;--rw-line:rgba(255,255,255,.12);--rw-text:#fff7ea;--rw-muted:#d0c4ae;--rw-primary:#ff7a00;--rw-accent:#ffe082;--rw-secondary:#2dc7ff;--rw-chip:#242a3d;--rw-shadow:0 28px 80px rgba(0,0,0,.58)}
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:transparent;font-family:Trebuchet MS,Segoe UI,system-ui,sans-serif;color:var(--rw-text)}
+    #rw-launcher{position:fixed;right:20px;bottom:20px;z-index:99999;display:flex;align-items:center;gap:12px;padding:12px 18px 12px 14px;border-radius:999px;background:radial-gradient(circle at 18% 50%,rgba(255,224,130,.42),transparent 24%),linear-gradient(135deg,rgba(255,122,0,.97),rgba(255,190,92,.97));color:#170f08;font-weight:1000;box-shadow:0 18px 40px rgba(255,122,0,.35);cursor:pointer;border:1px solid rgba(255,255,255,.22)}
+    .rw-launcher-logo{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid rgba(23,15,8,.18);background:#fff4dd}
+    .rw-launcher-copy{display:flex;flex-direction:column;line-height:1.05}
+    .rw-launcher-copy small{font-size:10px;letter-spacing:.18em;text-transform:uppercase;opacity:.82}
+    #rw-panel{position:fixed;right:20px;bottom:88px;z-index:99999;width:580px;max-width:calc(100vw - 32px);max-height:84vh;background:radial-gradient(circle at top right,rgba(45,199,255,.12),transparent 30%),radial-gradient(circle at top left,rgba(255,122,0,.18),transparent 34%),linear-gradient(180deg,#141927,#090b13 76%);border:1px solid var(--rw-line);border-radius:28px;box-shadow:var(--rw-shadow);overflow:hidden;display:none}
     #rw-panel.open{display:flex;flex-direction:column}
-    .rw-header{padding:14px 16px;background:linear-gradient(135deg,rgba(14,165,233,.95),rgba(34,197,94,.8));color:#04111c;display:flex;justify-content:space-between;align-items:center}
-    .rw-title{font-size:17px;font-weight:1000}.rw-close{background:transparent;border:0;color:#04111c;font-size:22px;cursor:pointer}
-    .rw-tabs{display:flex;gap:8px;padding:10px;background:#05101b;border-bottom:1px solid var(--rw-line)}
-    .rw-tab{flex:1;border:1px solid var(--rw-line);background:rgba(255,255,255,.03);color:var(--rw-text);padding:10px 12px;border-radius:999px;font-weight:900;cursor:pointer}
-    .rw-tab.active{background:linear-gradient(135deg,rgba(14,165,233,.95),rgba(34,197,94,.8));color:#04111c}
-    .rw-body{display:none;padding:12px;overflow:auto;background:radial-gradient(circle at top,#13253b 0,#030711 70%)}
+    .rw-header{padding:18px 18px 16px;background:linear-gradient(135deg,rgba(255,122,0,.96),rgba(255,184,77,.92) 52%,rgba(255,224,130,.94));color:#180f08;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;border-bottom:1px solid rgba(255,255,255,.14)}
+    .rw-brand{display:flex;gap:14px;align-items:center}
+    .rw-brand-logo{width:52px;height:52px;border-radius:16px;object-fit:cover;background:#fff5e4;border:2px solid rgba(24,15,8,.12);box-shadow:0 8px 22px rgba(24,15,8,.18)}
+    .rw-kicker{font-size:10px;font-weight:900;letter-spacing:.22em;text-transform:uppercase;opacity:.74;margin-bottom:4px}
+    .rw-title{font-size:21px;font-weight:1000;line-height:1.02}
+    .rw-subtitle{font-size:12px;font-weight:800;max-width:360px;opacity:.78;margin-top:6px}
+    .rw-close{background:rgba(24,15,8,.08);border:0;color:#180f08;font-size:24px;cursor:pointer;width:38px;height:38px;border-radius:12px}
+    .rw-tabs{display:flex;gap:8px;padding:10px 12px;background:rgba(10,12,19,.9);border-bottom:1px solid var(--rw-line)}
+    .rw-tab{flex:1;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);color:var(--rw-text);padding:11px 12px;border-radius:999px;font-weight:900;cursor:pointer}
+    .rw-tab.active{background:linear-gradient(135deg,var(--rw-primary),#ffb85c);color:#180f08;border-color:transparent}
+    .rw-body{display:none;padding:14px;overflow:auto;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0)),radial-gradient(circle at top,rgba(45,199,255,.07),transparent 24%),linear-gradient(180deg,#171b2a 0,#090b13 74%)}
     .rw-body.active{display:block}
+    .rw-highlight-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+    .rw-pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);font-size:11px;color:var(--rw-muted);font-weight:900;text-transform:uppercase;letter-spacing:.08em}
     .rw-card-grid{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:12px}
-    .rw-card{padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(8,15,26,.65)}
-    .rw-card h4{margin:0 0 6px;font-size:14px}.rw-card p{margin:0;color:var(--rw-muted);font-size:12px;line-height:1.45}
-    .rw-quick{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
-    .rw-quick button{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--rw-text);padding:9px 12px;border-radius:999px;font-weight:800;cursor:pointer}
-    .rw-faq-search{display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:16px;background:rgba(6,16,29,.72);border:1px solid var(--rw-line)}
+    .rw-card{padding:14px;border-radius:18px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));backdrop-filter:blur(8px)}
+    .rw-card h4{margin:0 0 7px;font-size:14px;color:#fff1cf}
+    .rw-card p{margin:0;color:var(--rw-muted);font-size:12px;line-height:1.5}
+    .rw-quick,.rw-actions{display:flex;flex-wrap:wrap;gap:8px}
+    .rw-quick{margin-bottom:12px}
+    .rw-actions{margin:10px 0}
+    .rw-quick button,.rw-actions button{border:1px solid rgba(255,255,255,.08);background:var(--rw-chip);color:var(--rw-text);padding:10px 13px;border-radius:999px;font-weight:900;cursor:pointer;transition:transform .12s ease,background .12s ease,border-color .12s ease}
+    .rw-quick button:hover,.rw-actions button:hover{transform:translateY(-1px);border-color:rgba(255,224,130,.4)}
+    .rw-faq-search{display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:16px;background:rgba(14,16,25,.86);border:1px solid var(--rw-line)}
     .rw-faq-search input{flex:1;background:transparent;border:0;outline:none;color:var(--rw-text)}
+    .rw-faq-search button{border:0;border-radius:12px;padding:9px 12px;font-weight:900;background:rgba(255,122,0,.14);color:#ffd8b0;cursor:pointer}
     .rw-faq-list{display:grid;gap:8px;margin:12px 0}
-    .rw-faq-item{padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(8,15,26,.6);cursor:pointer}
-    .rw-answer{padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(6,16,29,.6);white-space:pre-wrap;line-height:1.5}
+    .rw-faq-item{padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);cursor:pointer}
+    .rw-answer{padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(14,16,25,.74);white-space:pre-wrap;line-height:1.55}
     .rw-thread{display:flex;flex-direction:column;gap:10px;min-height:260px;max-height:38vh;overflow:auto;padding:4px 2px}
-    .rw-msg{max-width:92%;padding:12px 14px;border-radius:14px;line-height:1.45;white-space:pre-wrap;font-size:14px}
-    .rw-msg.bot{background:rgba(8,15,26,.78);border:1px solid rgba(255,255,255,.08)}
-    .rw-msg.user{margin-left:auto;background:rgba(14,165,233,.92);color:#04111c;font-weight:900}
-    .rw-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
-    .rw-actions button{border:0;background:rgba(34,197,94,.16);color:var(--rw-text);padding:9px 12px;border-radius:999px;cursor:pointer}
+    .rw-msg{max-width:92%;padding:12px 14px;border-radius:18px;line-height:1.52;white-space:pre-wrap;font-size:14px}
+    .rw-msg.bot{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
+    .rw-msg.user{margin-left:auto;background:linear-gradient(135deg,var(--rw-primary),#ffb85c);color:#180f08;font-weight:900}
     .rw-input{display:flex;gap:8px;margin-top:10px}
-    .rw-input input{flex:1;padding:12px 14px;border-radius:999px;border:1px solid var(--rw-line);background:rgba(6,16,29,.85);color:var(--rw-text);outline:none}
-    .rw-input button{padding:12px 14px;border-radius:999px;border:0;background:linear-gradient(135deg,var(--rw-primary),var(--rw-accent));color:#04111c;font-weight:1000;cursor:pointer}
+    .rw-input input{flex:1;padding:12px 14px;border-radius:999px;border:1px solid var(--rw-line);background:rgba(14,16,25,.9);color:var(--rw-text);outline:none}
+    .rw-input button{padding:12px 16px;border-radius:999px;border:0;background:linear-gradient(135deg,var(--rw-primary),#ffbf66);color:#180f08;font-weight:1000;cursor:pointer}
     .rw-note{margin-top:10px;color:var(--rw-muted);font-size:12px}
-    @media (max-width:768px){#rw-launcher{left:12px;right:12px;bottom:14px;justify-content:center}#rw-panel{left:10px;right:10px;width:auto;bottom:78px;max-height:80vh}.rw-card-grid{grid-template-columns:1fr}}
+    @media (max-width:768px){#rw-launcher{left:12px;right:12px;bottom:14px;justify-content:center}#rw-panel{left:10px;right:10px;width:auto;bottom:84px;max-height:82vh}.rw-card-grid{grid-template-columns:1fr}.rw-header{padding:16px}.rw-brand-logo{width:46px;height:46px}.rw-title{font-size:18px}.rw-subtitle{max-width:none}}
   </style>
 </head>
 <body>
-  <div id="rw-launcher"><span>Assistant IA</span><span id="rw-launcher-label">Retroworld</span></div>
+  <div id="rw-launcher">
+    <img class="rw-launcher-logo" id="rw-launcher-logo" src="/static/retroworld-logo.png" alt="Retroworld" />
+    <div class="rw-launcher-copy">
+      <small>Assistant IA</small>
+      <span id="rw-launcher-label">Retroworld</span>
+    </div>
+  </div>
   <div id="rw-panel" aria-hidden="true">
     <div class="rw-header">
-      <div>
-        <div class="rw-title" id="rw-title">Assistant Retroworld</div>
-        <div style="font-size:12px;font-weight:700" id="rw-subtitle">Tarifs, reservations, anniversaires, FAQ</div>
+      <div class="rw-brand">
+        <img class="rw-brand-logo" id="rw-brand-logo" src="/static/retroworld-logo.png" alt="Retroworld" />
+        <div>
+          <div class="rw-kicker">Draguignan</div>
+          <div class="rw-title" id="rw-title">Assistant Retroworld</div>
+          <div class="rw-subtitle" id="rw-subtitle">VR, quiz, anniversaires et informations pratiques</div>
+        </div>
       </div>
-      <button class="rw-close" id="rw-close">×</button>
+      <button class="rw-close" id="rw-close" aria-label="Fermer">×</button>
     </div>
     <div class="rw-tabs">
       <button class="rw-tab active" data-tab="home">Accueil</button>
@@ -57,34 +81,39 @@
     </div>
 
     <div class="rw-body active" id="rw-body-home">
+      <div class="rw-highlight-bar" id="rw-highlight-bar">
+        <div class="rw-pill">VR familiale</div>
+        <div class="rw-pill">Dès 7 ans</div>
+        <div class="rw-pill">Anniversaires</div>
+      </div>
       <div class="rw-quick" id="rw-quick"></div>
       <div class="rw-card-grid" id="rw-cards"></div>
       <div class="rw-actions">
-        <button data-prompt="Je veux connaitre les tarifs">Tarifs</button>
+        <button data-prompt="Je veux connaître les tarifs">Tarifs</button>
         <button data-prompt="Je veux organiser un anniversaire">Anniversaire</button>
-        <button data-prompt="Je veux reserver">Reserver</button>
+        <button data-prompt="Je veux réserver">Réserver</button>
         <button data-prompt="Comment vous contacter ?">Contact</button>
       </div>
       <div class="rw-card" style="margin-top:12px">
-        <h4>Questions frequentes</h4>
+        <h4>Questions fréquentes</h4>
         <div id="rw-home-faq" class="rw-faq-list" style="margin:10px 0 0"></div>
       </div>
-      <div class="rw-note">Le chatbot peut guider, qualifier la demande et orienter vers le bon contact, mais ne confirme jamais lui-meme une reservation.</div>
+      <div class="rw-note">L’assistant aide pour les infos, les tarifs et l’orientation. La confirmation finale d’une réservation reste faite par l’équipe Retroworld.</div>
     </div>
 
     <div class="rw-body" id="rw-body-faq">
-      <div class="rw-faq-search"><input id="rw-faq-search" placeholder="Chercher: tarifs, horaires, anniversaire..." /><button id="rw-faq-clear">Effacer</button></div>
-      <div style="margin:10px 2px 8px;color:var(--rw-muted);font-size:12px"><span id="rw-faq-count">0</span> resultat(s)</div>
+      <div class="rw-faq-search"><input id="rw-faq-search" placeholder="Chercher : tarifs, horaires, anniversaire..." /><button id="rw-faq-clear">Effacer</button></div>
+      <div style="margin:10px 2px 8px;color:var(--rw-muted);font-size:12px"><span id="rw-faq-count">0</span> résultat(s)</div>
       <div class="rw-faq-list" id="rw-faq-list"></div>
-      <div class="rw-answer" id="rw-faq-answer">Selectionnez une question pour afficher la reponse.</div>
+      <div class="rw-answer" id="rw-faq-answer">Sélectionnez une question pour afficher la réponse.</div>
     </div>
 
     <div class="rw-body" id="rw-body-chat">
       <div class="rw-actions" id="rw-chat-actions"></div>
       <div class="rw-thread" id="rw-thread"></div>
-      <div class="rw-note" id="rw-typing" style="display:none">L'assistant ecrit...</div>
+      <div class="rw-note" id="rw-typing" style="display:none">L’assistant écrit...</div>
       <form class="rw-input" id="rw-form">
-        <input id="rw-input" placeholder="Ecrivez votre message..." autocomplete="off" />
+        <input id="rw-input" placeholder="Écrivez votre message..." autocomplete="off" />
         <button type="submit" id="rw-send">Envoyer</button>
       </form>
     </div>
@@ -97,7 +126,7 @@
 
     const qs = new URLSearchParams(location.search);
     const brand = (qs.get('brand') || qs.get('brand_id') || localStorage.getItem('rw_widget_brand') || 'retroworld').toLowerCase();
-    const normalizeBase = (v) => (v || '').trim().replace(/\/$/, '');
+    const normalizeBase = (value) => (value || '').trim().replace(/\/$/, '');
     const DEFAULT_API_BASE = 'https://retroworld-ia.onrender.com';
     const API_BASE = normalizeBase(qs.get('api') || qs.get('api_base') || qs.get('base_url') || window.RW_IA_API_BASE || localStorage.getItem('rw_widget_api_base') || DEFAULT_API_BASE);
     if (API_BASE) localStorage.setItem('rw_widget_api_base', API_BASE);
@@ -111,7 +140,34 @@
     let faqItems = [];
     let knowledge = null;
 
+    const brandThemes = {
+      retroworld: {
+        title: 'Assistant Retroworld',
+        subtitle: 'VR, escape VR, quiz et anniversaires à Draguignan',
+        greeting: 'Bonjour. Je peux vous aider pour les tarifs, les réservations, les anniversaires, les groupes et les contacts Retroworld.',
+        pills: ['VR familiale', 'Dès 7 ans', 'Hygiène prioritaire'],
+        logo: '/static/retroworld-logo.png'
+      },
+      runningman: {
+        title: 'Assistant Runningman',
+        subtitle: 'Action game, activités enfants et événements de groupe',
+        greeting: 'Bonjour. Je peux vous aider pour les activités, les anniversaires et les informations pratiques Runningman.',
+        pills: ['Action game', 'Groupes', 'Anniversaires'],
+        logo: '/static/retroworld-logo.png'
+      },
+      enigmaniac: {
+        title: 'Assistant Enigmaniac',
+        subtitle: 'Escape game en décors réels et ambiances immersives',
+        greeting: 'Bonjour. Je peux vous aider pour les salles, les tarifs, les groupes et les contacts Enigmaniac.',
+        pills: ['Escape game', 'Immersion', 'Groupes'],
+        logo: '/static/retroworld-logo.png'
+      }
+    };
+
     const $ = (id) => document.getElementById(id);
+    function escapeHtml(value){
+      return String(value || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+    }
     function setTab(tab){
       document.querySelectorAll('.rw-tab').forEach((button) => button.classList.toggle('active', button.dataset.tab === tab));
       ['home','faq','chat'].forEach((name) => $('rw-body-' + name).classList.toggle('active', name === tab));
@@ -128,16 +184,27 @@
       $('rw-input').value = text;
       $('rw-form').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
     }
+    function applyBrandTheme(){
+      const theme = brandThemes[safeBrand] || brandThemes.retroworld;
+      $('rw-title').textContent = theme.title;
+      $('rw-subtitle').textContent = theme.subtitle;
+      $('rw-launcher-label').textContent = theme.title.replace('Assistant ', '');
+      $('rw-launcher-logo').src = theme.logo;
+      $('rw-brand-logo').src = theme.logo;
+      $('rw-highlight-bar').innerHTML = (theme.pills || []).map((item) => `<div class="rw-pill">${escapeHtml(item)}</div>`).join('');
+      return theme;
+    }
     async function loadKnowledge(){
+      const theme = applyBrandTheme();
       try{
         const response = await fetch(API_KNOWLEDGE, { headers: { 'Accept':'application/json' } });
         const data = await response.json();
         knowledge = data.brand || null;
       }catch(_e){ knowledge = null; }
-      const title = (knowledge && knowledge.short) || safeBrand;
+      const title = (knowledge && knowledge.short) || theme.title.replace('Assistant ', '');
       $('rw-title').textContent = 'Assistant ' + title;
       $('rw-launcher-label').textContent = title;
-      $('rw-subtitle').textContent = (knowledge && knowledge.summary) || 'Tarifs, reservations, anniversaires, FAQ';
+      $('rw-subtitle').textContent = (knowledge && knowledge.summary) || theme.subtitle;
       const quick = (knowledge && knowledge.quick_actions) || [];
       $('rw-quick').innerHTML = quick.map((item) => `<button data-prompt="${String(item.prompt || '').replaceAll('"','&quot;')}">${item.label || 'Action'}</button>`).join('');
       $('rw-cards').innerHTML = ((knowledge && knowledge.knowledge_cards) || []).slice(0,4).map((card) => `<div class="rw-card"><h4>${card.title || 'Offre'}</h4><p>${card.summary || ''}</p></div>`).join('');
@@ -152,7 +219,7 @@
       const q = (query || '').trim().toLowerCase();
       const filtered = faqItems.filter((item) => !q || (item.question + ' ' + item.answer + ' ' + (item.tags || []).join(' ')).toLowerCase().includes(q));
       $('rw-faq-count').textContent = String(filtered.length);
-      $('rw-faq-list').innerHTML = filtered.map((item, idx) => `<div class="rw-faq-item" data-idx="${idx}"><strong>${item.question}</strong><div style="margin-top:6px;color:var(--rw-muted);font-size:12px">${(item.tags || []).join(', ')}</div></div>`).join('') || '<div class="rw-note">Aucun resultat.</div>';
+      $('rw-faq-list').innerHTML = filtered.map((item, idx) => `<div class="rw-faq-item" data-idx="${idx}"><strong>${item.question}</strong><div style="margin-top:6px;color:var(--rw-muted);font-size:12px">${(item.tags || []).join(', ')}</div></div>`).join('') || '<div class="rw-note">Aucun résultat.</div>';
       document.querySelectorAll('.rw-faq-item').forEach((node) => node.addEventListener('click', () => { const item = filtered[Number(node.dataset.idx)]; $('rw-faq-answer').textContent = item.answer; }));
       const homeFaq = filtered.slice(0, 4);
       $('rw-home-faq').innerHTML = homeFaq.map((item, idx) => `<div class="rw-faq-item" data-home-idx="${idx}"><strong>${item.question}</strong></div>`).join('') || '<div class="rw-note">FAQ indisponible pour le moment.</div>';
@@ -161,7 +228,7 @@
         $('rw-faq-answer').textContent = item.answer;
         setTab('faq');
       }));
-      if (filtered.length && $('rw-faq-answer').textContent === 'Selectionnez une question pour afficher la reponse.') {
+      if (filtered.length && $('rw-faq-answer').textContent === 'Sélectionnez une question pour afficher la réponse.') {
         $('rw-faq-answer').textContent = filtered[0].answer;
       }
     }
@@ -187,9 +254,9 @@
           conversationId = data.conversation_id;
           localStorage.setItem(LS_CID, conversationId);
         }
-        addMsg(data.answer || data.reply || 'Je n’ai pas pu obtenir la reponse.', 'bot');
+        addMsg(data.answer || data.reply || 'Je n’ai pas pu obtenir la réponse.', 'bot');
       }catch(_e){
-        addMsg('Je rencontre un souci de connexion. Reessayez dans un instant.', 'bot');
+        addMsg('Je rencontre un souci de connexion. Réessayez dans un instant.', 'bot');
       }finally{
         $('rw-typing').style.display = 'none';
         $('rw-send').disabled = false;
@@ -210,7 +277,8 @@
       sendChat(text);
     });
 
-    addMsg('Bonjour. Je peux vous aider pour les tarifs, reservations, anniversaires, groupes et contacts.', 'bot');
+    const initialTheme = applyBrandTheme();
+    addMsg(initialTheme.greeting, 'bot');
     loadKnowledge();
     loadFaq();
     setTab((qs.get('tab') || 'home').toLowerCase() === 'chat' ? 'chat' : ((qs.get('tab') || 'home').toLowerCase() === 'faq' ? 'faq' : 'home'));

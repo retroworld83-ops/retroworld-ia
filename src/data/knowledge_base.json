@@ -26,12 +26,13 @@
         "retroworldfrance.com",
         "www.retroworldfrance.com"
       ],
-      "summary": "Centre de loisirs axe VR, quiz et anniversaires.",
+      "summary": "VR, escape VR, quiz et anniversaires a Draguignan pour enfants, ados, adultes et familles.",
       "highlights": [
         "Jeux VR arcade",
         "Escape game VR",
         "Quiz immersifs",
-        "Anniversaires et gouters"
+        "Anniversaires et gouters",
+        "Activites des 7 ans"
       ],
       "quick_actions": [
         {
@@ -47,6 +48,10 @@
           "prompt": "Je veux organiser un anniversaire chez Retroworld"
         },
         {
+          "label": "Des 7 ans",
+          "prompt": "A partir de quel age peut-on jouer chez Retroworld ?"
+        },
+        {
           "label": "Contact",
           "prompt": "Comment contacter Retroworld ?"
         }
@@ -58,11 +63,15 @@
         },
         {
           "title": "Escape game VR",
-          "summary": "Sessions plus longues, immersives, ideales pour les groupes en recherche de challenge."
+          "summary": "Sessions plus longues, immersives, ideales pour les groupes qui veulent une vraie aventure cooperative."
         },
         {
           "title": "Quiz",
-          "summary": "Activite sociale et competitive adaptee aux anniversaires et petits groupes."
+          "summary": "Activite sociale et competitive adaptee aux anniversaires, familles et petits groupes."
+        },
+        {
+          "title": "Hygiene et confort",
+          "summary": "Le materiel VR est nettoye entre chaque session pour une experience plus sereine."
         },
         {
           "title": "Anniversaire",
@@ -92,6 +101,12 @@
           "category": "Quiz",
           "price": "Selon formule",
           "details": "Activite de groupe et anniversaires sur reservation."
+        },
+        {
+          "name": "Formules anniversaire",
+          "category": "Evenement",
+          "price": "Selon formule",
+          "details": "Demande qualifiee par le bot, puis validation manuelle par l'equipe Retroworld."
         }
       ]
     },
