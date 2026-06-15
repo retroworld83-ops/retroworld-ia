@@ -3,86 +3,128 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Admin Retroworld IA</title>
+  <title>Centre de messages Retroworld IA</title>
   <style>
-    :root{--bg:#0b1018;--panel:#171e2a;--panel2:#111823;--line:#323d4f;--text:#f7fbff;--muted:#b4c0d3;--accent:#45c4ff;--accent2:#38d978;--warn:#f6b64d;--bad:#ff6b6b;--radius:12px}
-    *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.45}
-    .top{position:sticky;top:0;z-index:9;background:#0b1018;border-bottom:1px solid var(--line)}
-    .top-inner,.wrap{max-width:1440px;margin:0 auto;padding:16px}
-    .top-inner{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
-    .brand{font-weight:1000;font-size:18px}.muted{color:var(--muted);font-size:13px}
-    .actions{display:flex;gap:10px;flex-wrap:wrap}
+    :root{
+      --bg:#050911;--panel:#0a111c;--panel2:#101927;--panel3:#182231;
+      --line:#263344;--text:#f8fbff;--muted:#aeb8c8;--soft:#778499;
+      --retro:#8b5cf6;--retro2:#14b8ff;--run:#ff6532;--blue:#38bdf8;
+      --good:#38d978;--warn:#ffb74a;--bad:#ff5d5d;--radius:12px
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Segoe UI,system-ui,sans-serif;font-size:15px;line-height:1.45;overflow:hidden}
     button,a.btn,select,input,textarea{font:inherit}
-    button,a.btn{border:0;border-radius:10px;min-height:42px;padding:10px 14px;font-weight:850;cursor:pointer;text-decoration:none}
-    .primary{background:var(--accent);color:#06111a}
-    .secondary{background:#202939;color:var(--text);border:1px solid var(--line)}
-    .wrap{display:grid;grid-template-columns:380px 1fr;gap:16px}
-    @media (max-width:1080px){.wrap{grid-template-columns:1fr}}
-    .stack{display:flex;flex-direction:column;gap:16px}
-    .dashboard-card{order:3}.conversation-card{order:1}.correction-card{order:2}
-    .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
-    .card-h{padding:15px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
-    .title{font-size:13px;text-transform:uppercase;color:#d7e2f4;font-weight:950;letter-spacing:.06em}
-    .search{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap}
-    .search input,.search select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
-    .search input{flex:1;min-width:180px}
-    .list{max-height:calc(100vh - 230px);overflow:auto}
-    .item{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer}
-    .item:hover,.item.active{background:#223044}
-    .row{display:flex;justify-content:space-between;gap:10px;align-items:center}
-    .badge{display:inline-flex;gap:6px;align-items:center;padding:5px 9px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--muted)}
-    .thread{padding:16px;display:flex;flex-direction:column;gap:12px;min-height:320px;max-height:560px;overflow:auto;background:#101722}
-    .msg{max-width:90%;padding:13px 15px;border-radius:12px;line-height:1.55;white-space:pre-wrap;border:1px solid var(--line);background:#1b2432;font-size:15px}
-    .msg.user{margin-left:auto;background:#17354b;border-color:#35698e}
-    .msg.assistant{background:#1b2432}
-    .msg-foot{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}
-    .empty{padding:22px;color:var(--muted)}
-    .pane-toolbar{padding:14px 16px;border-top:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap}
-    .correction-form{padding:16px;display:grid;gap:10px}
+    button,a.btn{min-height:42px;border:0;border-radius:10px;padding:10px 14px;font-weight:850;cursor:pointer;text-decoration:none}
+    .primary{background:linear-gradient(135deg,var(--retro),var(--retro2));color:white}
+    .secondary{background:#121c2a;color:var(--text);border:1px solid var(--line)}
+    .topbar{height:76px;display:grid;grid-template-columns:370px minmax(280px,1fr) auto;gap:24px;align-items:center;padding:0 18px;border-bottom:1px solid #111a27;background:#050911}
+    .brand-title h1{margin:0;font-size:28px;line-height:1;font-weight:1000;letter-spacing:-.02em}
+    .brand-line{margin-top:8px;font-size:18px;font-weight:900;color:white}
+    .brand-retro{color:#9f7cff}.brand-run{color:#ff7b42}
+    .global-search{height:54px;border:1px solid var(--line);background:#0a111c;border-radius:12px;display:flex;align-items:center;gap:14px;padding:0 18px;color:var(--muted)}
+    .global-search svg{width:22px;height:22px;stroke:var(--muted);flex:0 0 auto}
+    .global-search input{width:100%;border:0;outline:0;background:transparent;color:var(--text);font-size:16px}
+    .top-actions{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+    .workspace{height:calc(100vh - 76px);display:grid;grid-template-columns:360px minmax(0,1fr);gap:8px;padding:0 8px 8px}
+    .sidebar,.chat-panel{min-height:0;background:linear-gradient(180deg,#0b121d,#060b13);border:1px solid var(--line)}
+    .sidebar{border-radius:0 0 12px 12px;display:flex;flex-direction:column;overflow:hidden}
+    .sidebar-head{height:58px;padding:0 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #182232}
+    .sidebar-head strong{font-size:16px}
+    .sidebar-head select{background:transparent;border:0;color:var(--muted);outline:0;max-width:150px}
+    .list{min-height:0;overflow:auto;padding:8px;display:grid;gap:6px}
+    .item{position:relative;display:grid;grid-template-columns:54px minmax(0,1fr) auto;gap:10px;align-items:start;padding:14px 12px;border-radius:10px;border:1px solid #172232;background:#0b121d;cursor:pointer;min-height:108px}
+    .item:hover,.item.active{background:#101a29;border-color:#364866}
+    .item.active{box-shadow:inset 0 0 0 1px var(--retro),0 0 0 1px rgba(20,184,255,.45)}
+    .avatar{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:#271b48;border:2px solid var(--retro);font-weight:1000;font-size:18px;position:relative}
+    .avatar.runningman{background:#33170f;border-color:var(--run)}
+    .avatar.assistant{background:#1b2652;border-color:#536dff}
+    .avatar:after{content:"";position:absolute;right:-3px;bottom:4px;width:12px;height:12px;border-radius:50%;background:var(--retro);border:2px solid #0b121d}
+    .avatar.runningman:after{background:var(--run)}
+    .avatar.assistant:after{background:var(--blue)}
+    .conv-main{min-width:0}
+    .conv-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+    .conv-name{font-size:18px;font-weight:1000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .conv-time{font-size:13px;color:#c5cfdd}
+    .conv-brand{margin-top:2px;font-size:14px;font-weight:900}
+    .conv-brand.retroworld{color:#9f7cff}.conv-brand.runningman{color:#ff7b42}.conv-brand.enigmaniac{color:#38d978}
+    .conv-preview{margin-top:6px;color:#c3ccd9;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .conv-pill{align-self:center;min-width:22px;height:22px;border-radius:999px;background:linear-gradient(135deg,var(--retro),#4f46e5);display:grid;place-items:center;font-size:12px;font-weight:1000}
+    .chat-panel{border-radius:0 0 12px 12px;display:grid;grid-template-rows:88px minmax(0,1fr) auto;overflow:hidden}
+    .chat-head{padding:0 18px;border-bottom:1px solid #182232;display:flex;align-items:center;justify-content:space-between;gap:16px}
+    .chat-person{display:flex;align-items:center;gap:14px;min-width:0}
+    .chat-title-row{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap}
+    .chat-name{font-size:18px;font-weight:1000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .brand-badge{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:8px;background:#241b55;color:#bda7ff;font-weight:900}
+    .brand-badge.runningman{background:#3a1b11;color:#ff9b70}
+    .brand-badge.enigmaniac{background:#123227;color:#79edb2}
+    .chat-sub{color:var(--muted);margin-top:3px}
+    .chat-icons{display:flex;gap:8px}
+    .icon-btn{width:42px;height:42px;display:grid;place-items:center;border-radius:10px;background:transparent;color:#cdd7e7;border:0;font-size:22px}
+    .thread{min-height:0;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:18px;background:linear-gradient(180deg,#07101b,#060a12)}
+    .empty{padding:28px;color:var(--muted)}
+    .message-row{display:grid;grid-template-columns:48px minmax(0,680px) 48px;gap:10px;align-items:end}
+    .message-row.outgoing{justify-content:end}
+    .message-row.outgoing .avatar{grid-column:3}
+    .message-row.outgoing .bubble{grid-column:2;grid-row:1;justify-self:end}
+    .message-row.incoming .bubble{grid-column:2}
+    .bubble{position:relative;padding:14px 16px;border-radius:10px;line-height:1.48;white-space:pre-wrap;border:1px solid #344054;background:#17202c;color:#f5f7fb;box-shadow:0 12px 28px rgba(0,0,0,.18)}
+    .bubble.assistant{max-width:560px;background:linear-gradient(180deg,#11182a,#0d1424);border-color:#754aff;box-shadow:0 0 0 1px rgba(20,184,255,.35)}
+    .bubble.user{max-width:460px}
+    .bubble-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:8px;font-size:12px;color:#aeb8c8}
+    .seen{color:#20d8ff;font-weight:900}
+    .correction-dock{border-top:1px solid #1c2737;background:#08101b;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px;padding:12px 16px}
+    .reply-tools{display:grid;gap:10px}
+    .reply-tools textarea{width:100%;min-height:70px;resize:vertical;border:1px solid var(--line);border-radius:10px;background:#0f1825;color:var(--text);padding:12px}
+    .tool-row{display:flex;gap:8px;flex-wrap:wrap}
+    .field-grid{display:grid;grid-template-columns:1fr 100px;gap:8px}
     .field{display:grid;gap:6px}
-    .field span{font-size:13px;color:#d7e2f4;font-weight:850}
-    .correction-form textarea,.correction-form input,.correction-form select{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
-    .correction-form textarea{min-height:112px;resize:vertical}
-    .correction-grid{display:grid;grid-template-columns:1fr 140px;gap:10px}
-    @media (max-width:720px){.correction-grid{grid-template-columns:1fr}}
-    .kpis{padding:16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-    @media (max-width:1080px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    .kpi{padding:14px;border-radius:14px;background:rgba(6,11,20,.45);border:1px solid rgba(255,255,255,.06)}
-    .kpi .label{font-size:12px;color:var(--muted)} .kpi .value{font-size:28px;font-weight:900;margin-top:6px}
-    .split{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:0 16px 16px}
-    @media (max-width:1080px){.split{grid-template-columns:1fr}}
-    .subcard{background:rgba(6,11,20,.45);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px}
+    .field span{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#cbd5e1;font-weight:900}
+    .field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:10px;background:#0f1825;color:var(--text);padding:10px 11px}
+    .side-tools{display:grid;gap:10px}
+    .correction-list{max-height:112px;overflow:auto;display:grid;gap:8px}
+    .lead,.mini-card{border:1px solid #263344;background:#0f1825;border-radius:10px;padding:10px 11px}
     .mini{font-size:12px;color:var(--muted)}
-    .lead-list{display:grid;gap:10px}
-    .lead{padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)}
-    .hot{color:#86efac}.warm{color:#fde68a}.cold{color:#93c5fd}
+    .hot{color:#8af0a8}.warm{color:#ffe08a}.cold{color:#8fbfff}
+    details.admin-drawer{border-top:1px solid #1c2737;background:#080f18}
+    details.admin-drawer summary{cursor:pointer;padding:12px 16px;color:#dce8f8;font-weight:900}
+    .drawer-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:0 16px 16px}
+    .kpis{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+    .kpi,.subcard{border:1px solid #263344;background:#0f1825;border-radius:10px;padding:12px}
+    .kpi .label{font-size:12px;color:var(--muted)}.kpi .value{font-size:26px;font-weight:1000;margin-top:4px}
+    .split{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .lead-list{display:grid;gap:8px;margin-top:8px}
     pre{margin:0;white-space:pre-wrap;font-family:Consolas,monospace;font-size:11px;color:#cdd9f0}
+    @media (max-width:1120px){
+      body{overflow:auto}.topbar{height:auto;grid-template-columns:1fr;padding:14px;gap:12px}.workspace{height:auto;grid-template-columns:1fr}.sidebar{max-height:380px}.chat-panel{min-height:720px}.correction-dock{grid-template-columns:1fr}.drawer-grid,.split{grid-template-columns:1fr}
+    }
   </style>
 </head>
 <body>
-  <div class="top">
-    <div class="top-inner">
-      <div>
-        <div class="brand">Admin Retroworld IA</div>
-        <div class="muted" id="sessionMeta">Chargement de session...</div>
-      </div>
-      <div class="actions">
-        <a class="btn secondary" href="/admin/faq">FAQ</a>
-        <a class="btn secondary" href="/admin/knowledge">Base metier</a>
-        <button class="secondary" id="btnExport">Export CSV</button>
-        <button class="secondary" id="btnLogout">Déconnexion</button>
-        <button class="primary" id="btnRefresh">Rafraîchir</button>
-      </div>
+  <header class="topbar">
+    <div class="brand-title">
+      <h1>Centre de messages</h1>
+      <div class="brand-line"><span class="brand-retro">Retroworld</span> &amp; <span class="brand-run">Runningman</span></div>
     </div>
-  </div>
+    <label class="global-search">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M10.8 18.2a7.4 7.4 0 1 1 0-14.8 7.4 7.4 0 0 1 0 14.8Zm5.3-2.1 4.5 4.5" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="searchInput" placeholder="Rechercher un message, un client..." />
+    </label>
+    <div class="top-actions">
+      <a class="btn secondary" href="/admin/faq">FAQ</a>
+      <a class="btn secondary" href="/admin/knowledge">Base métier</a>
+      <button class="secondary" id="btnExport">Export CSV</button>
+      <button class="secondary" id="btnLogout">Déconnexion</button>
+      <button class="primary" id="btnRefresh">Rafraîchir</button>
+    </div>
+  </header>
 
-  <div class="wrap">
-    <div class="card">
-      <div class="card-h"><div class="title">Conversations</div><div class="badge" id="countBadge">0</div></div>
-      <div class="search">
-        <input id="searchInput" placeholder="Recherche par id, marque, flags, preview..." />
+  <main class="workspace">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <strong>Conversations</strong>
         <select id="flagFilter">
-          <option value="all">Tous les flags</option>
+          <option value="all">Toutes</option>
           <option value="a_valider">À valider</option>
           <option value="devis">Devis</option>
           <option value="reservation">Réservation</option>
@@ -92,82 +134,79 @@
         </select>
       </div>
       <div class="list" id="conversationList"></div>
-    </div>
+    </aside>
 
-    <div class="stack">
-      <div class="card dashboard-card">
-        <div class="card-h">
-          <div class="title">Dashboard</div>
-          <div class="badge" id="diagBadge">Analytics</div>
+    <section class="chat-panel">
+      <header class="chat-head">
+        <div class="chat-person">
+          <div class="avatar" id="activeAvatar">IA</div>
+          <div>
+            <div class="chat-title-row">
+              <div class="chat-name" id="activeName">Aucune conversation</div>
+              <span class="brand-badge" id="activeBrand">Retroworld</span>
+            </div>
+            <div class="chat-sub" id="activeSubtitle">Conversation via Chatbot</div>
+          </div>
         </div>
-        <div class="kpis" id="kpis"></div>
-        <div class="split">
-          <div class="subcard">
-            <div class="title">Par marque</div>
-            <pre id="brandsStats">-</pre>
+        <div class="chat-icons">
+          <button class="icon-btn" title="Tag">◇</button>
+          <button class="icon-btn" title="Important">☆</button>
+          <button class="icon-btn" title="Options">⋮</button>
+        </div>
+      </header>
+
+      <div class="thread" id="thread"></div>
+
+      <section>
+        <div class="correction-dock">
+          <div class="reply-tools">
+            <div class="field">
+              <span>Réponse corrigée</span>
+              <textarea id="correctionAnswer" placeholder="Réponse exacte que l'assistant devra suivre"></textarea>
+            </div>
+            <div class="tool-row">
+              <button class="secondary" id="btnUseLastUser">Reprendre la question</button>
+              <button class="secondary" id="btnUseLastAssistant">Reprendre la réponse</button>
+              <button class="primary" id="btnSaveCorrection">Enregistrer correction</button>
+            </div>
+            <div class="mini" id="correctionStatus">Prêt.</div>
           </div>
-          <div class="subcard">
-            <div class="title">Par flag</div>
-            <pre id="flagsStats">-</pre>
+          <div class="side-tools">
+            <div class="field-grid">
+              <label class="field"><span>Marque</span><select id="correctionBrand"></select></label>
+              <label class="field"><span>Priorité</span><input id="correctionPriority" type="number" min="0" max="100" value="60" title="Priorité" /></label>
+            </div>
+            <label class="field"><span>Déclencheur</span><textarea id="correctionTrigger" placeholder="Question client ou sujet à reconnaître"></textarea></label>
+            <label class="field"><span>Note interne</span><input id="correctionNotes" placeholder="Contexte optionnel" /></label>
+            <div class="correction-list" id="correctionList"></div>
+            <div class="mini">Corrections <span id="correctionBadge">0</span></div>
           </div>
-          <div class="subcard">
-            <div class="title">Leads récents</div>
-            <div class="lead-list" id="leadList"></div>
-          </div>
-          <div class="subcard">
-            <div class="title">Logs récents</div>
-            <pre id="recentLogs">-</pre>
-          </div>
-          <div class="subcard">
-            <div class="title">Utilisateurs admin</div>
-            <div class="lead-list" id="userList"></div>
-            <div style="display:grid;gap:8px;margin-top:12px">
-              <input id="newUserName" placeholder="Nouvel utilisateur" style="background:var(--panel2);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 12px" />
-              <input id="newUserPassword" type="password" placeholder="Mot de passe" style="background:var(--panel2);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 12px" />
-              <button class="primary" id="btnCreateUser">Créer l'utilisateur</button>
+        </div>
+
+        <details class="admin-drawer">
+          <summary>Dashboard et outils admin</summary>
+          <div class="drawer-grid">
+            <div class="kpis" id="kpis"></div>
+            <div class="split">
+              <div class="subcard"><div class="mini">Par marque</div><pre id="brandsStats">-</pre></div>
+              <div class="subcard"><div class="mini">Par flag</div><pre id="flagsStats">-</pre></div>
+              <div class="subcard"><div class="mini">Leads récents</div><div class="lead-list" id="leadList"></div></div>
+              <div class="subcard"><div class="mini">Logs récents</div><pre id="recentLogs">-</pre></div>
+              <div class="subcard">
+                <div class="mini">Utilisateurs admin</div>
+                <div class="lead-list" id="userList"></div>
+                <div style="display:grid;gap:8px;margin-top:12px">
+                  <input id="newUserName" placeholder="Nouvel utilisateur" style="background:#0f1825;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 12px" />
+                  <input id="newUserPassword" type="password" placeholder="Mot de passe" style="background:#0f1825;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 12px" />
+                  <button class="primary" id="btnCreateUser">Créer l'utilisateur</button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
-
-      <div class="card conversation-card">
-        <div class="card-h">
-          <div class="title">Conversation</div>
-          <div class="badge" id="activeMeta">Aucune selection</div>
-        </div>
-        <div class="thread" id="thread"></div>
-        <div class="empty" id="emptyState">Sélectionnez une conversation à gauche.</div>
-        <div class="pane-toolbar">
-          <button class="secondary" id="btnCopyId">Copier id</button>
-          <button class="secondary" id="btnCopyJson">Copier JSON</button>
-          <button class="primary" id="btnReloadOne">Recharger la conversation</button>
-        </div>
-      </div>
-
-      <div class="card correction-card">
-        <div class="card-h">
-          <div class="title">Mémoire de corrections IA</div>
-          <div class="badge" id="correctionBadge">0</div>
-        </div>
-        <div class="correction-form">
-          <div class="correction-grid">
-            <label class="field"><span>Marque</span><select id="correctionBrand"></select></label>
-            <label class="field"><span>Priorité</span><input id="correctionPriority" type="number" min="0" max="100" value="60" title="Priorité" /></label>
-          </div>
-          <label class="field"><span>Déclencheur</span><textarea id="correctionTrigger" placeholder="Question client ou sujet à reconnaître"></textarea></label>
-          <label class="field"><span>Réponse corrigée</span><textarea id="correctionAnswer" placeholder="Réponse exacte que l'assistant devra suivre"></textarea></label>
-          <label class="field"><span>Note interne</span><input id="correctionNotes" placeholder="Contexte optionnel" /></label>
-          <div class="actions">
-            <button class="secondary" id="btnUseLastUser">Reprendre la question</button>
-            <button class="secondary" id="btnUseLastAssistant">Reprendre la réponse</button>
-            <button class="primary" id="btnSaveCorrection">Enregistrer correction</button>
-          </div>
-          <div class="mini" id="correctionStatus">Prêt.</div>
-          <div class="lead-list" id="correctionList"></div>
-        </div>
-      </div>
-    </div>
-  </div>
+        </details>
+      </section>
+    </section>
+  </main>
 
   <script>
     const $ = (id) => document.getElementById(id);
@@ -186,17 +225,41 @@
       return String(value || "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
     }
 
+    function brandClass(brandId) {
+      return ["retroworld", "runningman", "enigmaniac"].includes(brandId || "") ? brandId : "retroworld";
+    }
+
+    function brandLabel(brandId) {
+      if (brandId === "runningman") return "Runningman";
+      if (brandId === "enigmaniac") return "Enigmaniac";
+      return "Retroworld";
+    }
+
     function roleLabel(role) {
       if (role === "user") return "Client";
       if (role === "assistant") return "Assistant";
       return role || "-";
     }
 
+    function initialsFor(value, fallback = "IA") {
+      const clean = String(value || "").replace(/[^a-zA-Z0-9 ]/g, " ").trim();
+      if (!clean) return fallback;
+      const parts = clean.split(/\s+/).filter(Boolean);
+      if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+      return clean.slice(0, 2).toUpperCase();
+    }
+
+    function displayName(item) {
+      const metaName = item.user_id || "";
+      if (metaName) return metaName;
+      return "Conversation " + String(item.id || "").replace(/^../, "").slice(0, 6).toUpperCase();
+    }
+
     function applyFilters() {
       const query = ($("searchInput").value || "").trim().toLowerCase();
       const flag = $("flagFilter").value;
       state.filtered = state.conversations.filter((item) => {
-        const hay = [item.id, item.brand_id, item.preview, (item.flags || []).join(" ")].join(" ").toLowerCase();
+        const hay = [item.id, displayName(item), item.brand_id, item.preview, (item.flags || []).join(" ")].join(" ").toLowerCase();
         return (!query || hay.includes(query)) && (flag === "all" || (item.flags || []).includes(flag));
       });
     }
@@ -204,21 +267,26 @@
     function renderConversationList() {
       const list = $("conversationList");
       list.innerHTML = "";
-      $("countBadge").textContent = String(state.filtered.length);
       if (!state.filtered.length) {
         list.innerHTML = '<div class="empty">Aucune conversation.</div>';
         return;
       }
       state.filtered.forEach((item) => {
+        const bClass = brandClass(item.brand_id);
+        const name = displayName(item);
         const node = document.createElement("div");
         node.className = "item" + (item.id === state.activeId ? " active" : "");
         node.innerHTML = `
-          <div class="row">
-            <div><div>${escapeHtml(item.id)}</div><div class="mini">${escapeHtml(item.brand_id || "-")}</div></div>
-            <div class="badge">${escapeHtml((item.flags || []).join(", ") || "aucun flag")}</div>
+          <div class="avatar ${bClass}">${escapeHtml(initialsFor(name, "CL"))}</div>
+          <div class="conv-main">
+            <div class="conv-top">
+              <div class="conv-name">${escapeHtml(name)}</div>
+              <div class="conv-time">${escapeHtml((item.last || item.created || "").slice(11, 16))}</div>
+            </div>
+            <div class="conv-brand ${bClass}">${escapeHtml(brandLabel(item.brand_id))}</div>
+            <div class="conv-preview">${escapeHtml(item.preview || "Pas encore de message")}</div>
           </div>
-          <div class="mini" style="margin-top:8px">${escapeHtml(item.preview || "Pas encore de message")}</div>
-          <div class="mini" style="margin-top:8px">${escapeHtml(item.last || item.created || "")}</div>
+          <div class="conv-pill">${escapeHtml(item.count || 0)}</div>
         `;
         node.addEventListener("click", async () => {
           state.activeId = item.id;
@@ -229,25 +297,52 @@
       });
     }
 
-    function renderThread() {
-      const thread = $("thread");
-      const empty = $("emptyState");
-      thread.innerHTML = "";
+    function updateActiveHeader() {
       if (!state.activeConversation) {
-        empty.style.display = "block";
+        $("activeName").textContent = "Aucune conversation";
+        $("activeBrand").textContent = "Retroworld";
+        $("activeBrand").className = "brand-badge";
+        $("activeSubtitle").textContent = "Conversation via Chatbot";
+        $("activeAvatar").textContent = "IA";
+        $("activeAvatar").className = "avatar";
         return;
       }
-      empty.style.display = "none";
-      $("activeMeta").textContent = `${state.activeConversation.id} | ${(state.activeConversation.meta || {}).brand_id || "-"} | ${(state.activeConversation.flags || []).join(", ") || "aucun flag"}`;
+      const meta = state.activeConversation.meta || {};
+      const brand = meta.brand_id || "retroworld";
+      const name = meta.user_id || ("Conversation " + String(state.activeConversation.id || "").slice(-6).toUpperCase());
+      $("activeName").textContent = name;
+      $("activeBrand").textContent = brandLabel(brand);
+      $("activeBrand").className = "brand-badge " + brandClass(brand);
+      $("activeSubtitle").textContent = "Conversation via Chatbot";
+      $("activeAvatar").textContent = initialsFor(name, "CL");
+      $("activeAvatar").className = "avatar " + brandClass(brand);
+    }
+
+    function renderThread() {
+      const thread = $("thread");
+      thread.innerHTML = "";
+      updateActiveHeader();
+      if (!state.activeConversation) {
+        thread.innerHTML = '<div class="empty">Sélectionnez une conversation.</div>';
+        return;
+      }
       if ((state.activeConversation.meta || {}).brand_id && $("correctionBrand").value !== (state.activeConversation.meta || {}).brand_id) {
         $("correctionBrand").value = (state.activeConversation.meta || {}).brand_id;
       }
       (state.activeConversation.messages || []).forEach((message) => {
-        const node = document.createElement("div");
-        node.className = "msg " + (message.role === "user" ? "user" : "assistant");
-        node.innerHTML = `<div>${escapeHtml(message.content)}</div><div class="msg-foot"><span>${escapeHtml(roleLabel(message.role))}</span><span>${escapeHtml(message.ts)}</span></div>`;
-        thread.appendChild(node);
+        const outgoing = message.role === "assistant";
+        const row = document.createElement("div");
+        row.className = "message-row " + (outgoing ? "outgoing" : "incoming");
+        row.innerHTML = `
+          <div class="avatar ${outgoing ? "assistant" : brandClass((state.activeConversation.meta || {}).brand_id)}">${outgoing ? "IA" : escapeHtml(initialsFor($("activeName").textContent, "CL"))}</div>
+          <div class="bubble ${outgoing ? "assistant" : "user"}">
+            <div>${escapeHtml(message.content)}</div>
+            <div class="bubble-foot"><span>${escapeHtml((message.ts || "").slice(11, 16))}</span>${outgoing ? '<span class="seen">✓✓</span>' : ''}</div>
+          </div>
+        `;
+        thread.appendChild(row);
       });
+      thread.scrollTop = thread.scrollHeight;
     }
 
     function setCorrectionStatus(message) {
@@ -265,20 +360,18 @@
     function renderCorrections() {
       $("correctionBadge").textContent = String(state.corrections.length);
       const items = state.corrections || [];
-      $("correctionList").innerHTML = items.length ? items.slice(0, 20).map((item) => `
+      $("correctionList").innerHTML = items.length ? items.slice(0, 6).map((item) => `
         <div class="lead">
           <div class="row">
-            <strong>${escapeHtml(item.brand_id)} #${escapeHtml(item.id)}</strong>
+            <strong>${escapeHtml(brandLabel(item.brand_id))} #${escapeHtml(item.id)}</strong>
             <span class="${item.is_active ? 'hot' : 'cold'}">${item.is_active ? 'active' : 'inactive'}</span>
           </div>
-          <div class="mini" style="margin-top:6px"><strong>Déclencheur :</strong> ${escapeHtml(item.trigger_text)}</div>
-          <div class="mini" style="margin-top:6px"><strong>Correction:</strong> ${escapeHtml(item.corrected_answer)}</div>
-          <div class="mini" style="margin-top:6px">priorité ${escapeHtml(item.priority)} | ${escapeHtml(item.updated_at || item.created_at || '')}${item.openai_synced_at ? ' | sync OpenAI ' + escapeHtml(item.openai_synced_at) : ''}${item.sync_error ? ' | erreur sync' : ''}</div>
+          <div class="mini" style="margin-top:6px">${escapeHtml(item.trigger_text)}</div>
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
             <button class="secondary" data-toggle-correction="${item.id}" data-next="${item.is_active ? 0 : 1}">${item.is_active ? 'Désactiver' : 'Activer'}</button>
           </div>
         </div>
-      `).join("") : '<div class="mini">Aucune correction mémorisée pour cette marque.</div>';
+      `).join("") : '<div class="mini-card mini">Aucune correction mémorisée pour cette marque.</div>';
       document.querySelectorAll("[data-toggle-correction]").forEach((button) => button.addEventListener("click", async () => {
         await api("/admin/api/corrections/" + button.dataset.toggleCorrection, {
           method: "PUT",
@@ -294,7 +387,6 @@
       if (!sessionData.authenticated) { location.href = "/admin/login"; return; }
       state.username = sessionData.username;
       state.csrfToken = sessionData.csrf_token;
-      $("sessionMeta").textContent = `Connecté en tant que ${sessionData.username}`;
     }
 
     async function loadConversations() {
@@ -302,6 +394,10 @@
       state.conversations = data.items || [];
       applyFilters();
       renderConversationList();
+      if (!state.activeId && state.filtered.length) {
+        state.activeId = state.filtered[0].id;
+        await loadConversation(state.activeId);
+      }
     }
 
     async function loadConversation(id) {
@@ -309,6 +405,7 @@
       state.activeConversation = data.conversation;
       renderThread();
       await loadCorrections();
+      renderConversationList();
     }
 
     async function loadCorrectionBrands() {
@@ -353,11 +450,8 @@
     $("searchInput").addEventListener("input", () => { applyFilters(); renderConversationList(); });
     $("flagFilter").addEventListener("change", () => { applyFilters(); renderConversationList(); });
     $("btnRefresh").addEventListener("click", async () => { await loadConversations(); await loadAnalytics(); if (state.activeId) await loadConversation(state.activeId); });
-    $("btnReloadOne").addEventListener("click", async () => { if (state.activeId) await loadConversation(state.activeId); });
     $("btnExport").addEventListener("click", () => window.open("/admin/api/export.csv", "_blank"));
     $("btnLogout").addEventListener("click", async () => { await api("/admin/api/auth/logout", { method: "POST" }); location.href = "/admin/login"; });
-    $("btnCopyId").addEventListener("click", async () => { if (state.activeId) await navigator.clipboard.writeText(state.activeId); });
-    $("btnCopyJson").addEventListener("click", async () => { if (state.activeConversation) await navigator.clipboard.writeText(JSON.stringify(state.activeConversation, null, 2)); });
     $("correctionBrand").addEventListener("change", () => loadCorrections().catch((error) => setCorrectionStatus("Erreur: " + error.message)));
     $("btnUseLastUser").addEventListener("click", () => {
       const message = lastMessage("user");
@@ -403,7 +497,7 @@
         await loadCorrectionBrands();
         await Promise.all([loadConversations(), loadAnalytics(), loadCorrections()]);
       } catch (error) {
-        $("sessionMeta").textContent = "Erreur: " + error.message;
+        $("thread").innerHTML = '<div class="empty">Erreur: ' + escapeHtml(error.message) + '</div>';
       }
     })();
   </script>
