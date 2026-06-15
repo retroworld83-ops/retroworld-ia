@@ -5,53 +5,56 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Assistant IA Retroworld</title>
   <style>
-    :root{--rw-bg:#090c14;--rw-panel:#111525;--rw-panel2:#191f33;--rw-line:rgba(255,255,255,.12);--rw-text:#fff7ea;--rw-muted:#d0c4ae;--rw-primary:#ff7a00;--rw-accent:#ffe082;--rw-secondary:#2dc7ff;--rw-chip:#242a3d;--rw-shadow:0 28px 80px rgba(0,0,0,.58)}
+    :root{--rw-bg:#0b0f17;--rw-panel:#151a24;--rw-panel2:#1f2633;--rw-line:#333c4c;--rw-text:#fff9ef;--rw-muted:#d7cbb8;--rw-primary:#ff8a1f;--rw-primary2:#ffc36b;--rw-secondary:#2dc7ff;--rw-chip:#242b38;--rw-shadow:0 22px 58px rgba(0,0,0,.5)}
     *{box-sizing:border-box}
-    html,body{margin:0;padding:0;background:transparent;font-family:Trebuchet MS,Segoe UI,system-ui,sans-serif;color:var(--rw-text)}
-    #rw-launcher{position:fixed;right:20px;bottom:20px;z-index:99999;display:flex;align-items:center;gap:12px;padding:12px 18px 12px 14px;border-radius:999px;background:radial-gradient(circle at 18% 50%,rgba(255,224,130,.42),transparent 24%),linear-gradient(135deg,rgba(255,122,0,.97),rgba(255,190,92,.97));color:#170f08;font-weight:1000;box-shadow:0 18px 40px rgba(255,122,0,.35);cursor:pointer;border:1px solid rgba(255,255,255,.22)}
-    .rw-launcher-logo{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid rgba(23,15,8,.18);background:#fff4dd}
-    .rw-launcher-copy{display:flex;flex-direction:column;line-height:1.05}
-    .rw-launcher-copy small{font-size:10px;letter-spacing:.18em;text-transform:uppercase;opacity:.82}
-    #rw-panel{position:fixed;right:20px;bottom:88px;z-index:99999;width:580px;max-width:calc(100vw - 32px);max-height:84vh;background:radial-gradient(circle at top right,rgba(45,199,255,.12),transparent 30%),radial-gradient(circle at top left,rgba(255,122,0,.18),transparent 34%),linear-gradient(180deg,#141927,#090b13 76%);border:1px solid var(--rw-line);border-radius:28px;box-shadow:var(--rw-shadow);overflow:hidden;display:none}
+    html,body{margin:0;padding:0;background:transparent;font-family:Segoe UI,system-ui,sans-serif;color:var(--rw-text);font-size:15px}
+    #rw-launcher{position:fixed;right:20px;bottom:20px;z-index:99999;display:flex;align-items:center;gap:12px;min-height:60px;padding:10px 18px 10px 12px;border-radius:999px;background:linear-gradient(135deg,var(--rw-primary),var(--rw-primary2));color:#1d1206;font-weight:1000;box-shadow:0 14px 34px rgba(0,0,0,.34);cursor:pointer;border:1px solid rgba(255,255,255,.28)}
+    .rw-launcher-logo{width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid rgba(29,18,6,.18);background:#fff4dd}
+    .rw-launcher-copy{display:flex;flex-direction:column;line-height:1.12}
+    .rw-launcher-copy small{font-size:11px;letter-spacing:.12em;text-transform:uppercase;opacity:.82}
+    #rw-panel{position:fixed;right:20px;bottom:92px;z-index:99999;width:640px;max-width:calc(100vw - 32px);max-height:88vh;background:var(--rw-bg);border:1px solid var(--rw-line);border-radius:20px;box-shadow:var(--rw-shadow);overflow:hidden;display:none}
     #rw-panel.open{display:flex;flex-direction:column}
-    .rw-header{padding:18px 18px 16px;background:linear-gradient(135deg,rgba(255,122,0,.96),rgba(255,184,77,.92) 52%,rgba(255,224,130,.94));color:#180f08;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;border-bottom:1px solid rgba(255,255,255,.14)}
+    .rw-header{padding:18px 20px;background:linear-gradient(135deg,var(--rw-primary),var(--rw-primary2));color:#1d1206;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;border-bottom:1px solid rgba(255,255,255,.22)}
     .rw-brand{display:flex;gap:14px;align-items:center}
-    .rw-brand-logo{width:52px;height:52px;border-radius:16px;object-fit:cover;background:#fff5e4;border:2px solid rgba(24,15,8,.12);box-shadow:0 8px 22px rgba(24,15,8,.18)}
-    .rw-kicker{font-size:10px;font-weight:900;letter-spacing:.22em;text-transform:uppercase;opacity:.74;margin-bottom:4px}
-    .rw-title{font-size:21px;font-weight:1000;line-height:1.02}
-    .rw-subtitle{font-size:12px;font-weight:800;max-width:360px;opacity:.78;margin-top:6px}
-    .rw-close{background:rgba(24,15,8,.08);border:0;color:#180f08;font-size:24px;cursor:pointer;width:38px;height:38px;border-radius:12px}
-    .rw-tabs{display:flex;gap:8px;padding:10px 12px;background:rgba(10,12,19,.9);border-bottom:1px solid var(--rw-line)}
-    .rw-tab{flex:1;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);color:var(--rw-text);padding:11px 12px;border-radius:999px;font-weight:900;cursor:pointer}
-    .rw-tab.active{background:linear-gradient(135deg,var(--rw-primary),#ffb85c);color:#180f08;border-color:transparent}
-    .rw-body{display:none;padding:14px;overflow:auto;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0)),radial-gradient(circle at top,rgba(45,199,255,.07),transparent 24%),linear-gradient(180deg,#171b2a 0,#090b13 74%)}
+    .rw-brand-logo{width:54px;height:54px;border-radius:14px;object-fit:cover;background:#fff5e4;border:2px solid rgba(24,15,8,.14)}
+    .rw-kicker{font-size:11px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;opacity:.78;margin-bottom:4px}
+    .rw-title{font-size:23px;font-weight:1000;line-height:1.08}
+    .rw-subtitle{font-size:14px;font-weight:800;max-width:440px;opacity:.82;margin-top:5px}
+    .rw-close{background:rgba(29,18,6,.12);border:0;color:#1d1206;font-size:26px;cursor:pointer;width:42px;height:42px;border-radius:12px}
+    .rw-tabs{display:flex;gap:8px;padding:12px;background:#111720;border-bottom:1px solid var(--rw-line)}
+    .rw-tab{flex:1;border:1px solid var(--rw-line);background:var(--rw-panel);color:var(--rw-text);padding:13px 12px;border-radius:12px;font-weight:900;cursor:pointer;font-size:15px}
+    .rw-tab.active{background:var(--rw-primary);color:#1d1206;border-color:var(--rw-primary)}
+    .rw-body{display:none;padding:18px;overflow:auto;background:#0f141d}
     .rw-body.active{display:block}
     .rw-highlight-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
-    .rw-pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);font-size:11px;color:var(--rw-muted);font-weight:900;text-transform:uppercase;letter-spacing:.08em}
-    .rw-card-grid{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:12px}
-    .rw-card{padding:14px;border-radius:18px;border:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));backdrop-filter:blur(8px)}
-    .rw-card h4{margin:0 0 7px;font-size:14px;color:#fff1cf}
-    .rw-card p{margin:0;color:var(--rw-muted);font-size:12px;line-height:1.5}
+    .rw-pill{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:#1b2230;border:1px solid var(--rw-line);font-size:12px;color:var(--rw-muted);font-weight:900;text-transform:uppercase;letter-spacing:.05em}
+    .rw-card-grid{display:grid;gap:10px;grid-template-columns:1fr;margin-bottom:12px}
+    .rw-card{padding:14px;border-radius:12px;border:1px solid var(--rw-line);background:var(--rw-panel)}
+    .rw-card h4{margin:0 0 7px;font-size:16px;color:#fff1cf}
+    .rw-card p{margin:0;color:var(--rw-muted);font-size:14px;line-height:1.55}
     .rw-quick,.rw-actions{display:flex;flex-wrap:wrap;gap:8px}
     .rw-quick{margin-bottom:12px}
     .rw-actions{margin:10px 0}
-    .rw-quick button,.rw-actions button{border:1px solid rgba(255,255,255,.08);background:var(--rw-chip);color:var(--rw-text);padding:10px 13px;border-radius:999px;font-weight:900;cursor:pointer;transition:transform .12s ease,background .12s ease,border-color .12s ease}
-    .rw-quick button:hover,.rw-actions button:hover{transform:translateY(-1px);border-color:rgba(255,224,130,.4)}
-    .rw-faq-search{display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:16px;background:rgba(14,16,25,.86);border:1px solid var(--rw-line)}
-    .rw-faq-search input{flex:1;background:transparent;border:0;outline:none;color:var(--rw-text)}
-    .rw-faq-search button{border:0;border-radius:12px;padding:9px 12px;font-weight:900;background:rgba(255,122,0,.14);color:#ffd8b0;cursor:pointer}
-    .rw-faq-list{display:grid;gap:8px;margin:12px 0}
-    .rw-faq-item{padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);cursor:pointer}
-    .rw-answer{padding:12px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:rgba(14,16,25,.74);white-space:pre-wrap;line-height:1.55}
-    .rw-thread{display:flex;flex-direction:column;gap:10px;min-height:260px;max-height:38vh;overflow:auto;padding:4px 2px}
-    .rw-msg{max-width:92%;padding:12px 14px;border-radius:18px;line-height:1.52;white-space:pre-wrap;font-size:14px}
-    .rw-msg.bot{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08)}
-    .rw-msg.user{margin-left:auto;background:linear-gradient(135deg,var(--rw-primary),#ffb85c);color:#180f08;font-weight:900}
-    .rw-input{display:flex;gap:8px;margin-top:10px}
-    .rw-input input{flex:1;padding:12px 14px;border-radius:999px;border:1px solid var(--rw-line);background:rgba(14,16,25,.9);color:var(--rw-text);outline:none}
-    .rw-input button{padding:12px 16px;border-radius:999px;border:0;background:linear-gradient(135deg,var(--rw-primary),#ffbf66);color:#180f08;font-weight:1000;cursor:pointer}
-    .rw-note{margin-top:10px;color:var(--rw-muted);font-size:12px}
-    @media (max-width:768px){#rw-launcher{left:12px;right:12px;bottom:14px;justify-content:center}#rw-panel{left:10px;right:10px;width:auto;bottom:84px;max-height:82vh}.rw-card-grid{grid-template-columns:1fr}.rw-header{padding:16px}.rw-brand-logo{width:46px;height:46px}.rw-title{font-size:18px}.rw-subtitle{max-width:none}}
+    .rw-quick button,.rw-actions button{border:1px solid var(--rw-line);background:var(--rw-chip);color:var(--rw-text);min-height:44px;padding:11px 15px;border-radius:12px;font-weight:900;cursor:pointer;transition:background .12s ease,border-color .12s ease}
+    .rw-quick button:hover,.rw-actions button:hover{background:#303848;border-color:#566177}
+    .rw-faq-search{display:flex;gap:10px;align-items:center;padding:12px;border-radius:12px;background:var(--rw-panel);border:1px solid var(--rw-line)}
+    .rw-faq-search input{flex:1;min-width:0;background:transparent;border:0;outline:none;color:var(--rw-text);font-size:16px}
+    .rw-faq-search button{border:0;border-radius:10px;padding:10px 12px;font-weight:900;background:#3b2819;color:#ffd8b0;cursor:pointer}
+    .rw-faq-list{display:grid;gap:10px;margin:12px 0}
+    .rw-faq-item{padding:14px;border-radius:12px;border:1px solid var(--rw-line);background:var(--rw-panel);cursor:pointer}
+    .rw-faq-item strong{display:block;font-size:15px;color:#fff4dc;margin-bottom:8px}
+    .rw-faq-item p{margin:0;color:var(--rw-muted);font-size:14px;line-height:1.55}
+    .rw-faq-item .rw-tags{margin-top:8px;color:#aeb9ca;font-size:12px}
+    .rw-answer{display:none}
+    .rw-thread{display:flex;flex-direction:column;gap:10px;min-height:300px;max-height:46vh;overflow:auto;padding:2px}
+    .rw-msg{max-width:94%;padding:13px 15px;border-radius:14px;line-height:1.55;white-space:pre-wrap;font-size:15px}
+    .rw-msg.bot{background:var(--rw-panel);border:1px solid var(--rw-line)}
+    .rw-msg.user{margin-left:auto;background:var(--rw-primary);color:#1d1206;font-weight:900}
+    .rw-input{display:flex;gap:8px;margin-top:12px;position:sticky;bottom:0;background:#0f141d;padding-top:10px}
+    .rw-input input{flex:1;min-width:0;padding:13px 14px;border-radius:12px;border:1px solid var(--rw-line);background:var(--rw-panel);color:var(--rw-text);outline:none;font-size:16px}
+    .rw-input button{min-width:110px;padding:13px 16px;border-radius:12px;border:0;background:var(--rw-primary);color:#1d1206;font-weight:1000;cursor:pointer}
+    .rw-note{margin-top:10px;color:var(--rw-muted);font-size:13px;line-height:1.45}
+    @media (max-width:768px){#rw-launcher{left:12px;right:12px;bottom:14px;justify-content:center}#rw-panel{left:8px;right:8px;width:auto;bottom:84px;max-height:86vh;border-radius:16px}.rw-header{padding:14px}.rw-brand-logo{width:46px;height:46px}.rw-title{font-size:19px}.rw-subtitle{max-width:none;font-size:13px}.rw-body{padding:14px}.rw-quick button,.rw-actions button{flex:1 1 calc(50% - 8px)}.rw-input{align-items:stretch}.rw-input button{min-width:92px}}
   </style>
 </head>
 <body>
@@ -219,10 +222,10 @@
       const q = (query || '').trim().toLowerCase();
       const filtered = faqItems.filter((item) => !q || (item.question + ' ' + item.answer + ' ' + (item.tags || []).join(' ')).toLowerCase().includes(q));
       $('rw-faq-count').textContent = String(filtered.length);
-      $('rw-faq-list').innerHTML = filtered.map((item, idx) => `<div class="rw-faq-item" data-idx="${idx}"><strong>${item.question}</strong><div style="margin-top:6px;color:var(--rw-muted);font-size:12px">${(item.tags || []).join(', ')}</div></div>`).join('') || '<div class="rw-note">Aucun résultat.</div>';
+      $('rw-faq-list').innerHTML = filtered.map((item, idx) => `<div class="rw-faq-item" data-idx="${idx}"><strong>${escapeHtml(item.question)}</strong><p>${escapeHtml(item.answer)}</p><div class="rw-tags">${escapeHtml((item.tags || []).join(', '))}</div></div>`).join('') || '<div class="rw-note">Aucun résultat.</div>';
       document.querySelectorAll('.rw-faq-item').forEach((node) => node.addEventListener('click', () => { const item = filtered[Number(node.dataset.idx)]; $('rw-faq-answer').textContent = item.answer; }));
       const homeFaq = filtered.slice(0, 4);
-      $('rw-home-faq').innerHTML = homeFaq.map((item, idx) => `<div class="rw-faq-item" data-home-idx="${idx}"><strong>${item.question}</strong></div>`).join('') || '<div class="rw-note">FAQ indisponible pour le moment.</div>';
+      $('rw-home-faq').innerHTML = homeFaq.map((item, idx) => `<div class="rw-faq-item" data-home-idx="${idx}"><strong>${escapeHtml(item.question)}</strong><p>${escapeHtml(item.answer)}</p></div>`).join('') || '<div class="rw-note">FAQ indisponible pour le moment.</div>';
       document.querySelectorAll('[data-home-idx]').forEach((node) => node.addEventListener('click', () => {
         const item = homeFaq[Number(node.dataset.homeIdx)];
         $('rw-faq-answer').textContent = item.answer;

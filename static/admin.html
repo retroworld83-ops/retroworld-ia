@@ -5,41 +5,45 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Admin Retroworld IA</title>
   <style>
-    :root{--bg:#08111f;--panel:#111b2d;--panel2:#0c1524;--line:#23314a;--text:#eff4ff;--muted:#94a5c2;--accent:#38bdf8;--accent2:#22c55e;--warn:#f59e0b;--bad:#ef4444;--radius:16px}
-    *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:radial-gradient(circle at top left,rgba(56,189,248,.12),transparent 26%),radial-gradient(circle at top right,rgba(34,197,94,.1),transparent 22%),var(--bg);color:var(--text)}
-    .top{position:sticky;top:0;z-index:9;background:rgba(8,17,31,.92);backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,.06)}
-    .top-inner,.wrap{max-width:1320px;margin:0 auto;padding:16px}
+    :root{--bg:#0b1018;--panel:#171e2a;--panel2:#111823;--line:#323d4f;--text:#f7fbff;--muted:#b4c0d3;--accent:#45c4ff;--accent2:#38d978;--warn:#f6b64d;--bad:#ff6b6b;--radius:12px}
+    *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.45}
+    .top{position:sticky;top:0;z-index:9;background:#0b1018;border-bottom:1px solid var(--line)}
+    .top-inner,.wrap{max-width:1440px;margin:0 auto;padding:16px}
     .top-inner{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}
-    .brand{font-weight:900}.muted{color:var(--muted);font-size:13px}
+    .brand{font-weight:1000;font-size:18px}.muted{color:var(--muted);font-size:13px}
     .actions{display:flex;gap:10px;flex-wrap:wrap}
     button,a.btn,select,input,textarea{font:inherit}
-    button,a.btn{border:0;border-radius:12px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none}
-    .primary{background:linear-gradient(135deg,var(--accent),#6366f1);color:#08111f}
-    .secondary{background:var(--panel);color:var(--text);border:1px solid rgba(255,255,255,.08)}
-    .wrap{display:grid;grid-template-columns:340px 1fr;gap:14px}
+    button,a.btn{border:0;border-radius:10px;min-height:42px;padding:10px 14px;font-weight:850;cursor:pointer;text-decoration:none}
+    .primary{background:var(--accent);color:#06111a}
+    .secondary{background:#202939;color:var(--text);border:1px solid var(--line)}
+    .wrap{display:grid;grid-template-columns:380px 1fr;gap:16px}
     @media (max-width:1080px){.wrap{grid-template-columns:1fr}}
-    .stack{display:grid;gap:14px}
-    .card{background:rgba(17,27,45,.94);border:1px solid rgba(255,255,255,.06);border-radius:var(--radius);overflow:hidden}
-    .card-h{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
-    .title{font-size:13px;text-transform:uppercase;color:var(--muted);font-weight:900}
-    .search{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;gap:10px;flex-wrap:wrap}
-    .search input,.search select{background:var(--panel2);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:11px 12px}
+    .stack{display:flex;flex-direction:column;gap:16px}
+    .dashboard-card{order:3}.conversation-card{order:1}.correction-card{order:2}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+    .card-h{padding:15px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+    .title{font-size:13px;text-transform:uppercase;color:#d7e2f4;font-weight:950;letter-spacing:.06em}
+    .search{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap}
+    .search input,.search select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
     .search input{flex:1;min-width:180px}
-    .list{max-height:calc(100vh - 240px);overflow:auto}
-    .item{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer}
-    .item:hover,.item.active{background:rgba(56,189,248,.08)}
+    .list{max-height:calc(100vh - 230px);overflow:auto}
+    .item{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer}
+    .item:hover,.item.active{background:#223044}
     .row{display:flex;justify-content:space-between;gap:10px;align-items:center}
-    .badge{display:inline-flex;gap:6px;align-items:center;padding:4px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);font-size:11px;color:var(--muted)}
-    .thread{padding:16px;display:flex;flex-direction:column;gap:12px;max-height:460px;overflow:auto}
-    .msg{max-width:88%;padding:12px 14px;border-radius:14px;line-height:1.45;white-space:pre-wrap;border:1px solid rgba(255,255,255,.08);background:rgba(6,11,20,.45)}
-    .msg.user{margin-left:auto;background:rgba(56,189,248,.12)}
-    .msg-foot{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:11px;color:var(--muted)}
+    .badge{display:inline-flex;gap:6px;align-items:center;padding:5px 9px;border-radius:999px;border:1px solid var(--line);font-size:12px;color:var(--muted)}
+    .thread{padding:16px;display:flex;flex-direction:column;gap:12px;min-height:320px;max-height:560px;overflow:auto;background:#101722}
+    .msg{max-width:90%;padding:13px 15px;border-radius:12px;line-height:1.55;white-space:pre-wrap;border:1px solid var(--line);background:#1b2432;font-size:15px}
+    .msg.user{margin-left:auto;background:#17354b;border-color:#35698e}
+    .msg.assistant{background:#1b2432}
+    .msg-foot{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:12px;color:var(--muted)}
     .empty{padding:22px;color:var(--muted)}
-    .pane-toolbar{padding:14px 16px;border-top:1px solid rgba(255,255,255,.06);display:flex;gap:10px;flex-wrap:wrap}
+    .pane-toolbar{padding:14px 16px;border-top:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap}
     .correction-form{padding:16px;display:grid;gap:10px}
-    .correction-form textarea,.correction-form input,.correction-form select{width:100%;background:var(--panel2);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 12px}
-    .correction-form textarea{min-height:86px;resize:vertical}
-    .correction-grid{display:grid;grid-template-columns:1fr 110px;gap:10px}
+    .field{display:grid;gap:6px}
+    .field span{font-size:13px;color:#d7e2f4;font-weight:850}
+    .correction-form textarea,.correction-form input,.correction-form select{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+    .correction-form textarea{min-height:112px;resize:vertical}
+    .correction-grid{display:grid;grid-template-columns:1fr 140px;gap:10px}
     @media (max-width:720px){.correction-grid{grid-template-columns:1fr}}
     .kpis{padding:16px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
     @media (max-width:1080px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -66,8 +70,8 @@
         <a class="btn secondary" href="/admin/faq">FAQ</a>
         <a class="btn secondary" href="/admin/knowledge">Base metier</a>
         <button class="secondary" id="btnExport">Export CSV</button>
-        <button class="secondary" id="btnLogout">Deconnexion</button>
-        <button class="primary" id="btnRefresh">Rafraichir</button>
+        <button class="secondary" id="btnLogout">Déconnexion</button>
+        <button class="primary" id="btnRefresh">Rafraîchir</button>
       </div>
     </div>
   </div>
@@ -79,19 +83,19 @@
         <input id="searchInput" placeholder="Recherche par id, marque, flags, preview..." />
         <select id="flagFilter">
           <option value="all">Tous les flags</option>
-          <option value="a_valider">A valider</option>
+          <option value="a_valider">À valider</option>
           <option value="devis">Devis</option>
-          <option value="reservation">Reservation</option>
-          <option value="reclamation">Reclamation</option>
-          <option value="croise">Croise</option>
-          <option value="promesse_resa">Promesse resa</option>
+          <option value="reservation">Réservation</option>
+          <option value="reclamation">Réclamation</option>
+          <option value="croise">Croisé</option>
+          <option value="promesse_resa">Promesse résa</option>
         </select>
       </div>
       <div class="list" id="conversationList"></div>
     </div>
 
     <div class="stack">
-      <div class="card">
+      <div class="card dashboard-card">
         <div class="card-h">
           <div class="title">Dashboard</div>
           <div class="badge" id="diagBadge">Analytics</div>
@@ -107,11 +111,11 @@
             <pre id="flagsStats">-</pre>
           </div>
           <div class="subcard">
-            <div class="title">Leads recents</div>
+            <div class="title">Leads récents</div>
             <div class="lead-list" id="leadList"></div>
           </div>
           <div class="subcard">
-            <div class="title">Logs recents</div>
+            <div class="title">Logs récents</div>
             <pre id="recentLogs">-</pre>
           </div>
           <div class="subcard">
@@ -120,19 +124,19 @@
             <div style="display:grid;gap:8px;margin-top:12px">
               <input id="newUserName" placeholder="Nouvel utilisateur" style="background:var(--panel2);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 12px" />
               <input id="newUserPassword" type="password" placeholder="Mot de passe" style="background:var(--panel2);color:var(--text);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:10px 12px" />
-              <button class="primary" id="btnCreateUser">Creer l'utilisateur</button>
+              <button class="primary" id="btnCreateUser">Créer l'utilisateur</button>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="card">
+      <div class="card conversation-card">
         <div class="card-h">
           <div class="title">Conversation</div>
           <div class="badge" id="activeMeta">Aucune selection</div>
         </div>
         <div class="thread" id="thread"></div>
-        <div class="empty" id="emptyState">Selectionnez une conversation a gauche.</div>
+        <div class="empty" id="emptyState">Sélectionnez une conversation à gauche.</div>
         <div class="pane-toolbar">
           <button class="secondary" id="btnCopyId">Copier id</button>
           <button class="secondary" id="btnCopyJson">Copier JSON</button>
@@ -140,25 +144,25 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card correction-card">
         <div class="card-h">
-          <div class="title">Memoire de corrections IA</div>
+          <div class="title">Mémoire de corrections IA</div>
           <div class="badge" id="correctionBadge">0</div>
         </div>
         <div class="correction-form">
           <div class="correction-grid">
-            <select id="correctionBrand"></select>
-            <input id="correctionPriority" type="number" min="0" max="100" value="60" title="Priorite" />
+            <label class="field"><span>Marque</span><select id="correctionBrand"></select></label>
+            <label class="field"><span>Priorité</span><input id="correctionPriority" type="number" min="0" max="100" value="60" title="Priorité" /></label>
           </div>
-          <textarea id="correctionTrigger" placeholder="Question ou declencheur a reconnaitre plus tard..."></textarea>
-          <textarea id="correctionAnswer" placeholder="Reponse corrigee que l'IA devra suivre quand le sujet revient..."></textarea>
-          <input id="correctionNotes" placeholder="Note interne optionnelle" />
+          <label class="field"><span>Déclencheur</span><textarea id="correctionTrigger" placeholder="Question client ou sujet à reconnaître"></textarea></label>
+          <label class="field"><span>Réponse corrigée</span><textarea id="correctionAnswer" placeholder="Réponse exacte que l'assistant devra suivre"></textarea></label>
+          <label class="field"><span>Note interne</span><input id="correctionNotes" placeholder="Contexte optionnel" /></label>
           <div class="actions">
-            <button class="secondary" id="btnUseLastUser">Derniere question</button>
-            <button class="secondary" id="btnUseLastAssistant">Reponse actuelle</button>
+            <button class="secondary" id="btnUseLastUser">Reprendre la question</button>
+            <button class="secondary" id="btnUseLastAssistant">Reprendre la réponse</button>
             <button class="primary" id="btnSaveCorrection">Enregistrer correction</button>
           </div>
-          <div class="mini" id="correctionStatus">Les corrections sont injectees dans le prompt IA sans modifier les fichiers FAQ.</div>
+          <div class="mini" id="correctionStatus">Prêt.</div>
           <div class="lead-list" id="correctionList"></div>
         </div>
       </div>
@@ -180,6 +184,12 @@
 
     function escapeHtml(value) {
       return String(value || "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+    }
+
+    function roleLabel(role) {
+      if (role === "user") return "Client";
+      if (role === "assistant") return "Assistant";
+      return role || "-";
     }
 
     function applyFilters() {
@@ -235,7 +245,7 @@
       (state.activeConversation.messages || []).forEach((message) => {
         const node = document.createElement("div");
         node.className = "msg " + (message.role === "user" ? "user" : "assistant");
-        node.innerHTML = `<div>${escapeHtml(message.content)}</div><div class="msg-foot"><span>${escapeHtml(message.role)}</span><span>${escapeHtml(message.ts)}</span></div>`;
+        node.innerHTML = `<div>${escapeHtml(message.content)}</div><div class="msg-foot"><span>${escapeHtml(roleLabel(message.role))}</span><span>${escapeHtml(message.ts)}</span></div>`;
         thread.appendChild(node);
       });
     }
@@ -261,14 +271,14 @@
             <strong>${escapeHtml(item.brand_id)} #${escapeHtml(item.id)}</strong>
             <span class="${item.is_active ? 'hot' : 'cold'}">${item.is_active ? 'active' : 'inactive'}</span>
           </div>
-          <div class="mini" style="margin-top:6px"><strong>Declencheur:</strong> ${escapeHtml(item.trigger_text)}</div>
+          <div class="mini" style="margin-top:6px"><strong>Déclencheur :</strong> ${escapeHtml(item.trigger_text)}</div>
           <div class="mini" style="margin-top:6px"><strong>Correction:</strong> ${escapeHtml(item.corrected_answer)}</div>
-          <div class="mini" style="margin-top:6px">prio ${escapeHtml(item.priority)} | ${escapeHtml(item.updated_at || item.created_at || '')}${item.openai_synced_at ? ' | sync OpenAI ' + escapeHtml(item.openai_synced_at) : ''}${item.sync_error ? ' | sync erreur' : ''}</div>
+          <div class="mini" style="margin-top:6px">priorité ${escapeHtml(item.priority)} | ${escapeHtml(item.updated_at || item.created_at || '')}${item.openai_synced_at ? ' | sync OpenAI ' + escapeHtml(item.openai_synced_at) : ''}${item.sync_error ? ' | erreur sync' : ''}</div>
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-            <button class="secondary" data-toggle-correction="${item.id}" data-next="${item.is_active ? 0 : 1}">${item.is_active ? 'Desactiver' : 'Activer'}</button>
+            <button class="secondary" data-toggle-correction="${item.id}" data-next="${item.is_active ? 0 : 1}">${item.is_active ? 'Désactiver' : 'Activer'}</button>
           </div>
         </div>
-      `).join("") : '<div class="mini">Aucune correction memorisee pour cette marque.</div>';
+      `).join("") : '<div class="mini">Aucune correction mémorisée pour cette marque.</div>';
       document.querySelectorAll("[data-toggle-correction]").forEach((button) => button.addEventListener("click", async () => {
         await api("/admin/api/corrections/" + button.dataset.toggleCorrection, {
           method: "PUT",
@@ -284,7 +294,7 @@
       if (!sessionData.authenticated) { location.href = "/admin/login"; return; }
       state.username = sessionData.username;
       state.csrfToken = sessionData.csrf_token;
-      $("sessionMeta").textContent = `Connecte en tant que ${sessionData.username}`;
+      $("sessionMeta").textContent = `Connecté en tant que ${sessionData.username}`;
     }
 
     async function loadConversations() {
@@ -331,9 +341,9 @@
       $("leadList").innerHTML = leads.length ? leads.map((lead) => {
         const temp = ((lead.payload || {}).temperature || "cold");
         return `<div class="lead"><div class="row"><strong>${escapeHtml(lead.lead_type)}</strong><span class="${temp}">${escapeHtml(temp)}</span></div><div class="mini">${escapeHtml(lead.conversation_id)} | score ${escapeHtml(lead.score)}</div></div>`;
-      }).join("") : '<div class="mini">Aucun lead qualifie pour le moment.</div>';
+      }).join("") : '<div class="mini">Aucun lead qualifié pour le moment.</div>';
       const users = usersData.items || [];
-      $("userList").innerHTML = users.length ? users.map((user) => `<div class="lead"><div class="row"><strong>${escapeHtml(user.username)}</strong><span class="${user.is_active ? 'hot' : 'cold'}">${user.is_active ? 'actif' : 'inactif'}</span></div><div class="mini">id ${escapeHtml(user.id)} | maj ${escapeHtml(user.updated_at)}</div><div style="margin-top:8px;display:flex;gap:8px"><button class="secondary" data-toggle-user="${user.id}" data-next="${user.is_active ? 0 : 1}">${user.is_active ? 'Desactiver' : 'Activer'}</button></div></div>`).join("") : '<div class="mini">Aucun utilisateur.</div>';
+      $("userList").innerHTML = users.length ? users.map((user) => `<div class="lead"><div class="row"><strong>${escapeHtml(user.username)}</strong><span class="${user.is_active ? 'hot' : 'cold'}">${user.is_active ? 'actif' : 'inactif'}</span></div><div class="mini">id ${escapeHtml(user.id)} | maj ${escapeHtml(user.updated_at)}</div><div style="margin-top:8px;display:flex;gap:8px"><button class="secondary" data-toggle-user="${user.id}" data-next="${user.is_active ? 0 : 1}">${user.is_active ? 'Désactiver' : 'Activer'}</button></div></div>`).join("") : '<div class="mini">Aucun utilisateur.</div>';
       document.querySelectorAll('[data-toggle-user]').forEach((button) => button.addEventListener('click', async () => {
         await api('/admin/api/users/' + button.dataset.toggleUser, { method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ is_active: Number(button.dataset.next) }) });
         await loadAnalytics();
@@ -367,14 +377,14 @@
         source_conversation_id: state.activeId || ""
       };
       if (!payload.trigger_text || !payload.corrected_answer) {
-        setCorrectionStatus("Ajoutez un declencheur et une reponse corrigee.");
+        setCorrectionStatus("Ajoutez un déclencheur et une réponse corrigée.");
         return;
       }
       setCorrectionStatus("Enregistrement...");
       await api("/admin/api/corrections", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
       $("correctionAnswer").value = "";
       $("correctionNotes").value = "";
-      setCorrectionStatus("Correction memorisee. Elle sera reinjectee sur les prochaines questions proches.");
+      setCorrectionStatus("Correction mémorisée.");
       await loadCorrections();
     });
     $("btnCreateUser").addEventListener("click", async () => {

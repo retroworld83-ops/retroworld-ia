@@ -3,11 +3,18 @@ import shutil
 import unittest
 
 
+ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 TMP_DIR = os.path.join(os.path.dirname(__file__), "_tmp_runtime")
+TMP_STATIC_DIR = os.path.join(TMP_DIR, "static")
+TMP_KNOWLEDGE_BASE_PATH = os.path.join(TMP_DIR, "knowledge_base.json")
 shutil.rmtree(TMP_DIR, ignore_errors=True)
 os.makedirs(TMP_DIR, exist_ok=True)
+shutil.copytree(os.path.join(ROOT_DIR, "static"), TMP_STATIC_DIR)
+shutil.copy2(os.path.join(ROOT_DIR, "src", "data", "knowledge_base.json"), TMP_KNOWLEDGE_BASE_PATH)
 os.environ["APP_DATA_DIR"] = TMP_DIR
 os.environ["APP_DB_PATH"] = os.path.join(TMP_DIR, "test.db")
+os.environ["APP_STATIC_DIR"] = TMP_STATIC_DIR
+os.environ["APP_KNOWLEDGE_PATH"] = TMP_KNOWLEDGE_BASE_PATH
 os.environ["ADMIN_USERNAME"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "testpass123"
 os.environ["SECRET_KEY"] = "test-secret-key"
@@ -18,21 +25,14 @@ from src.retroworld_ia.services.corrections import find_relevant_corrections  # 
 from src.retroworld_ia.services.knowledge import build_system_prompt  # noqa: E402
 
 FAQ_RETROWORLD_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "static",
+    TMP_STATIC_DIR,
     "faq_retroworld.json",
 )
 FAQ_RUNNINGMAN_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "static",
+    TMP_STATIC_DIR,
     "faq_runningman.json",
 )
-KNOWLEDGE_BASE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "src",
-    "data",
-    "knowledge_base.json",
-)
+KNOWLEDGE_BASE_PATH = TMP_KNOWLEDGE_BASE_PATH
 
 
 class SmokeTests(unittest.TestCase):

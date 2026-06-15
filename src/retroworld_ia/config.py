@@ -23,10 +23,10 @@ def _env_float(key: str, default: float) -> float:
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 APP_DATA_DIR = Path(os.getenv("APP_DATA_DIR", str(BASE_DIR / "data"))).resolve()
-STATIC_DIR = BASE_DIR / "static"
+STATIC_DIR = Path(os.getenv("APP_STATIC_DIR", str(BASE_DIR / "static"))).resolve()
 CONV_DIR = APP_DATA_DIR / "conversations"
 DB_PATH = Path(os.getenv("APP_DB_PATH", str(APP_DATA_DIR / "retroworld_ia.db"))).resolve()
-KNOWLEDGE_PATH = BASE_DIR / "src" / "data" / "knowledge_base.json"
+KNOWLEDGE_PATH = Path(os.getenv("APP_KNOWLEDGE_PATH", str(BASE_DIR / "src" / "data" / "knowledge_base.json"))).resolve()
 
 APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONV_DIR.mkdir(parents=True, exist_ok=True)
