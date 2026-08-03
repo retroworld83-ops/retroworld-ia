@@ -1,6 +1,7 @@
 import os
 import shutil
 import unittest
+from unittest.mock import patch
 
 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -20,7 +21,14 @@ os.environ["ADMIN_PASSWORD"] = "testpass123"
 os.environ["SECRET_KEY"] = "test-secret-key"
 
 from app import app  # noqa: E402
-from src.retroworld_ia.services.ai import build_openai_messages  # noqa: E402
+from src.retroworld_ia import config as app_config  # noqa: E402
+from src.retroworld_ia.services import ai as ai_service  # noqa: E402
+from src.retroworld_ia.services.ai import (  # noqa: E402
+    build_openai_messages,
+    enforce_grounded_price_claims,
+    enforce_no_live_availability_claims,
+    responses_answer,
+)
 from src.retroworld_ia.services.corrections import find_relevant_corrections  # noqa: E402
 from src.retroworld_ia.services.knowledge import build_system_prompt  # noqa: E402
 
@@ -141,7 +149,10 @@ class SmokeTests(unittest.TestCase):
 
         diag = self.client.get("/admin/api/diag")
         self.assertEqual(diag.status_code, 200)
-        self.assertTrue(diag.get_json()["ok"])
+        diag_payload = diag.get_json()
+        self.assertTrue(diag_payload["ok"])
+        self.assertTrue(diag_payload["openai_model"])
+        self.assertIn(diag_payload["openai_api_mode"], {"responses", "chat_completions"})
         analytics = self.client.get("/admin/api/analytics")
         self.assertEqual(analytics.status_code, 200)
         self.assertTrue(analytics.get_json()["ok"])
@@ -241,6 +252,99 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(messages[1]["content"][0]["text"], "Bonjour")
         self.assertEqual(messages[2]["content"][0]["text"], "Bonjour, que puis-je faire ?")
         self.assertEqual(messages[3]["content"][0]["text"], "Je veux reserver")
+
+    def test_system_prompt_has_strict_grounding_contract(self):
+        prompt = build_system_prompt(
+            "enigmaniac",
+            "Quel est le tarif exact pour 5 joueurs demain ?",
+        )
+        self.assertIn("Une information absente est inconnue", prompt)
+        self.assertIn("Ne calcule et n'interpole jamais un prix exact", prompt)
+        self.assertIn("pas leur disponibilite a une date donnee", prompt)
+
+    def test_price_guard_blocks_interpolated_amount(self):
+        user_text = "Quel est le tarif exact pour 5 joueurs ?"
+        answer, changed = enforce_grounded_price_claims(
+            "Le tarif est de 20 € par personne.",
+            "Le tarif connu est de 15 EUR à 25 EUR selon la formule.",
+            user_text,
+        )
+        self.assertTrue(changed)
+        self.assertNotIn("20 €", answer)
+        self.assertIn("à confirmer", answer)
+
+    def test_price_guard_keeps_known_amount(self):
+        user_text = "Combien coûte la VR ?"
+        answer, changed = enforce_grounded_price_claims(
+            "Les jeux VR arcade coûtent 15 EUR par joueur.",
+            "Jeux VR arcade: 15 EUR par joueur.",
+            user_text,
+        )
+        self.assertFalse(changed)
+        self.assertIn("15 EUR", answer)
+
+    def test_live_availability_guard_relabels_known_inventory(self):
+        answer, changed = enforce_no_live_availability_claims(
+            "Les salles disponibles sont : La Loi de la Jungle et Terreur Nocturne.",
+            "Quelles salles sont disponibles demain ?",
+        )
+        self.assertTrue(changed)
+        self.assertIn("figurant dans mes informations", answer)
+        self.assertNotIn(": :", answer)
+
+    def test_responses_api_payload_and_output_parsing(self):
+        captured = {}
+
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "Réponse test"}],
+                        }
+                    ]
+                }
+
+        class FakeRequests:
+            @staticmethod
+            def post(url, headers, json, timeout):
+                captured.update({"url": url, "headers": headers, "json": json, "timeout": timeout})
+                return FakeResponse()
+
+        messages = build_openai_messages("Instruction test", [], "Question test")
+        with patch.object(ai_service, "requests", FakeRequests()), patch.object(app_config, "OPENAI_MODEL", "gpt-test"), patch.object(app_config, "OPENAI_REASONING_EFFORT", "low"), patch.object(app_config, "OPENAI_TEXT_VERBOSITY", "low"):
+            answer = responses_answer(messages, safety_identifier="rw_test")
+
+        self.assertEqual(answer, "Réponse test")
+        self.assertEqual(captured["url"], "https://api.openai.com/v1/responses")
+        self.assertEqual(captured["json"]["instructions"], "Instruction test")
+        self.assertEqual(captured["json"]["input"][0]["role"], "user")
+        self.assertFalse(captured["json"]["store"])
+        self.assertEqual(captured["json"]["reasoning"]["effort"], "low")
+        self.assertEqual(captured["json"]["text"]["verbosity"], "low")
+        self.assertEqual(captured["json"]["safety_identifier"], "rw_test")
+
+    def test_chat_rejects_overlong_message(self):
+        response = self.client.post(
+            "/chat",
+            json={"message": "x" * (app_config.CHAT_MAX_MESSAGE_CHARS + 1)},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"], "message_too_long")
+
+    def test_widget_scopes_conversation_by_brand(self):
+        widget_path = os.path.join(TMP_STATIC_DIR, "chat-widget.html")
+        with open(widget_path, "r", encoding="utf-8") as handle:
+            widget = handle.read()
+        self.assertIn("'rw_conversation_id_' + safeBrand", widget)
+        self.assertIn('id="rw-new-conversation"', widget)
 
     def test_chat_persists_conversation_and_reuses_id(self):
         first = self.client.post("/chat", json={"message": "bonjour", "brand_id": "retroworld"})

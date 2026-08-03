@@ -5,9 +5,12 @@ from src.retroworld_ia.services.ai import (
     add_disclaimer_if_needed,
     append_retroworld_links_if_missing,
     build_openai_messages,
+    enforce_grounded_price_claims,
+    enforce_no_live_availability_claims,
     enforce_no_reservation_promises,
     openai_answer,
     openai_ready,
+    safety_identifier_for,
 )
 from src.retroworld_ia.services.conversations import append_message, create_or_load_conversation, new_conv_id, upsert_conversation
 from src.retroworld_ia.services.corrections import find_relevant_corrections
@@ -44,14 +47,16 @@ def detect_brand_from_origin() -> str | None:
 
 
 def get_brand_id(payload: dict) -> str:
+    payload_brand = payload.get("brand_id") if isinstance(payload.get("brand_id"), str) else ""
     for candidate in [
-        normalize_brand(payload.get("brand_id") or ""),
+        normalize_brand(payload_brand),
         normalize_brand(request.headers.get("X-Brand-Id") or ""),
         normalize_brand(request.args.get("brand_id") or request.args.get("brand") or ""),
     ]:
         if candidate in BRANDS:
             return candidate
-    from_text = detect_brand_from_text(payload.get("message") or "")
+    payload_message = payload.get("message") if isinstance(payload.get("message"), str) else ""
+    from_text = detect_brand_from_text(payload_message)
     if from_text in BRANDS:
         return from_text
     from_origin = detect_brand_from_origin()
@@ -150,14 +155,20 @@ def chat():
         payload = {}
     if not isinstance(payload, dict):
         return jsonify({"ok": False, "error": "message manquant"}), 400
-    msg = (payload.get("message") or "").strip()
+    message_value = payload.get("message")
+    msg = message_value.strip() if isinstance(message_value, str) else ""
     if not msg:
         return jsonify({"ok": False, "error": "message manquant"}), 400
+    if len(msg) > config.CHAT_MAX_MESSAGE_CHARS:
+        return jsonify({"ok": False, "error": "message_too_long", "max_chars": config.CHAT_MAX_MESSAGE_CHARS}), 400
 
     brand_id = get_brand_id(payload)
-    conv_id = (payload.get("conversation_id") or "").strip() or new_conv_id(prefix=brand_id[:2] if brand_id else "rw")
+    requested_conv_id = payload.get("conversation_id")
+    conv_id = requested_conv_id.strip()[:120] if isinstance(requested_conv_id, str) else ""
+    conv_id = conv_id or new_conv_id(prefix=brand_id[:2] if brand_id else "rw")
     conversation = create_or_load_conversation(conv_id, brand_id)
-    append_message(conversation, "user", msg, extra={"source": (payload.get("metadata") or {}).get("source", ""), "intents": ["reservation"] if booking_intent(msg) else []})
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    append_message(conversation, "user", msg, extra={"source": metadata.get("source", ""), "intents": ["reservation"] if booking_intent(msg) else []})
 
     if not openai_ready():
         answer = "Le service IA n'est pas configure (OPENAI_API_KEY manquante)."
@@ -168,12 +179,23 @@ def chat():
     corrections = find_relevant_corrections(brand_id, msg)
     system_prompt = build_system_prompt(brand_id, msg, corrections=corrections)
     history = conversation.get("messages", [])[:-1]
-    raw_answer = openai_answer(build_openai_messages(system_prompt, history, msg))
+    raw_answer = openai_answer(
+        build_openai_messages(system_prompt, history, msg),
+        safety_identifier=safety_identifier_for(conv_id),
+    )
     safe_answer, promised = enforce_no_reservation_promises(raw_answer)
+    safe_answer, availability_guarded = enforce_no_live_availability_claims(safe_answer, msg)
+    safe_answer, price_guarded = enforce_grounded_price_claims(safe_answer, system_prompt, msg)
     safe_answer = add_disclaimer_if_needed(safe_answer, brand_id, msg)
     if brand_id == "retroworld":
         safe_answer = append_retroworld_links_if_missing(msg, safe_answer)
-    flags = ["promesse_resa"] if promised else []
+    flags = []
+    if promised:
+        flags.append("promesse_resa")
+    if availability_guarded:
+        flags.append("disponibilite_non_verifiee")
+    if price_guarded:
+        flags.append("prix_non_source")
     append_message(conversation, "assistant", safe_answer, extra={"brand_id": brand_id, "flags": flags, "correction_ids": [item.get("id") for item in corrections]})
     upsert_conversation(conversation)
     return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": safe_answer})

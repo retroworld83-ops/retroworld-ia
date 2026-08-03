@@ -180,7 +180,7 @@ RESERVATION_FORBIDDEN_PATTERNS = [
     r"\b(c['’]?est réservé|réservé|confirmé|confirmée|je vous bloque|on vous bloque|bloqué|bloquée)\b",
 ]
 RESERVATION_INTENT_PATTERNS = [
-    r"\b(réserv|reservation|réservation|dispo|disponibilit|créneau|horaire|anniversaire|goûter|acompte)\b",
+    r"\b(réserv\w*|reservation\w*|réservation\w*|dispo\w*|disponib\w*|créneau\w*|horaire\w*|anniversaire\w*|goûter\w*|acompte\w*)\b",
 ]
 
 

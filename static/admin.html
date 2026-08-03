@@ -430,6 +430,8 @@
         <div class="kpi"><div class="label">Leads</div><div class="value">${a.leads_total || 0}</div></div>
         <div class="kpi"><div class="label">Leads chauds</div><div class="value">${a.hot_leads || 0}</div></div>
         <div class="kpi"><div class="label">Utilisateurs admin</div><div class="value">${diagData.users_count || 0}</div></div>
+        <div class="kpi"><div class="label">Modèle IA</div><div class="value" style="font-size:15px">${escapeHtml(diagData.openai_model || "non configuré")}</div></div>
+        <div class="kpi"><div class="label">Moteur API</div><div class="value" style="font-size:15px">${escapeHtml(diagData.openai_api_mode || "-")}</div></div>
       `;
       $("brandsStats").textContent = JSON.stringify(a.brands || {}, null, 2);
       $("flagsStats").textContent = JSON.stringify(a.flags || {}, null, 2);

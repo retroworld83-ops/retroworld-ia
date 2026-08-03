@@ -58,14 +58,14 @@
   </style>
 </head>
 <body>
-  <div id="rw-launcher">
+  <div id="rw-launcher" role="button" tabindex="0" aria-controls="rw-panel" aria-expanded="false">
     <img class="rw-launcher-logo" id="rw-launcher-logo" src="/static/retroworld-logo.png" alt="Retroworld" />
     <div class="rw-launcher-copy">
       <small>Assistant IA</small>
       <span id="rw-launcher-label">Retroworld</span>
     </div>
   </div>
-  <div id="rw-panel" aria-hidden="true">
+  <div id="rw-panel" role="dialog" aria-modal="false" aria-labelledby="rw-title" aria-hidden="true">
     <div class="rw-header">
       <div class="rw-brand">
         <img class="rw-brand-logo" id="rw-brand-logo" src="/static/retroworld-logo.png" alt="Retroworld" />
@@ -113,10 +113,11 @@
 
     <div class="rw-body" id="rw-body-chat">
       <div class="rw-actions" id="rw-chat-actions"></div>
-      <div class="rw-thread" id="rw-thread"></div>
+      <div class="rw-actions"><button type="button" id="rw-new-conversation">Nouvelle discussion</button></div>
+      <div class="rw-thread" id="rw-thread" role="log" aria-live="polite" aria-relevant="additions"></div>
       <div class="rw-note" id="rw-typing" style="display:none">L’assistant écrit...</div>
       <form class="rw-input" id="rw-form">
-        <input id="rw-input" placeholder="Écrivez votre message..." autocomplete="off" />
+        <input id="rw-input" placeholder="Écrivez votre message..." autocomplete="off" maxlength="1500" aria-label="Votre message" />
         <button type="submit" id="rw-send">Envoyer</button>
       </form>
     </div>
@@ -138,7 +139,7 @@
     const API_CHAT = (API_BASE || '') + '/chat';
     const API_FAQ = (API_BASE || '') + '/faq.json?brand_id=' + encodeURIComponent(safeBrand);
     const API_KNOWLEDGE = (API_BASE || '') + '/knowledge.json?brand_id=' + encodeURIComponent(safeBrand);
-    const LS_CID = 'rw_conversation_id';
+    const LS_CID = 'rw_conversation_id_' + safeBrand;
     let conversationId = localStorage.getItem(LS_CID) || '';
     let faqItems = [];
     let knowledge = null;
@@ -168,6 +169,12 @@
     };
 
     const $ = (id) => document.getElementById(id);
+    function setPanelOpen(open){
+      $('rw-panel').classList.toggle('open', open);
+      $('rw-panel').setAttribute('aria-hidden', open ? 'false' : 'true');
+      $('rw-launcher').setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) window.setTimeout(() => $('rw-input').focus(), 0);
+    }
     function escapeHtml(value){
       return String(value || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
     }
@@ -253,24 +260,42 @@
           body: JSON.stringify({ message:text, conversation_id: conversationId || undefined, brand_id: safeBrand, metadata:{ source:'widget_v2', page_url: location.href } })
         });
         const data = await response.json();
+        if (!response.ok || data.ok === false) {
+          if (data.error === 'message_too_long') throw new Error('Votre message est trop long. Raccourcissez-le puis réessayez.');
+          throw new Error('Je rencontre un souci de connexion. Réessayez dans un instant.');
+        }
         if (data.conversation_id) {
           conversationId = data.conversation_id;
           localStorage.setItem(LS_CID, conversationId);
         }
         addMsg(data.answer || data.reply || 'Je n’ai pas pu obtenir la réponse.', 'bot');
-      }catch(_e){
-        addMsg('Je rencontre un souci de connexion. Réessayez dans un instant.', 'bot');
+      }catch(error){
+        addMsg(error && error.message ? error.message : 'Je rencontre un souci de connexion. Réessayez dans un instant.', 'bot');
       }finally{
         $('rw-typing').style.display = 'none';
         $('rw-send').disabled = false;
       }
     }
 
-    $('rw-launcher').addEventListener('click', () => $('rw-panel').classList.toggle('open'));
-    $('rw-close').addEventListener('click', () => $('rw-panel').classList.remove('open'));
+    $('rw-launcher').addEventListener('click', () => setPanelOpen(!$('rw-panel').classList.contains('open')));
+    $('rw-launcher').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        setPanelOpen(!$('rw-panel').classList.contains('open'));
+      }
+    });
+    $('rw-close').addEventListener('click', () => setPanelOpen(false));
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') setPanelOpen(false); });
     document.querySelectorAll('.rw-tab').forEach((button) => button.addEventListener('click', () => setTab(button.dataset.tab)));
     $('rw-faq-search').addEventListener('input', () => renderFaq($('rw-faq-search').value));
     $('rw-faq-clear').addEventListener('click', () => { $('rw-faq-search').value = ''; renderFaq(''); });
+    $('rw-new-conversation').addEventListener('click', () => {
+      conversationId = '';
+      localStorage.removeItem(LS_CID);
+      $('rw-thread').innerHTML = '';
+      addMsg((brandThemes[safeBrand] || brandThemes.retroworld).greeting, 'bot');
+      $('rw-input').focus();
+    });
     $('rw-form').addEventListener('submit', (event) => {
       event.preventDefault();
       const text = ($('rw-input').value || '').trim();
