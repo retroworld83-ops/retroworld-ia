@@ -25,6 +25,7 @@ from src.retroworld_ia import config as app_config  # noqa: E402
 from src.retroworld_ia.services import ai as ai_service  # noqa: E402
 from src.retroworld_ia.services.ai import (  # noqa: E402
     add_disclaimer_if_needed,
+    append_retroworld_links_if_missing,
     build_openai_messages,
     enforce_grounded_price_claims,
     enforce_no_live_availability_claims,
@@ -306,6 +307,14 @@ class SmokeTests(unittest.TestCase):
             add_disclaimer_if_needed(answer, "retroworld", "Pouvez-vous réserver ?"),
             answer,
         )
+
+    def test_restaurant_request_does_not_get_activity_booking_link(self):
+        answer = "Je n'ai pas d'information sur un restaurant sur place."
+        result = append_retroworld_links_if_missing(
+            "Pouvez-vous réserver une table pour manger sur place ?",
+            answer,
+        )
+        self.assertEqual(result, answer)
 
     def test_responses_api_payload_and_output_parsing(self):
         captured = {}
