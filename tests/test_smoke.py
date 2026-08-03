@@ -307,6 +307,17 @@ class SmokeTests(unittest.TestCase):
             add_disclaimer_if_needed(answer, "retroworld", "Pouvez-vous réserver ?"),
             answer,
         )
+        plural_answer = "Je n'ai pas l'information sur les disponibilités demain."
+        self.assertEqual(
+            add_disclaimer_if_needed(plural_answer, "enigmaniac", "Quelles salles sont disponibles ?"),
+            plural_answer,
+        )
+
+        table_answer = "Je n'ai pas d'information sur la réservation d'une table."
+        self.assertEqual(
+            add_disclaimer_if_needed(table_answer, "retroworld", "Pouvez-vous réserver une table ?"),
+            table_answer,
+        )
 
     def test_restaurant_request_does_not_get_activity_booking_link(self):
         answer = "Je n'ai pas d'information sur un restaurant sur place."
