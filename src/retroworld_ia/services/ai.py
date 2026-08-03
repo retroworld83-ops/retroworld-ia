@@ -1,3 +1,4 @@
+import hashlib
 import importlib
 import importlib.util
 import json
@@ -28,10 +29,101 @@ def build_openai_messages(system_prompt: str, history: List[Dict[str, Any]], use
     return messages
 
 
-def openai_answer(messages: List[Dict[str, Any]]) -> str:
+def _message_text(message: Dict[str, Any]) -> str:
+    content = message.get("content") or ""
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    return "\n".join(
+        str(block.get("text") or "").strip()
+        for block in content
+        if isinstance(block, dict) and block.get("text")
+    ).strip()
+
+
+def _simple_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    simple_messages: List[Dict[str, str]] = []
+    for message in messages:
+        role = message.get("role") or "user"
+        text = _message_text(message)
+        if role in {"system", "user", "assistant"} and text:
+            simple_messages.append({"role": role, "content": text})
+    return simple_messages
+
+
+def safety_identifier_for(value: str) -> str:
+    digest = hashlib.sha256(f"retroworld-ia:{value or 'anonymous'}".encode("utf-8")).hexdigest()
+    return f"rw_{digest[:40]}"
+
+
+def _extract_response_text(data: Dict[str, Any]) -> str:
+    direct = data.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    parts: List[str] = []
+    for item in data.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        for block in item.get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "output_text" and block.get("text"):
+                parts.append(str(block["text"]).strip())
+    return "\n".join(part for part in parts if part).strip()
+
+
+def responses_answer(messages: List[Dict[str, Any]], safety_identifier: str = "") -> str:
+    simple_messages = _simple_messages(messages)
+    instructions = "\n\n".join(item["content"] for item in simple_messages if item["role"] == "system")
+    input_items = [item for item in simple_messages if item["role"] != "system"]
+    if not input_items:
+        return ""
+
+    payload: Dict[str, Any] = {
+        "model": config.OPENAI_MODEL,
+        "instructions": instructions,
+        "input": input_items,
+        "store": False,
+    }
+    if config.OPENAI_MAX_OUTPUT_TOKENS:
+        payload["max_output_tokens"] = config.OPENAI_MAX_OUTPUT_TOKENS
+    if config.OPENAI_REASONING_EFFORT in {"none", "low", "medium", "high", "xhigh", "max"}:
+        payload["reasoning"] = {"effort": config.OPENAI_REASONING_EFFORT}
+    if config.OPENAI_TEXT_VERBOSITY in {"low", "medium", "high"}:
+        payload["text"] = {"verbosity": config.OPENAI_TEXT_VERBOSITY}
+    if safety_identifier:
+        payload["safety_identifier"] = safety_identifier[:64]
+
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={"Authorization": f"Bearer {config.OPENAI_API_KEY}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=35,
+        )
+        response.raise_for_status()
+        return _extract_response_text(response.json() or {})
+    except Exception as err:
+        response_obj = getattr(err, "response", None)
+        response_text = ""
+        status_code = None
+        if response_obj is not None:
+            status_code = getattr(response_obj, "status_code", None)
+            try:
+                response_text = response_obj.text[:2000]
+            except Exception:
+                response_text = ""
+        log_error("OpenAI responses error", err, {"model": config.OPENAI_MODEL, "status_code": status_code, "response_text": response_text})
+        return ""
+
+
+def openai_answer(messages: List[Dict[str, Any]], safety_identifier: str = "") -> str:
     if not openai_ready():
         return ""
-    primary = fallback_chat_completions(messages, primary=True)
+    primary = ""
+    if config.OPENAI_API_MODE != "chat_completions":
+        primary = responses_answer(messages, safety_identifier=safety_identifier)
+    if not primary:
+        primary = fallback_chat_completions(messages, primary=True)
     if primary:
         return primary
     return "Desole, je rencontre un souci technique. Pouvez-vous reessayer ou contacter l'equipe ?"
@@ -39,17 +131,7 @@ def openai_answer(messages: List[Dict[str, Any]]) -> str:
 
 def fallback_chat_completions(messages: List[Dict[str, Any]], primary: bool = False) -> str:
     try:
-        simple_messages = []
-        for message in messages:
-            role = message.get("role") or "user"
-            content_blocks = message.get("content") or []
-            text = ""
-            if isinstance(content_blocks, list):
-                text = "\n".join(block.get("text", "") for block in content_blocks if isinstance(block, dict))
-            elif isinstance(content_blocks, str):
-                text = content_blocks
-            if role in {"system", "user", "assistant"} and text.strip():
-                simple_messages.append({"role": role, "content": text})
+        simple_messages = _simple_messages(messages)
 
         payload: Dict[str, Any] = {
             "model": config.OPENAI_MODEL,
@@ -81,6 +163,59 @@ def fallback_chat_completions(messages: List[Dict[str, Any]], primary: bool = Fa
                 response_text = ""
         log_error("OpenAI chat.completions error" if primary else "OpenAI fallback error", err, {"model": config.OPENAI_MODEL, "status_code": status_code, "response_text": response_text})
         return ""
+
+
+CURRENCY_AMOUNT_PATTERN = re.compile(
+    r"(?<![\w])(\d+(?:[.,]\d{1,2})?)\s*(?:€|euros?|eur)(?=\s|/|$|[.,;:!?])",
+    flags=re.IGNORECASE,
+)
+
+
+def _normalized_amount(value: str) -> str:
+    value = (value or "").replace(",", ".")
+    try:
+        number = float(value)
+    except ValueError:
+        return value
+    return str(int(number)) if number.is_integer() else f"{number:.2f}".rstrip("0").rstrip(".")
+
+
+def enforce_grounded_price_claims(text: str, grounding_text: str, user_text: str = "") -> Tuple[str, bool]:
+    if not price_intent(user_text):
+        return text or "", False
+    allowed = {
+        _normalized_amount(match.group(1))
+        for match in CURRENCY_AMOUNT_PATTERN.finditer(grounding_text or "")
+    }
+    altered = False
+
+    def replace_unknown(match: re.Match) -> str:
+        nonlocal altered
+        if _normalized_amount(match.group(1)) in allowed:
+            return match.group(0)
+        altered = True
+        return "un montant à confirmer par l'équipe"
+
+    safe_text = CURRENCY_AMOUNT_PATTERN.sub(replace_unknown, text or "")
+    safe_text = re.sub(r"\bde un montant\b", "d'un montant", safe_text, flags=re.IGNORECASE)
+    return safe_text, altered
+
+
+LIVE_AVAILABILITY_PATTERN = re.compile(
+    r"\b((?:les\s+)?(?:salles|créneaux|creneaux|sessions|places))\s+disponibles\s+(?:sont\s*:|sont|:)",
+    flags=re.IGNORECASE,
+)
+
+
+def enforce_no_live_availability_claims(text: str, user_text: str = "") -> Tuple[str, bool]:
+    if not booking_intent(user_text):
+        return text or "", False
+
+    def replace_claim(match: re.Match) -> str:
+        return f"{match.group(1)} figurant dans mes informations sont :"
+
+    safe_text, replacements = LIVE_AVAILABILITY_PATTERN.subn(replace_claim, text or "")
+    return safe_text, replacements > 0
 
 
 RESERVATION_FORBIDDEN_PATTERNS = [

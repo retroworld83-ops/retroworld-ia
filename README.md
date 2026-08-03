@@ -43,7 +43,11 @@ tests/test_smoke.py
 ## Variables d'environnement
 
 - `OPENAI_API_KEY`
-- `OPENAI_MODEL`
+- `OPENAI_MODEL` (defaut `gpt-5.6-terra`)
+- `OPENAI_API_MODE` (`responses` par defaut, `chat_completions` pour un repli temporaire)
+- `OPENAI_REASONING_EFFORT` (`low` par defaut)
+- `OPENAI_TEXT_VERBOSITY` (`low`, `medium` ou `high`)
+- `OPENAI_MAX_OUTPUT_TOKENS`
 - `ADMIN_USERNAME`
 - `ADMIN_PASSWORD`
 - `SECRET_KEY`
@@ -52,6 +56,7 @@ tests/test_smoke.py
 - `FAQ_ENABLED_BRANDS`
 - `PUBLIC_BRANDS`
 - `CHAT_HISTORY_MESSAGES`
+- `CHAT_MAX_MESSAGE_CHARS`
 - `CORRECTION_MEMORY_MAX` nombre maximum de corrections reinjectees dans un prompt
 - `OPENAI_CORRECTIONS_VECTOR_STORE_ID` optionnel, pour synchroniser les corrections approuvees vers un Vector Store OpenAI
 - `APP_DB_PATH`
@@ -73,6 +78,13 @@ Le widget public charge maintenant :
 - les FAQ via `/faq.json`
 - les cartes de contenu metier via `/knowledge.json`
 - le chat via `/chat`
+- un historique separe pour chaque marque et un bouton de nouvelle discussion
+
+## Fiabilite des reponses
+
+Les appels utilisent l'API Responses avec un repli vers Chat Completions. Le prompt et les garde-fous applicatifs interdisent notamment d'interpoler un prix depuis une fourchette, de transformer l'absence d'information en refus categorique, ou de presenter une salle connue comme disponible en temps reel.
+
+L'administration se fait uniquement via `/admin/login`. Ne partagez jamais un mot de passe ou un ancien jeton dans une URL. L'authentification historique par parametre `?token=` doit rester desactivee (`ADMIN_ENABLE_LEGACY_TOKENS=false`).
 
 ## Memoire de corrections
 
