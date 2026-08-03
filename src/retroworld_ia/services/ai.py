@@ -3,6 +3,7 @@ import importlib
 import importlib.util
 import json
 import re
+import unicodedata
 from typing import Any, Dict, List, Tuple
 
 from src.retroworld_ia import config
@@ -202,7 +203,7 @@ def enforce_grounded_price_claims(text: str, grounding_text: str, user_text: str
 
 
 LIVE_AVAILABILITY_PATTERN = re.compile(
-    r"\b((?:les\s+)?(?:salles|créneaux|creneaux|sessions|places))\s+disponibles\s+(?:sont\s*:|sont|:)",
+    r"\b((?:les\s+)?(?:salles|créneaux|creneaux|sessions|places)(?:\s+(?!disponibles\b)[\wÀ-ÿ'’-]+){0,3})\s+disponibles\s+(?:sont\s*:|sont|:)",
     flags=re.IGNORECASE,
 )
 
@@ -237,7 +238,20 @@ def enforce_no_reservation_promises(text: str) -> Tuple[str, bool]:
 def add_disclaimer_if_needed(answer: str, brand_id: str, user_msg: str) -> str:
     if not booking_intent(user_msg):
         return answer
-    disclaimer = "Je n'ai pas acces au planning en temps reel, la disponibilite doit etre confirmee par l'equipe."
+    normalized_answer = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", answer or "")
+        if not unicodedata.combining(character)
+    ).lower()
+    existing_disclaimers = (
+        "je n'ai pas acces au planning",
+        "je n'ai pas l'information sur la disponibilite",
+        "je ne peux pas effectuer la reservation",
+        "la disponibilite doit etre confirmee",
+    )
+    if any(signal in normalized_answer for signal in existing_disclaimers):
+        return answer
+    disclaimer = "Je n'ai pas accès au planning en temps réel, la disponibilité doit être confirmée par l'équipe."
     contact = format_contact(brand_id)
     if contact:
         disclaimer += f" Contact: {contact}"

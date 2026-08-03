@@ -24,6 +24,7 @@ from app import app  # noqa: E402
 from src.retroworld_ia import config as app_config  # noqa: E402
 from src.retroworld_ia.services import ai as ai_service  # noqa: E402
 from src.retroworld_ia.services.ai import (  # noqa: E402
+    add_disclaimer_if_needed,
     build_openai_messages,
     enforce_grounded_price_claims,
     enforce_no_live_availability_claims,
@@ -291,6 +292,20 @@ class SmokeTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertIn("figurant dans mes informations", answer)
         self.assertNotIn(": :", answer)
+
+        branded_answer, branded_changed = enforce_no_live_availability_claims(
+            "Les salles Enigmaniac disponibles sont : La Loi de la Jungle et Terreur Nocturne.",
+            "Quelles salles sont disponibles demain ?",
+        )
+        self.assertTrue(branded_changed)
+        self.assertIn("salles Enigmaniac figurant dans mes informations", branded_answer)
+
+    def test_booking_disclaimer_is_not_repeated(self):
+        answer = "Je ne peux pas effectuer la réservation. Contactez directement l'équipe."
+        self.assertEqual(
+            add_disclaimer_if_needed(answer, "retroworld", "Pouvez-vous réserver ?"),
+            answer,
+        )
 
     def test_responses_api_payload_and_output_parsing(self):
         captured = {}
