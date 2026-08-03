@@ -235,8 +235,25 @@ def enforce_no_reservation_promises(text: str) -> Tuple[str, bool]:
     return safe_text, promised
 
 
+def _is_non_activity_booking_request(user_text: str) -> bool:
+    lowered = (user_text or "").lower()
+    non_activity_request = re.search(
+        r"\b(table|restaurant|repas|déjeuner|dejeuner|dîner|diner|manger|boire)\b",
+        lowered,
+        flags=re.I,
+    )
+    activity_request = re.search(
+        r"\b(activité|activite|jeu|vr|escape|quiz|quizz|simulateur|arcade)\b",
+        lowered,
+        flags=re.I,
+    )
+    return bool(non_activity_request and not activity_request)
+
+
 def add_disclaimer_if_needed(answer: str, brand_id: str, user_msg: str) -> str:
     if not booking_intent(user_msg):
+        return answer
+    if _is_non_activity_booking_request(user_msg):
         return answer
     normalized_answer = "".join(
         character
@@ -246,6 +263,7 @@ def add_disclaimer_if_needed(answer: str, brand_id: str, user_msg: str) -> str:
     existing_disclaimers = (
         "je n'ai pas acces au planning",
         "je n'ai pas l'information sur la disponibilite",
+        "je n'ai pas l'information sur les disponibilite",
         "je ne peux pas effectuer la reservation",
         "la disponibilite doit etre confirmee",
     )
@@ -263,17 +281,7 @@ def add_disclaimer_if_needed(answer: str, brand_id: str, user_msg: str) -> str:
 def retroworld_booking_links_for(user_text: str) -> List[str]:
     lowered = (user_text or "").lower()
     links = []
-    non_activity_request = re.search(
-        r"\b(table|restaurant|repas|déjeuner|dejeuner|dîner|diner|manger|boire)\b",
-        lowered,
-        flags=re.I,
-    )
-    activity_request = re.search(
-        r"\b(activité|activite|jeu|vr|escape|quiz|quizz|simulateur|arcade)\b",
-        lowered,
-        flags=re.I,
-    )
-    if non_activity_request and not activity_request:
+    if _is_non_activity_booking_request(user_text):
         return links
     if re.search(r"\b(escape|escape\s*vr|escape\s*game)\b", lowered, flags=re.I):
         links.append("https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr")
