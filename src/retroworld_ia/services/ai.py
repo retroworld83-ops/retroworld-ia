@@ -263,6 +263,18 @@ def add_disclaimer_if_needed(answer: str, brand_id: str, user_msg: str) -> str:
 def retroworld_booking_links_for(user_text: str) -> List[str]:
     lowered = (user_text or "").lower()
     links = []
+    non_activity_request = re.search(
+        r"\b(table|restaurant|repas|déjeuner|dejeuner|dîner|diner|manger|boire)\b",
+        lowered,
+        flags=re.I,
+    )
+    activity_request = re.search(
+        r"\b(activité|activite|jeu|vr|escape|quiz|quizz|simulateur|arcade)\b",
+        lowered,
+        flags=re.I,
+    )
+    if non_activity_request and not activity_request:
+        return links
     if re.search(r"\b(escape|escape\s*vr|escape\s*game)\b", lowered, flags=re.I):
         links.append("https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr")
     if re.search(r"\b(quiz|quizz)\b", lowered, flags=re.I):
@@ -277,7 +289,10 @@ def append_retroworld_links_if_missing(user_text: str, reply: str) -> str:
         return reply
     if not (booking_intent(user_text) or price_intent(user_text)):
         return reply
-    block = "\n".join(f"Lien reservation Retroworld: {url}" for url in retroworld_booking_links_for(user_text))
+    links = retroworld_booking_links_for(user_text)
+    if not links:
+        return reply
+    block = "\n".join(f"Lien reservation Retroworld: {url}" for url in links)
     return (reply or "").rstrip() + "\n\n" + block
 
 
