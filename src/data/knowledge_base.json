@@ -112,54 +112,103 @@
     },
     "runningman": {
       "id": "runningman",
-      "name": "Runningman",
-      "short": "Runningman",
+      "name": "Running Man Games",
+      "short": "Running Man Games",
       "contact_phone": "04 98 09 30 59",
-      "contact_email": "",
-      "website": "https://www.runningmangames.fr",
+      "contact_email": "contact@runningmangames.fr",
+      "website": "https://runningmangames.fr",
       "domains": [
         "runningmangames.fr",
         "www.runningmangames.fr"
       ],
-      "summary": "Activites enfant, action game et evenements de groupe dans le meme batiment que Retroworld.",
+      "summary": "Complexe de loisirs collectifs a Draguignan reunissant Game Zone, escape games physiques, escape games VR, jeux VR, quiz et escape game exterieur.",
       "highlights": [
-        "Action game",
-        "Activites enfants",
-        "Anniversaires"
+        "Game Zone de 10 salles de defis",
+        "Escape games physiques Enigmaniac",
+        "Jeux VR et escape games VR",
+        "Quiz et blind test",
+        "Escape game exterieur a partir de 10 personnes",
+        "Anniversaires, groupes, EVG et EVJF"
       ],
       "quick_actions": [
         {
-          "label": "Action game",
-          "prompt": "Je veux des infos sur l action game Runningman"
+          "label": "Activites",
+          "prompt": "Quelles activites propose Running Man Games ?"
+        },
+        {
+          "label": "Tarifs",
+          "prompt": "Quels sont les tarifs de Running Man Games ?"
         },
         {
           "label": "Anniversaire",
-          "prompt": "Je veux organiser un anniversaire chez Runningman"
+          "prompt": "Je veux organiser un anniversaire chez Running Man Games"
         },
         {
           "label": "Contact",
-          "prompt": "Comment contacter Runningman ?"
+          "prompt": "Comment contacter Running Man Games ?"
         }
       ],
       "knowledge_cards": [
         {
-          "title": "Action game",
-          "summary": "Activite physique et dynamique, plutot groupe et challenge."
+          "title": "Game Zone",
+          "summary": "10 salles de defis, environ 1 heure, des 7 ans. 15 EUR pour un enfant de moins de 12 ans et 20 EUR pour un adulte."
         },
         {
-          "title": "Enfants",
-          "summary": "Positionnement clair pour anniversaires et sorties familiales."
+          "title": "Realite virtuelle",
+          "summary": "Jeux VR de 30 minutes a 15 EUR par joueur et escape games VR de 40 a 60 minutes a 30 EUR par joueur."
+        },
+        {
+          "title": "Quiz",
+          "summary": "Jeu en tour par tour de 30 minutes, a partir de 8 EUR par joueur, avec 6 themes a choisir parmi plus de 60."
+        },
+        {
+          "title": "Escape Game Enigmaniac",
+          "summary": "25 EUR par joueur pour 3 a 4 joueurs, 20 EUR pour 5 a 6 joueurs et 15 EUR pour les enfants de moins de 12 ans."
+        },
+        {
+          "title": "Anniversaire",
+          "summary": "Formules avec activite et salle dediee. L'enfant de moins de 12 ans qui fete son anniversaire est offert sur les formules Game Zone et Escape Game."
         }
       ],
       "booking_links": [
-        "https://www.runningmangames.fr"
+        "https://runningmangames.fr/reserver/"
       ],
       "offers": [
         {
-          "name": "Action game",
-          "category": "Physique",
-          "price": "Selon formule",
-          "details": "Reservation et confirmation directement aupres de Runningman."
+          "name": "Game Zone",
+          "category": "Defis grandeur nature",
+          "price": "15 EUR enfant de moins de 12 ans | 20 EUR adulte",
+          "details": "10 salles de defis, environ 1 heure, des 7 ans."
+        },
+        {
+          "name": "Jeux VR",
+          "category": "Realite virtuelle",
+          "price": "15 EUR / joueur / 30 min",
+          "details": "De 1 a 5 joueurs, des 7 ans."
+        },
+        {
+          "name": "Escape Game VR",
+          "category": "Realite virtuelle",
+          "price": "30 EUR / joueur",
+          "details": "Mission de 40 a 60 minutes, de 1 a 5 joueurs, des 10 ans."
+        },
+        {
+          "name": "Quiz et Blind Test",
+          "category": "Quiz",
+          "price": "A partir de 8 EUR / joueur / 30 min",
+          "details": "Tour par tour, 6 themes a choisir parmi plus de 60."
+        },
+        {
+          "name": "Escape Game Enigmaniac",
+          "category": "Escape game en decor reel",
+          "price": "15 a 25 EUR / joueur",
+          "details": "25 EUR pour 3 a 4 joueurs, 20 EUR pour 5 a 6 joueurs, 15 EUR pour les moins de 12 ans."
+        },
+        {
+          "name": "VR + Quiz",
+          "category": "Formule anniversaire",
+          "price": "20 EUR / joueur",
+          "details": "Formule combinee pour anniversaire."
         }
       ]
     },

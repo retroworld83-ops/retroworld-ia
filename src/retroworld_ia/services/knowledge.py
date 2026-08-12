@@ -118,7 +118,7 @@ def build_system_prompt(brand_id: str, user_text: str, corrections: Optional[Lis
     if faq_items:
         lines.append("")
         lines.append("FAQ publique:")
-        for item in faq_items[:10]:
+        for item in faq_items[:40]:
             question = item.get("question") or ""
             answer = item.get("answer") or ""
             if question and answer:

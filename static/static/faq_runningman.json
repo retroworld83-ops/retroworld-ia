@@ -58,18 +58,18 @@
       "tags": ["réservation"]
     },
     {
-      "question": "Quel est le tarif de l’Action Game ?",
-      "answer": "Le tarif est de 15 € pour les enfants et 20 € pour les adultes.",
-      "tags": ["tarifs", "action game"]
+      "question": "Quel est le tarif de la Game Zone ?",
+      "answer": "La Game Zone coûte 15 € pour un enfant de moins de 12 ans et 20 € pour un adulte. La partie dure environ 1 heure.",
+      "tags": ["tarifs", "game zone", "enfant"]
     },
     {
       "question": "Quel est le tarif de l’Escape Game ?",
-      "answer": "15 € enfant, 25 € adulte (jusqu’à 4 joueurs), puis 20 € adulte à partir de 4 joueurs.",
+      "answer": "L’Escape Game Enigmaniac coûte 25 € par joueur pour un groupe de 3 à 4, 20 € par joueur pour un groupe de 5 à 6 et 15 € pour un enfant de moins de 12 ans.",
       "tags": ["tarifs", "escape game"]
     },
     {
       "question": "Quel est le tarif du Quiz ?",
-      "answer": "Le quiz coûte environ 15 € pour 1 heure de jeu.",
+      "answer": "Le Quiz coûte à partir de 8 € par joueur pour 30 minutes. Il se joue en tour par tour et permet de choisir 6 thèmes parmi plus de 60.",
       "tags": ["quiz", "tarifs"]
     },
     {
@@ -84,7 +84,7 @@
     },
     {
       "question": "Y a-t-il des activités en extérieur ?",
-      "answer": "Oui, un escape game extérieur est proposé avec une aventure immersive dans Draguignan.",
+      "answer": "Oui. La Forteresse du Dragon est un escape game extérieur médiéval proposé à partir de 10 personnes.",
       "tags": ["extérieur"]
     },
     {
@@ -99,7 +99,7 @@
     },
     {
       "question": "Proposez-vous des EVG / EVJF ?",
-      "answer": "Oui, avec des packs dédiés incluant activités, options traiteur et prestations personnalisées.",
+      "answer": "Oui. Les formules EVG et EVJF sont préparées sur mesure avec l’équipe selon la date, l’effectif et les activités choisies. Aucune formule fixe ne doit être promise avant validation.",
       "tags": ["evg", "evjf"]
     },
     {
@@ -109,7 +109,7 @@
     },
     {
       "question": "Y a-t-il des options supplémentaires ?",
-      "answer": "Oui, des options comme traiteur, vidéo/photo ou activités supplémentaires peuvent être ajoutées sur devis.",
+      "answer": "Des boissons et snacks sont disponibles sur place. Un prestataire extérieur peut être envisagé pour certains groupes après accord préalable de l’équipe.",
       "tags": ["options"]
     },
     {
@@ -139,7 +139,7 @@
     },
     {
       "question": "Combien coûte la VR ?",
-      "answer": "À partir de 15 € pour une session de 20 à 30 minutes.",
+      "answer": "Les Jeux VR coûtent 15 € par joueur pour 30 minutes. Les Escape Games VR coûtent 30 € par joueur pour une mission de 40 à 60 minutes.",
       "tags": ["vr", "tarifs"]
     },
     {

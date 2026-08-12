@@ -99,6 +99,14 @@ class SmokeTests(unittest.TestCase):
         self.assertTrue("Runningman" in questions or "Running Man" in questions)
         self.assertIn("04 98 09 30 59", answers)
 
+    def test_runningman_current_prices_are_grounded(self):
+        prompt = build_system_prompt("runningman", "Quel est le tarif de la Game Zone pour un enfant de 10 ans ?")
+        self.assertIn("15 EUR enfant de moins de 12 ans", prompt)
+        self.assertIn("20 EUR adulte", prompt)
+        self.assertIn("A partir de 8 EUR / joueur / 30 min", prompt)
+        self.assertIn("30 EUR / joueur", prompt)
+        self.assertIn("contact@runningmangames.fr", prompt)
+
     def test_chat_without_openai_key_returns_graceful_message(self):
         response = self.client.post("/chat", json={"message": "bonjour"})
         self.assertEqual(response.status_code, 200)
