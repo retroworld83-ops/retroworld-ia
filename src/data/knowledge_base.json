@@ -8,9 +8,9 @@
       "Distinguer clairement Retroworld, Runningman et Enigmaniac."
     ],
     "routing": [
-      "VR, quiz et experiences digitales: Retroworld.",
-      "Action game, univers enfant et activites physiques: Runningman.",
-      "Escape game en decors reels: Enigmaniac.",
+      "Toujours repondre dans le perimetre de la marque demandee, sans rediriger automatiquement vers une autre marque.",
+      "Running Man Games reunit Game Zone, escape games physiques, escape games VR, jeux VR, quiz et escape game exterieur.",
+      "Retroworld et Enigmaniac conservent leurs propres informations quand leur marque est explicitement demandee.",
       "Si le client dit seulement escape game, demander si c'est en VR ou en decor reel."
     ]
   },

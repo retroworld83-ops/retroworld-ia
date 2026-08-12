@@ -9,13 +9,13 @@
     },
     {
       "question": "Quelles activités sont proposées chez Running Man ?",
-      "answer": "Running Man propose plusieurs activités : Action Game (défis physiques et mentaux), Escape Game, Quiz interactif, Escape Game extérieur et événements pour groupes comme anniversaires, EVG/EVJF et team building.",
-      "tags": ["activités", "escape game", "quiz", "action game"]
+      "answer": "Running Man Games propose six activités : Game Zone, Escape Game Enigmaniac, Escape Game VR, Jeux VR, Quiz et Escape Game extérieur, ainsi que des événements de groupe.",
+      "tags": ["activités", "game zone", "escape game", "vr", "quiz"]
     },
     {
-      "question": "Qu’est-ce que l’Action Game ?",
-      "answer": "L’Action Game est un parcours de défis physiques et mentaux inspiré de jeux télévisés, où les joueurs doivent coopérer pour réussir des épreuves dans différentes salles.",
-      "tags": ["action game", "jeu", "physique"]
+      "question": "Qu’est-ce que la Game Zone ?",
+      "answer": "La Game Zone est un parcours collectif de 10 salles de défis physiques et mentaux. La partie dure environ une heure et les joueurs coopèrent pour réussir les épreuves.",
+      "tags": ["game zone", "jeu", "défis"]
     },
     {
       "question": "Le jeu est-il physique ?",
@@ -119,7 +119,7 @@
     },
     {
       "question": "Où se situe Running Man ?",
-      "answer": "815 avenue Pierre Brossolette à Draguignan, dans le même bâtiment que Retroworld.",
+      "answer": "Running Man Games se situe au 815 avenue Pierre Brossolette, 83300 Draguignan.",
       "tags": ["adresse"]
     },
     {
@@ -129,13 +129,13 @@
     },
     {
       "question": "Proposez-vous de la VR ?",
-      "answer": "La réalité virtuelle est proposée chez Retroworld, partenaire situé dans le même bâtiment.",
-      "tags": ["vr", "retroworld"]
+      "answer": "Oui. Running Man Games propose des Jeux VR à 15 € par joueur pour 30 minutes et des Escape Games VR à 30 € par joueur pour une mission de 40 à 60 minutes.",
+      "tags": ["vr", "jeux vr", "escape game vr"]
     },
     {
-      "question": "Pourquoi faire VR chez Retroworld ?",
-      "answer": "Retroworld propose des jeux VR immersifs en solo ou en groupe, complémentaires à Running Man.",
-      "tags": ["vr"]
+      "question": "Quelle différence entre Jeux VR et Escape Game VR ?",
+      "answer": "Les Jeux VR sont des expériences courtes d’action, d’aventure ou de découverte. Les Escape Games VR sont des missions coopératives de 40 à 60 minutes centrées sur les énigmes et l’exploration.",
+      "tags": ["vr", "jeux vr", "escape game vr"]
     },
     {
       "question": "Combien coûte la VR ?",

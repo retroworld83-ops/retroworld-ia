@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import unittest
@@ -106,6 +107,18 @@ class SmokeTests(unittest.TestCase):
         self.assertIn("A partir de 8 EUR / joueur / 30 min", prompt)
         self.assertIn("30 EUR / joueur", prompt)
         self.assertIn("contact@runningmangames.fr", prompt)
+
+    def test_runningman_vr_stays_on_runningman(self):
+        with open(FAQ_RUNNINGMAN_PATH, "r", encoding="utf-8") as handle:
+            faq = json.load(handle)
+        items = faq.get("items", [])
+        vr_answers = " ".join(
+            item.get("answer", "")
+            for item in items
+            if "vr" in " ".join(item.get("tags", [])).lower()
+        )
+        self.assertIn("Running Man Games propose des Jeux VR", vr_answers)
+        self.assertNotIn("proposée chez Retroworld", vr_answers)
 
     def test_chat_without_openai_key_returns_graceful_message(self):
         response = self.client.post("/chat", json={"message": "bonjour"})
