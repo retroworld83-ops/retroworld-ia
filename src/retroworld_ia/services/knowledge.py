@@ -186,6 +186,10 @@ RESERVATION_INTENT_PATTERNS = [
 
 def booking_intent(text: str) -> bool:
     lowered = (text or "").lower()
+    opening_hours = re.search(r"\b(horaires?|heures?\s+d['’]?ouverture|ouvert(?:e|es|s)?)\b", lowered, flags=re.IGNORECASE)
+    live_scheduling = re.search(r"\b(réserv\w*|reservation\w*|réservation\w*|dispo\w*|créneau\w*|planning\w*)\b", lowered, flags=re.IGNORECASE)
+    if opening_hours and not live_scheduling:
+        return False
     return any(re.search(pattern, lowered, flags=re.IGNORECASE) for pattern in RESERVATION_INTENT_PATTERNS)
 
 
@@ -196,7 +200,6 @@ def price_intent(text: str) -> bool:
 def intent_tags(text: str) -> List[str]:
     lowered = (text or "").lower()
     patterns = {
-        "reservation": r"\b(réserv|dispo|créneau|horaire|planning)\b",
         "tarif": r"\b(prix|tarif|combien|euro|€)\b",
         "anniversaire": r"\b(anniversaire|gouter|goûter)\b",
         "devis": r"\b(devis|entreprise|groupe|privat)\b",
@@ -204,4 +207,6 @@ def intent_tags(text: str) -> List[str]:
         "contact": r"\b(contact|telephone|mail|email|adresse)\b",
     }
     found = [name for name, pattern in patterns.items() if re.search(pattern, lowered, flags=re.I)]
+    if booking_intent(text):
+        found.insert(0, "reservation")
     return found or ["general"]
