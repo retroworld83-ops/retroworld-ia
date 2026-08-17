@@ -376,7 +376,7 @@ class SmokeTests(unittest.TestCase):
                 return FakeResponse()
 
         messages = build_openai_messages("Instruction test", [], "Question test")
-        with patch.object(ai_service, "requests", FakeRequests()), patch.object(app_config, "OPENAI_MODEL", "gpt-test"), patch.object(app_config, "OPENAI_REASONING_EFFORT", "low"), patch.object(app_config, "OPENAI_TEXT_VERBOSITY", "low"):
+        with patch.object(ai_service, "requests", FakeRequests()), patch.object(app_config, "OPENAI_MODEL", "gpt-5.6-terra"), patch.object(app_config, "OPENAI_REASONING_EFFORT", "low"), patch.object(app_config, "OPENAI_TEXT_VERBOSITY", "low"):
             answer = responses_answer(messages, safety_identifier="rw_test")
 
         self.assertEqual(answer, "Réponse test")
@@ -387,6 +387,33 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(captured["json"]["reasoning"]["effort"], "low")
         self.assertEqual(captured["json"]["text"]["verbosity"], "low")
         self.assertEqual(captured["json"]["safety_identifier"], "rw_test")
+
+    def test_non_reasoning_model_omits_unsupported_response_controls(self):
+        captured = {}
+
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"output_text": "Réponse directe"}
+
+        class FakeRequests:
+            @staticmethod
+            def post(url, headers, json, timeout):
+                captured.update({"url": url, "json": json})
+                return FakeResponse()
+
+        messages = build_openai_messages("Instruction test", [], "Question test")
+        with patch.object(ai_service, "requests", FakeRequests()), patch.object(app_config, "OPENAI_MODEL", "gpt-4.1-mini"), patch.object(app_config, "OPENAI_REASONING_EFFORT", "low"), patch.object(app_config, "OPENAI_TEXT_VERBOSITY", "low"):
+            answer = responses_answer(messages, safety_identifier="rw_test")
+
+        self.assertEqual(answer, "Réponse directe")
+        self.assertNotIn("reasoning", captured["json"])
+        self.assertNotIn("text", captured["json"])
 
     def test_chat_rejects_overlong_message(self):
         response = self.client.post(

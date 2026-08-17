@@ -58,6 +58,15 @@ def safety_identifier_for(value: str) -> str:
     return f"rw_{digest[:40]}"
 
 
+def _supports_reasoning_effort(model: str) -> bool:
+    normalized = (model or "").strip().lower()
+    return normalized.startswith("gpt-5") or bool(re.match(r"^o\d", normalized))
+
+
+def _supports_text_verbosity(model: str) -> bool:
+    return (model or "").strip().lower().startswith("gpt-5")
+
+
 def _extract_response_text(data: Dict[str, Any]) -> str:
     direct = data.get("output_text")
     if isinstance(direct, str) and direct.strip():
@@ -87,9 +96,9 @@ def responses_answer(messages: List[Dict[str, Any]], safety_identifier: str = ""
     }
     if config.OPENAI_MAX_OUTPUT_TOKENS:
         payload["max_output_tokens"] = config.OPENAI_MAX_OUTPUT_TOKENS
-    if config.OPENAI_REASONING_EFFORT in {"none", "low", "medium", "high", "xhigh", "max"}:
+    if _supports_reasoning_effort(config.OPENAI_MODEL) and config.OPENAI_REASONING_EFFORT in {"none", "low", "medium", "high", "xhigh", "max"}:
         payload["reasoning"] = {"effort": config.OPENAI_REASONING_EFFORT}
-    if config.OPENAI_TEXT_VERBOSITY in {"low", "medium", "high"}:
+    if _supports_text_verbosity(config.OPENAI_MODEL) and config.OPENAI_TEXT_VERBOSITY in {"low", "medium", "high"}:
         payload["text"] = {"verbosity": config.OPENAI_TEXT_VERBOSITY}
     if safety_identifier:
         payload["safety_identifier"] = safety_identifier[:64]
