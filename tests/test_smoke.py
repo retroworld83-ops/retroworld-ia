@@ -388,6 +388,18 @@ class SmokeTests(unittest.TestCase):
         untrusted = "Voir https://example.net/reserver"
         self.assertEqual(extract_response_actions(untrusted), (untrusted, []))
 
+        runningman = (
+            "Utilisez le lien suivant : https://runningmangames.fr/reserver/\n"
+            "Contact: telephone: 04 98 09 30 59 | site: https://runningmangames.fr/"
+        )
+        display, actions = extract_response_actions(runningman)
+        self.assertNotIn("site:", display.lower())
+        self.assertIn("bouton ci-dessous", display.lower())
+        self.assertEqual(
+            [action["label"] for action in actions],
+            ["Réserver chez Running Man Games", "Voir le site Running Man Games"],
+        )
+
     def test_opening_hours_request_requires_advance_booking(self):
         answer = "Retroworld est ouvert le dimanche de 11h à 22h."
         question = "Quels sont vos horaires le dimanche ?"

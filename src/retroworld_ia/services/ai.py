@@ -354,7 +354,8 @@ def extract_response_actions(answer: str) -> Tuple[str, List[Dict[str, str]]]:
     for match in re.finditer(r'https://[^\s<>"\']+', source, flags=re.I):
         url = match.group(0).rstrip(".,;:!?)]}")
         try:
-            host = (urlparse(url).hostname or "").lower()
+            parsed = urlparse(url)
+            host = (parsed.hostname or "").lower()
         except ValueError:
             continue
         if host not in TRUSTED_ACTION_HOSTS or url in seen:
@@ -365,14 +366,16 @@ def extract_response_actions(answer: str) -> Tuple[str, List[Dict[str, str]]]:
         elif host == "enigmaniac.4escape.io":
             label = "Voir les créneaux"
         elif host.endswith("runningmangames.fr"):
-            label = "Ouvrir Running Man Games"
+            label = "Réserver chez Running Man Games" if parsed.path.startswith("/reserver") else "Voir le site Running Man Games"
         else:
-            label = "Ouvrir Retroworld"
+            label = "Réserver chez Retroworld" if parsed.path.startswith("/reserver") else "Voir le site Retroworld"
         actions.append({"type": "link", "label": label, "url": url})
 
     display_answer = source
     for action in actions:
         display_answer = display_answer.replace(action["url"], "")
+    display_answer = re.sub(r"\ble\s+lien\s+suivant\s*:\s*", "le bouton ci-dessous. ", display_answer, flags=re.I)
+    display_answer = re.sub(r"\s*\|\s*site\s*:\s*(?=$|\n)", "", display_answer, flags=re.I)
     cleaned_lines = []
     for line in display_answer.splitlines():
         cleaned = re.sub(
