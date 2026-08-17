@@ -191,8 +191,8 @@
     }
     function sendQuickPrompt(text){
       setTab('chat');
-      $('rw-input').value = text;
-      $('rw-form').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+      addMsg(text, 'user');
+      sendChat(text, 'quick_action');
     }
     function applyBrandTheme(){
       const theme = brandThemes[safeBrand] || brandThemes.retroworld;
@@ -250,14 +250,14 @@
       }catch(_e){ faqItems = []; }
       renderFaq('');
     }
-    async function sendChat(text){
+    async function sendChat(text, interactionType){
       $('rw-typing').style.display = 'block';
       $('rw-send').disabled = true;
       try{
         const response = await fetch(API_CHAT, {
           method:'POST',
           headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ message:text, conversation_id: conversationId || undefined, brand_id: safeBrand, metadata:{ source:'widget_v2', page_url: location.href } })
+          body: JSON.stringify({ message:text, conversation_id: conversationId || undefined, brand_id: safeBrand, metadata:{ source:'widget_v2', interaction_type:interactionType || 'manual', page_url: location.href } })
         });
         const data = await response.json();
         if (!response.ok || data.ok === false) {
@@ -302,7 +302,7 @@
       if (!text) return;
       $('rw-input').value = '';
       addMsg(text, 'user');
-      sendChat(text);
+      sendChat(text, 'manual');
     });
 
     const initialTheme = applyBrandTheme();

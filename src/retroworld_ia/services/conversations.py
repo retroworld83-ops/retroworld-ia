@@ -1,11 +1,13 @@
 import json
+import re
 import sqlite3
+import unicodedata
 import uuid
 from typing import Any, Dict, List
 
 from src.retroworld_ia import config
 from src.retroworld_ia.services.corrections import init_corrections_db
-from src.retroworld_ia.services.knowledge import BRAND_ID_DEFAULT, intent_tags, normalize_brand
+from src.retroworld_ia.services.knowledge import BRAND_ID_DEFAULT, BRANDS, intent_tags, load_public_faq, normalize_brand
 from src.retroworld_ia.services.logging_store import log_error, now_str
 
 import importlib
@@ -22,6 +24,102 @@ FLAG_PATTERNS = {
     "promesse_resa": r"\b(réservé|confirmé|je vous bloque|c['’]?est réservé|bloqué)\b",
     "a_relire": r"\b(peut[- ]?etre|probablement|je pense|a priori|il me semble)\b",
 }
+
+AUTOMATED_INTERACTION_TYPES = {"quick_action", "faq_click", "suggestion"}
+STATIC_QUICK_PROMPTS = {
+    "Je veux connaître les tarifs",
+    "Je veux organiser un anniversaire",
+    "Je veux réserver",
+    "Comment vous contacter ?",
+}
+KNOWLEDGE_GAP_PATTERNS = {
+    "information_manquante": re.compile(
+        r"\b(je n['’](?:ai|aurais) pas (?:l['’]|d['’])?information|"
+        r"je ne dispose pas|information (?:absente|inconnue|non disponible)|"
+        r"je ne peux pas (?:confirmer|vous renseigner))\b",
+        flags=re.IGNORECASE,
+    ),
+    "service_indisponible": re.compile(
+        r"\b(service ia n['’]est pas configur[ée]|souci de connexion|"
+        r"je n['’]ai pas pu obtenir la réponse|réessayez dans un instant)\b",
+        flags=re.IGNORECASE,
+    ),
+}
+
+
+def _normalized_text(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", (value or "").strip().lower())
+    without_accents = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", without_accents).split())
+
+
+def known_automated_prompts(brand_id: str) -> set[str]:
+    brand = BRANDS.get(normalize_brand(brand_id), {}) or {}
+    prompts = set(STATIC_QUICK_PROMPTS)
+    prompts.update(
+        str(item.get("prompt") or "")
+        for item in (brand.get("quick_actions") or [])
+        if isinstance(item, dict)
+    )
+    prompts.update(f"Je veux des infos sur {item}" for item in (brand.get("highlights") or []) if item)
+    faq = load_public_faq(normalize_brand(brand_id))
+    prompts.update(
+        str(item.get("question") or item.get("q") or "")
+        for item in (faq.get("items") or [])
+        if isinstance(item, dict)
+    )
+    return {_normalized_text(prompt) for prompt in prompts if prompt}
+
+
+def message_is_automated(message: Dict[str, Any], brand_id: str) -> bool:
+    if message.get("role") != "user":
+        return False
+    extra = message.get("extra") or {}
+    interaction_type = str(extra.get("interaction_type") or "").strip().lower()
+    if interaction_type:
+        return interaction_type in AUTOMATED_INTERACTION_TYPES
+    return _normalized_text(message.get("content") or "") in known_automated_prompts(brand_id)
+
+
+def conversation_is_automated_only(conv: Dict[str, Any]) -> bool:
+    meta = conv.get("meta") or {}
+    if meta.get("has_manual_user_message") is True:
+        return False
+    brand_id = normalize_brand(meta.get("brand_id") or BRAND_ID_DEFAULT)
+    user_messages = [message for message in (conv.get("messages") or []) if message.get("role") == "user"]
+    return bool(user_messages) and all(message_is_automated(message, brand_id) for message in user_messages)
+
+
+def knowledge_gaps(limit: int = 100) -> List[Dict[str, Any]]:
+    gaps: List[Dict[str, Any]] = []
+    for item in list_conversations(include_automated=False):
+        conversation = fetch_conversation(item["id"])
+        messages = conversation.get("messages") or []
+        last_manual_question: Dict[str, Any] | None = None
+        for message in messages:
+            if message.get("role") == "user":
+                if not message_is_automated(message, item["brand_id"]):
+                    last_manual_question = message
+                continue
+            if message.get("role") != "assistant" or not last_manual_question:
+                continue
+            answer = message.get("content") or ""
+            reason = next((name for name, pattern in KNOWLEDGE_GAP_PATTERNS.items() if pattern.search(answer)), "")
+            if not reason:
+                continue
+            gaps.append(
+                {
+                    "conversation_id": item["id"],
+                    "brand_id": item["brand_id"],
+                    "question": last_manual_question.get("content") or "",
+                    "answer": answer,
+                    "reason": reason,
+                    "ts": message.get("ts") or item.get("last") or "",
+                }
+            )
+            last_manual_question = None
+    gaps.sort(key=lambda gap: (gap.get("ts") or "", gap.get("conversation_id") or ""), reverse=True)
+    return gaps[: max(1, min(int(limit or 100), 500))]
 
 
 def get_db() -> sqlite3.Connection:
@@ -126,6 +224,8 @@ def score_lead(conv: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def sync_lead_for_conversation(conv: Dict[str, Any]) -> None:
+    if conversation_is_automated_only(conv):
+        return
     lead = score_lead(conv)
     if lead["score"] < 25:
         return
@@ -294,7 +394,7 @@ def conversation_message_count(conv_id: str) -> int:
         return int(row["n"])
 
 
-def list_conversations() -> List[Dict[str, Any]]:
+def list_conversations(include_automated: bool = False) -> List[Dict[str, Any]]:
     with get_db() as conn:
         rows = conn.execute("SELECT id, brand_id, created_at, updated_at, flags_json, meta_json, last_message_preview FROM conversations ORDER BY updated_at DESC, id DESC").fetchall()
     items = []
@@ -303,6 +403,10 @@ def list_conversations() -> List[Dict[str, Any]]:
             meta = json.loads(row["meta_json"] or "{}")
         except Exception:
             meta = {}
+        conversation = fetch_conversation(row["id"])
+        automated_only = conversation_is_automated_only(conversation)
+        if automated_only and not include_automated:
+            continue
         items.append(
             {
                 "id": row["id"],
@@ -313,16 +417,20 @@ def list_conversations() -> List[Dict[str, Any]]:
                 "flags": json.loads(row["flags_json"] or "[]"),
                 "preview": row["last_message_preview"],
                 "user_id": meta.get("user_id", ""),
+                "automated_only": automated_only,
             }
         )
     return items
 
 
 def list_leads(limit: int = 100) -> List[Dict[str, Any]]:
+    visible_conversation_ids = {item["id"] for item in list_conversations(include_automated=False)}
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM leads ORDER BY score DESC, updated_at DESC LIMIT ?", (limit,)).fetchall()
     items = []
     for row in rows:
+        if row["conversation_id"] not in visible_conversation_ids:
+            continue
         try:
             payload = json.loads(row["payload_json"] or "{}")
         except Exception:
@@ -341,6 +449,7 @@ def list_admin_users() -> List[Dict[str, Any]]:
 
 def analytics_snapshot() -> Dict[str, Any]:
     conversations = list_conversations()
+    all_conversations = list_conversations(include_automated=True)
     leads = list_leads(100)
     by_brand: Dict[str, int] = {}
     by_flag: Dict[str, int] = {}
@@ -350,6 +459,8 @@ def analytics_snapshot() -> Dict[str, Any]:
             by_flag[flag] = by_flag.get(flag, 0) + 1
     return {
         "conversations_total": len(conversations),
+        "automated_hidden": len(all_conversations) - len(conversations),
+        "knowledge_gaps": len(knowledge_gaps()),
         "leads_total": len(leads),
         "hot_leads": len([lead for lead in leads if lead.get("score", 0) >= 90]),
         "brands": by_brand,

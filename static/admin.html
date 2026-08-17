@@ -191,6 +191,7 @@
               <div class="subcard"><div class="mini">Par marque</div><pre id="brandsStats">-</pre></div>
               <div class="subcard"><div class="mini">Par flag</div><pre id="flagsStats">-</pre></div>
               <div class="subcard"><div class="mini">Leads récents</div><div class="lead-list" id="leadList"></div></div>
+              <div class="subcard"><div class="mini">Questions sans réponse</div><div class="lead-list" id="gapList"></div></div>
               <div class="subcard"><div class="mini">Logs récents</div><pre id="recentLogs">-</pre></div>
               <div class="subcard">
                 <div class="mini">Utilisateurs admin</div>
@@ -423,10 +424,12 @@
     }
 
     async function loadAnalytics() {
-      const [analyticsData, diagData, usersData] = await Promise.all([api("/admin/api/analytics"), api("/admin/api/diag"), api("/admin/api/users")]);
+      const [analyticsData, diagData, usersData, gapsData] = await Promise.all([api("/admin/api/analytics"), api("/admin/api/diag"), api("/admin/api/users"), api("/admin/api/knowledge-gaps?limit=30")]);
       const a = analyticsData.analytics || {};
       $("kpis").innerHTML = `
         <div class="kpi"><div class="label">Conversations</div><div class="value">${a.conversations_total || 0}</div></div>
+        <div class="kpi"><div class="label">Raccourcis masqués</div><div class="value">${a.automated_hidden || 0}</div></div>
+        <div class="kpi"><div class="label">Sans réponse</div><div class="value">${a.knowledge_gaps || 0}</div></div>
         <div class="kpi"><div class="label">Leads</div><div class="value">${a.leads_total || 0}</div></div>
         <div class="kpi"><div class="label">Leads chauds</div><div class="value">${a.hot_leads || 0}</div></div>
         <div class="kpi"><div class="label">Utilisateurs admin</div><div class="value">${diagData.users_count || 0}</div></div>
@@ -441,6 +444,8 @@
         const temp = ((lead.payload || {}).temperature || "cold");
         return `<div class="lead"><div class="row"><strong>${escapeHtml(lead.lead_type)}</strong><span class="${temp}">${escapeHtml(temp)}</span></div><div class="mini">${escapeHtml(lead.conversation_id)} | score ${escapeHtml(lead.score)}</div></div>`;
       }).join("") : '<div class="mini">Aucun lead qualifié pour le moment.</div>';
+      const gaps = gapsData.items || [];
+      $("gapList").innerHTML = gaps.length ? gaps.map((gap) => `<div class="lead"><div class="row"><strong>${escapeHtml(brandLabel(gap.brand_id))}</strong><span class="warm">${escapeHtml(gap.reason)}</span></div><div style="margin-top:6px">${escapeHtml(gap.question)}</div><div class="mini" style="margin-top:5px">${escapeHtml(gap.answer)}</div></div>`).join("") : '<div class="mini">Aucune question sans réponse détectée.</div>';
       const users = usersData.items || [];
       $("userList").innerHTML = users.length ? users.map((user) => `<div class="lead"><div class="row"><strong>${escapeHtml(user.username)}</strong><span class="${user.is_active ? 'hot' : 'cold'}">${user.is_active ? 'actif' : 'inactif'}</span></div><div class="mini">id ${escapeHtml(user.id)} | maj ${escapeHtml(user.updated_at)}</div><div style="margin-top:8px;display:flex;gap:8px"><button class="secondary" data-toggle-user="${user.id}" data-next="${user.is_active ? 0 : 1}">${user.is_active ? 'Désactiver' : 'Activer'}</button></div></div>`).join("") : '<div class="mini">Aucun utilisateur.</div>';
       document.querySelectorAll('[data-toggle-user]').forEach((button) => button.addEventListener('click', async () => {
