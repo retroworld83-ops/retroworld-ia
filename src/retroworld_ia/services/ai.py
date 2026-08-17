@@ -374,7 +374,12 @@ def extract_response_actions(answer: str) -> Tuple[str, List[Dict[str, str]]]:
     display_answer = source
     for action in actions:
         display_answer = display_answer.replace(action["url"], "")
-    display_answer = re.sub(r"\ble\s+lien\s+suivant\s*:\s*", "le bouton ci-dessous. ", display_answer, flags=re.I)
+    display_answer = re.sub(
+        r"\b(?:ce|le)\s+lien(?:\s+de\s+r[eé]servation)?(?:\s+(?:suivant|direct))?\s*:\s*",
+        "le bouton ci-dessous. ",
+        display_answer,
+        flags=re.I,
+    )
     display_answer = re.sub(r"\s*\|\s*site\s*:\s*(?=$|\n)", "", display_answer, flags=re.I)
     cleaned_lines = []
     for line in display_answer.splitlines():
