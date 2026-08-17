@@ -182,13 +182,25 @@ def init_db() -> None:
 
 
 def compute_flags(conv: Dict[str, Any]) -> List[str]:
-    import re
     messages = conv.get("messages") or []
-    blob = "\n".join((message.get("content") or "") for message in messages).lower()
+    user_blob = "\n".join((message.get("content") or "") for message in messages if message.get("role") == "user").lower()
+    assistant_blob = "\n".join((message.get("content") or "") for message in messages if message.get("role") == "assistant").lower()
     flags = []
     for name, pattern in FLAG_PATTERNS.items():
+        if name == "croise":
+            mentioned_brands = {brand for brand in ("retroworld", "runningman", "enigmaniac") if brand in user_blob}
+            if len(mentioned_brands) >= 2:
+                flags.append(name)
+            continue
+        blob = assistant_blob if name in {"promesse_resa", "a_relire"} else user_blob
         if re.search(pattern, blob, flags=re.IGNORECASE | re.DOTALL):
             flags.append(name)
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        for flag in (message.get("extra") or {}).get("flags") or []:
+            if flag in {"promesse_resa", "disponibilite_non_verifiee", "prix_non_source"}:
+                flags.append(flag)
     if any(flag in flags for flag in ("devis", "reclamation")):
         flags.append("a_valider")
     return sorted(set(flags))
@@ -196,8 +208,8 @@ def compute_flags(conv: Dict[str, Any]) -> List[str]:
 
 def score_lead(conv: Dict[str, Any]) -> Dict[str, Any]:
     flags = set(compute_flags(conv))
-    messages = conv.get("messages") or []
-    text = "\n".join((m.get("content") or "") for m in messages)
+    messages = [message for message in (conv.get("messages") or []) if message.get("role") == "user"]
+    text = "\n".join((message.get("content") or "") for message in messages)
     intents = intent_tags(text)
     score = 0
     lead_type = "general"

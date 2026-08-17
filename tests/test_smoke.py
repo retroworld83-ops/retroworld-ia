@@ -33,7 +33,7 @@ from src.retroworld_ia.services.ai import (  # noqa: E402
     responses_answer,
 )
 from src.retroworld_ia.services.corrections import find_relevant_corrections  # noqa: E402
-from src.retroworld_ia.services.conversations import append_message, new_conv_id, upsert_conversation  # noqa: E402
+from src.retroworld_ia.services.conversations import append_message, compute_flags, new_conv_id, score_lead, upsert_conversation  # noqa: E402
 from src.retroworld_ia.services.knowledge import build_system_prompt  # noqa: E402
 
 FAQ_RETROWORLD_PATH = os.path.join(
@@ -348,6 +348,27 @@ class SmokeTests(unittest.TestCase):
             answer,
         )
         self.assertEqual(result, answer)
+
+    def test_opening_hours_request_does_not_get_booking_noise(self):
+        answer = "Retroworld est ouvert le dimanche de 11h à 22h."
+        question = "Quels sont vos horaires le dimanche ?"
+        self.assertEqual(add_disclaimer_if_needed(answer, "retroworld", question), answer)
+        self.assertEqual(append_retroworld_links_if_missing(question, answer), answer)
+
+    def test_lead_scoring_uses_client_messages_not_assistant_boilerplate(self):
+        conversation = {
+            "messages": [
+                {"role": "user", "content": "Quels sont vos horaires le dimanche ?", "extra": {}},
+                {
+                    "role": "assistant",
+                    "content": "Réservation et disponibilité à confirmer chez Retroworld. Contact Retroworld.",
+                    "extra": {},
+                },
+            ]
+        }
+        self.assertNotIn("reservation", compute_flags(conversation))
+        self.assertNotIn("croise", compute_flags(conversation))
+        self.assertLess(score_lead(conversation)["score"], 25)
 
     def test_responses_api_payload_and_output_parsing(self):
         captured = {}
