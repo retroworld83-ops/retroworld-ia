@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Tuple
 
 from src.retroworld_ia import config
 from src.retroworld_ia.services.logging_store import log_error
-from src.retroworld_ia.services.knowledge import booking_intent, price_intent, format_contact
+from src.retroworld_ia.services.knowledge import booking_intent, opening_hours_intent, price_intent, format_contact
 
 requests = importlib.import_module("requests") if importlib.util.find_spec("requests") else None
 
@@ -301,10 +301,34 @@ def retroworld_booking_links_for(user_text: str) -> List[str]:
     return links
 
 
+def enforce_retroworld_mandatory_reservation(answer: str, user_text: str) -> str:
+    if not opening_hours_intent(user_text):
+        return answer
+    normalized_answer = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", answer or "")
+        if not unicodedata.combining(character)
+    ).lower()
+    mandatory_signals = (
+        "reservation prealable est obligatoire",
+        "reservation est obligatoire",
+        "reservation obligatoire",
+        "uniquement sur reservation",
+        "sur reservation uniquement",
+    )
+    if any(signal in normalized_answer for signal in mandatory_signals):
+        return answer
+    rule = (
+        "La réservation préalable est obligatoire avant de venir jouer ; "
+        "ces horaires d'ouverture ne garantissent pas qu'un créneau est disponible."
+    )
+    return (answer or "").rstrip() + "\n\n" + rule
+
+
 def append_retroworld_links_if_missing(user_text: str, reply: str) -> str:
     if "qweekle.com" in (reply or "").lower():
         return reply
-    if not (booking_intent(user_text) or price_intent(user_text)):
+    if not (booking_intent(user_text) or price_intent(user_text) or opening_hours_intent(user_text)):
         return reply
     links = retroworld_booking_links_for(user_text)
     if not links:
