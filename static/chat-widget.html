@@ -50,6 +50,10 @@
     .rw-msg{max-width:94%;padding:13px 15px;border-radius:14px;line-height:1.55;white-space:pre-wrap;font-size:15px}
     .rw-msg.bot{background:var(--rw-panel);border:1px solid var(--rw-line)}
     .rw-msg.user{margin-left:auto;background:var(--rw-primary);color:#1d1206;font-weight:900}
+    .rw-msg-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px;white-space:normal}
+    .rw-msg-link{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:10px 14px;border-radius:11px;background:var(--rw-primary);color:#1d1206;text-decoration:none;font-weight:1000;border:1px solid rgba(255,255,255,.2);transition:filter .12s ease,transform .12s ease}
+    .rw-msg-link:hover{filter:brightness(1.08);transform:translateY(-1px)}
+    .rw-msg-link:focus-visible{outline:3px solid var(--rw-secondary);outline-offset:2px}
     .rw-input{display:flex;gap:8px;margin-top:12px;position:sticky;bottom:0;background:#0f141d;padding-top:10px}
     .rw-input input{flex:1;min-width:0;padding:13px 14px;border-radius:12px;border:1px solid var(--rw-line);background:var(--rw-panel);color:var(--rw-text);outline:none;font-size:16px}
     .rw-input button{min-width:110px;padding:13px 16px;border-radius:12px;border:0;background:var(--rw-primary);color:#1d1206;font-weight:1000;cursor:pointer}
@@ -182,10 +186,34 @@
       document.querySelectorAll('.rw-tab').forEach((button) => button.classList.toggle('active', button.dataset.tab === tab));
       ['home','faq','chat'].forEach((name) => $('rw-body-' + name).classList.toggle('active', name === tab));
     }
-    function addMsg(text, who){
+    function safeActionUrl(value){
+      try{
+        const parsed = new URL(String(value || ''));
+        return parsed.protocol === 'https:' ? parsed.href : '';
+      }catch(_error){ return ''; }
+    }
+    function addMsg(text, who, actions){
       const node = document.createElement('div');
       node.className = 'rw-msg ' + (who === 'user' ? 'user' : 'bot');
-      node.textContent = text;
+      const copy = document.createElement('div');
+      copy.textContent = text;
+      node.appendChild(copy);
+      if (who !== 'user' && Array.isArray(actions) && actions.length) {
+        const actionGroup = document.createElement('div');
+        actionGroup.className = 'rw-msg-actions';
+        actions.forEach((action) => {
+          const href = safeActionUrl(action && action.url);
+          if (!href) return;
+          const link = document.createElement('a');
+          link.className = 'rw-msg-link';
+          link.href = href;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = String((action && action.label) || 'Ouvrir le lien');
+          actionGroup.appendChild(link);
+        });
+        if (actionGroup.childElementCount) node.appendChild(actionGroup);
+      }
       $('rw-thread').appendChild(node);
       $('rw-thread').scrollTop = $('rw-thread').scrollHeight;
     }
@@ -268,7 +296,7 @@
           conversationId = data.conversation_id;
           localStorage.setItem(LS_CID, conversationId);
         }
-        addMsg(data.answer || data.reply || 'Je n’ai pas pu obtenir la réponse.', 'bot');
+        addMsg(data.display_answer || data.answer || data.reply || 'Je n’ai pas pu obtenir la réponse.', 'bot', data.actions || []);
       }catch(error){
         addMsg(error && error.message ? error.message : 'Je rencontre un souci de connexion. Réessayez dans un instant.', 'bot');
       }finally{

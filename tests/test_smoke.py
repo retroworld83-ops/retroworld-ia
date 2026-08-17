@@ -31,6 +31,7 @@ from src.retroworld_ia.services.ai import (  # noqa: E402
     enforce_grounded_price_claims,
     enforce_no_live_availability_claims,
     enforce_retroworld_mandatory_reservation,
+    extract_response_actions,
     responses_answer,
 )
 from src.retroworld_ia.services.corrections import find_relevant_corrections  # noqa: E402
@@ -146,9 +147,13 @@ class SmokeTests(unittest.TestCase):
                 json={"message": "Quels sont vos horaires le dimanche ?"},
             )
         self.assertEqual(response.status_code, 200)
-        answer = response.get_json()["answer"]
+        payload = response.get_json()
+        answer = payload["answer"]
         self.assertIn("réservation préalable est obligatoire", answer)
         self.assertIn("retroworld.qweekle.com", answer)
+        self.assertNotIn("qweekle.com", payload["display_answer"])
+        self.assertEqual(payload["actions"][0]["label"], "Réserver en ligne")
+        self.assertIn("retroworld.qweekle.com", payload["actions"][0]["url"])
 
     def test_chat_brand_alias_routes(self):
         self.assertEqual(self.client.options("/chat/retroworld").status_code, 204)
@@ -363,6 +368,25 @@ class SmokeTests(unittest.TestCase):
             answer,
         )
         self.assertEqual(result, answer)
+
+    def test_response_links_become_trusted_button_actions(self):
+        answer = (
+            "La réservation est obligatoire.\n\n"
+            "Lien reservation Retroworld: https://retroworld.qweekle.com/shop/retroworld/booking?lang=fr"
+        )
+        display, actions = extract_response_actions(answer)
+        self.assertEqual(display, "La réservation est obligatoire.")
+        self.assertEqual(
+            actions,
+            [{
+                "type": "link",
+                "label": "Réserver en ligne",
+                "url": "https://retroworld.qweekle.com/shop/retroworld/booking?lang=fr",
+            }],
+        )
+
+        untrusted = "Voir https://example.net/reserver"
+        self.assertEqual(extract_response_actions(untrusted), (untrusted, []))
 
     def test_opening_hours_request_requires_advance_booking(self):
         answer = "Retroworld est ouvert le dimanche de 11h à 22h."
