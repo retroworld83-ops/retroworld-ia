@@ -5,12 +5,22 @@ import json
 import re
 import unicodedata
 from typing import Any, Dict, List, Tuple
+from urllib.parse import urlparse
 
 from src.retroworld_ia import config
 from src.retroworld_ia.services.logging_store import log_error
 from src.retroworld_ia.services.knowledge import booking_intent, opening_hours_intent, price_intent, format_contact
 
 requests = importlib.import_module("requests") if importlib.util.find_spec("requests") else None
+
+TRUSTED_ACTION_HOSTS = {
+    "enigmaniac.4escape.io",
+    "retroworld.qweekle.com",
+    "retroworldfrance.com",
+    "runningmangames.fr",
+    "www.retroworldfrance.com",
+    "www.runningmangames.fr",
+}
 
 
 def openai_ready() -> bool:
@@ -335,6 +345,48 @@ def append_retroworld_links_if_missing(user_text: str, reply: str) -> str:
         return reply
     block = "\n".join(f"Lien reservation Retroworld: {url}" for url in links)
     return (reply or "").rstrip() + "\n\n" + block
+
+
+def extract_response_actions(answer: str) -> Tuple[str, List[Dict[str, str]]]:
+    source = answer or ""
+    actions: List[Dict[str, str]] = []
+    seen = set()
+    for match in re.finditer(r'https://[^\s<>"\']+', source, flags=re.I):
+        url = match.group(0).rstrip(".,;:!?)]}")
+        try:
+            host = (urlparse(url).hostname or "").lower()
+        except ValueError:
+            continue
+        if host not in TRUSTED_ACTION_HOSTS or url in seen:
+            continue
+        seen.add(url)
+        if host == "retroworld.qweekle.com":
+            label = "Réserver en ligne"
+        elif host == "enigmaniac.4escape.io":
+            label = "Voir les créneaux"
+        elif host.endswith("runningmangames.fr"):
+            label = "Ouvrir Running Man Games"
+        else:
+            label = "Ouvrir Retroworld"
+        actions.append({"type": "link", "label": label, "url": url})
+
+    display_answer = source
+    for action in actions:
+        display_answer = display_answer.replace(action["url"], "")
+    cleaned_lines = []
+    for line in display_answer.splitlines():
+        cleaned = re.sub(
+            r"^\s*lien\s+(?:de\s+)?r[eé]servation(?:\s+[\w-]+){0,3}\s*:\s*$",
+            "",
+            line,
+            flags=re.I,
+        ).rstrip()
+        if cleaned.strip():
+            cleaned_lines.append(cleaned)
+    display_answer = "\n".join(cleaned_lines).strip()
+    if actions and not display_answer:
+        display_answer = "Utilisez le bouton ci-dessous pour continuer."
+    return display_answer, actions
 
 
 def summarize_transcript(messages: List[Dict[str, Any]]) -> str:

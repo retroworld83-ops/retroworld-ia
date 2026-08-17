@@ -9,6 +9,7 @@ from src.retroworld_ia.services.ai import (
     enforce_grounded_price_claims,
     enforce_no_live_availability_claims,
     enforce_no_reservation_promises,
+    extract_response_actions,
     openai_answer,
     openai_ready,
     safety_identifier_for,
@@ -188,9 +189,10 @@ def chat():
 
     if not openai_ready():
         answer = "Le service IA n'est pas configure (OPENAI_API_KEY manquante)."
-        append_message(conversation, "assistant", answer, extra={"brand_id": brand_id, "flags": ["openai_missing"]})
+        display_answer, actions = extract_response_actions(answer)
+        append_message(conversation, "assistant", answer, extra={"brand_id": brand_id, "flags": ["openai_missing"], "actions": actions})
         upsert_conversation(conversation)
-        return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": answer})
+        return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": answer, "display_answer": display_answer, "actions": actions})
 
     corrections = find_relevant_corrections(brand_id, msg)
     system_prompt = build_system_prompt(brand_id, msg, corrections=corrections)
@@ -213,9 +215,10 @@ def chat():
         flags.append("disponibilite_non_verifiee")
     if price_guarded:
         flags.append("prix_non_source")
-    append_message(conversation, "assistant", safe_answer, extra={"brand_id": brand_id, "flags": flags, "correction_ids": [item.get("id") for item in corrections]})
+    display_answer, actions = extract_response_actions(safe_answer)
+    append_message(conversation, "assistant", safe_answer, extra={"brand_id": brand_id, "flags": flags, "correction_ids": [item.get("id") for item in corrections], "actions": actions})
     upsert_conversation(conversation)
-    return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": safe_answer})
+    return jsonify({"ok": True, "conversation_id": conv_id, "brand_id": brand_id, "answer": safe_answer, "display_answer": display_answer, "actions": actions})
 
 
 @public_bp.route("/chat/<brand_id>", methods=["POST", "OPTIONS"], strict_slashes=False)
