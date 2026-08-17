@@ -33,6 +33,7 @@ from src.retroworld_ia.services.ai import (  # noqa: E402
     responses_answer,
 )
 from src.retroworld_ia.services.corrections import find_relevant_corrections  # noqa: E402
+from src.retroworld_ia.services.conversations import append_message, new_conv_id, upsert_conversation  # noqa: E402
 from src.retroworld_ia.services.knowledge import build_system_prompt  # noqa: E402
 
 FAQ_RETROWORLD_PATH = os.path.join(
@@ -416,6 +417,78 @@ class SmokeTests(unittest.TestCase):
         messages = detail.get_json()["conversation"]["messages"]
         self.assertGreaterEqual(len(messages), 4)
         self.assertTrue(csrf_token)
+
+    def test_quick_action_only_is_hidden_from_admin(self):
+        response = self.client.post(
+            "/chat",
+            json={
+                "message": "Je veux connaître les tarifs",
+                "brand_id": "retroworld",
+                "metadata": {"source": "widget_v2", "interaction_type": "quick_action"},
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        conv_id = response.get_json()["conversation_id"]
+        self.login()
+
+        visible = self.client.get("/admin/api/conversations").get_json()
+        self.assertNotIn(conv_id, [item["id"] for item in visible["items"]])
+        self.assertGreaterEqual(visible["hidden_automated"], 1)
+
+        all_items = self.client.get("/admin/api/conversations?include_automated=1").get_json()["items"]
+        item = next(item for item in all_items if item["id"] == conv_id)
+        self.assertTrue(item["automated_only"])
+
+    def test_manual_followup_makes_quick_action_conversation_visible(self):
+        first = self.client.post(
+            "/chat",
+            json={
+                "message": "Je veux organiser un anniversaire",
+                "brand_id": "retroworld",
+                "metadata": {"source": "widget_v2", "interaction_type": "quick_action"},
+            },
+        )
+        conv_id = first.get_json()["conversation_id"]
+        second = self.client.post(
+            "/chat",
+            json={
+                "message": "Peut-on apporter notre propre gâteau ?",
+                "conversation_id": conv_id,
+                "brand_id": "retroworld",
+                "metadata": {"source": "widget_v2", "interaction_type": "manual"},
+            },
+        )
+        self.assertEqual(second.status_code, 200)
+        self.login()
+        visible = self.client.get("/admin/api/conversations").get_json()["items"]
+        self.assertIn(conv_id, [item["id"] for item in visible])
+
+    def test_legacy_canned_prompt_is_hidden_without_deleting_it(self):
+        conv_id = new_conv_id("legacy")
+        conversation = {"id": conv_id, "meta": {"brand_id": "retroworld"}, "messages": []}
+        append_message(conversation, "user", "Je veux connaître les tarifs", extra={"source": "widget_v2"})
+        append_message(conversation, "assistant", "Voici les tarifs connus.")
+        upsert_conversation(conversation)
+        self.login()
+
+        visible = self.client.get("/admin/api/conversations").get_json()["items"]
+        self.assertNotIn(conv_id, [item["id"] for item in visible])
+        all_items = self.client.get("/admin/api/conversations?include_automated=1").get_json()["items"]
+        self.assertIn(conv_id, [item["id"] for item in all_items])
+
+    def test_admin_reports_manual_questions_without_answer(self):
+        response = self.client.post(
+            "/chat",
+            json={
+                "message": "Avez-vous des casiers sur place ?",
+                "brand_id": "retroworld",
+                "metadata": {"source": "widget_v2", "interaction_type": "manual"},
+            },
+        )
+        conv_id = response.get_json()["conversation_id"]
+        self.login()
+        gaps = self.client.get("/admin/api/knowledge-gaps").get_json()["items"]
+        self.assertIn(conv_id, [item["conversation_id"] for item in gaps])
 
 
 if __name__ == "__main__":

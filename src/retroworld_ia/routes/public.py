@@ -168,7 +168,22 @@ def chat():
     conv_id = conv_id or new_conv_id(prefix=brand_id[:2] if brand_id else "rw")
     conversation = create_or_load_conversation(conv_id, brand_id)
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
-    append_message(conversation, "user", msg, extra={"source": metadata.get("source", ""), "intents": ["reservation"] if booking_intent(msg) else []})
+    interaction_type = str(metadata.get("interaction_type") or "manual").strip().lower()
+    if interaction_type not in {"manual", "quick_action", "faq_click", "suggestion"}:
+        interaction_type = "manual"
+    conversation.setdefault("meta", {})["last_interaction_type"] = interaction_type
+    if interaction_type == "manual":
+        conversation["meta"]["has_manual_user_message"] = True
+    append_message(
+        conversation,
+        "user",
+        msg,
+        extra={
+            "source": metadata.get("source", ""),
+            "interaction_type": interaction_type,
+            "intents": ["reservation"] if booking_intent(msg) else [],
+        },
+    )
 
     if not openai_ready():
         answer = "Le service IA n'est pas configure (OPENAI_API_KEY manquante)."

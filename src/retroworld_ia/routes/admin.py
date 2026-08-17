@@ -11,7 +11,7 @@ from src.retroworld_ia.services.auth import (
     require_csrf,
     update_admin_user,
 )
-from src.retroworld_ia.services.conversations import analytics_snapshot, fetch_conversation, get_db, list_admin_users, list_conversations, list_leads
+from src.retroworld_ia.services.conversations import analytics_snapshot, fetch_conversation, get_db, knowledge_gaps, list_admin_users, list_conversations, list_leads
 from src.retroworld_ia.services.corrections import create_correction, list_corrections, update_correction
 from src.retroworld_ia.services.knowledge import BRANDS, FAQ_ENABLED_BRANDS, PUBLIC_BRANDS, get_knowledge_editor_payload, load_public_faq, normalize_brand, save_knowledge_brand
 from src.retroworld_ia.services.logging_store import APP_LOGS, now_str
@@ -133,7 +133,22 @@ def admin_list_conversations():
     auth = require_admin_auth(api=True)
     if auth is not None:
         return auth
-    return jsonify({"ok": True, "items": list_conversations()})
+    include_automated = (request.args.get("include_automated") or "").strip().lower() in {"1", "true", "yes", "on"}
+    items = list_conversations(include_automated=include_automated)
+    all_items = items if include_automated else list_conversations(include_automated=True)
+    return jsonify({"ok": True, "items": items, "hidden_automated": len(all_items) - len(items)})
+
+
+@admin_bp.route("/admin/api/knowledge-gaps", methods=["GET"])
+def admin_knowledge_gaps():
+    auth = require_admin_auth(api=True)
+    if auth is not None:
+        return auth
+    try:
+        limit = int(request.args.get("limit") or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    return jsonify({"ok": True, "items": knowledge_gaps(limit=limit)})
 
 
 @admin_bp.route("/admin/api/conversation/<conv_id>", methods=["GET"])
