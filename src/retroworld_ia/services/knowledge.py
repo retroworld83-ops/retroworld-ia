@@ -184,9 +184,19 @@ RESERVATION_INTENT_PATTERNS = [
 ]
 
 
+def opening_hours_intent(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(horaires?|heures?\s+d['’]?ouverture|ouvert(?:e|es|s)?|ferme(?:e|es|s)?|fermé(?:e|es|s)?)\b",
+            (text or "").lower(),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def booking_intent(text: str) -> bool:
     lowered = (text or "").lower()
-    opening_hours = re.search(r"\b(horaires?|heures?\s+d['’]?ouverture|ouvert(?:e|es|s)?)\b", lowered, flags=re.IGNORECASE)
+    opening_hours = opening_hours_intent(lowered)
     live_scheduling = re.search(r"\b(réserv\w*|reservation\w*|réservation\w*|dispo\w*|créneau\w*|planning\w*)\b", lowered, flags=re.IGNORECASE)
     if opening_hours and not live_scheduling:
         return False

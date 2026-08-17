@@ -30,6 +30,7 @@ from src.retroworld_ia.services.ai import (  # noqa: E402
     build_openai_messages,
     enforce_grounded_price_claims,
     enforce_no_live_availability_claims,
+    enforce_retroworld_mandatory_reservation,
     responses_answer,
 )
 from src.retroworld_ia.services.corrections import find_relevant_corrections  # noqa: E402
@@ -134,6 +135,20 @@ class SmokeTests(unittest.TestCase):
         payload = response.get_json()
         self.assertFalse(payload.get("ok"))
         self.assertIn("error", payload)
+
+    def test_chat_opening_hours_enforces_mandatory_reservation(self):
+        with patch("src.retroworld_ia.routes.public.openai_ready", return_value=True), patch(
+            "src.retroworld_ia.routes.public.openai_answer",
+            return_value="Retroworld est ouvert le dimanche de 11h à 22h.",
+        ):
+            response = self.client.post(
+                "/chat/retroworld",
+                json={"message": "Quels sont vos horaires le dimanche ?"},
+            )
+        self.assertEqual(response.status_code, 200)
+        answer = response.get_json()["answer"]
+        self.assertIn("réservation préalable est obligatoire", answer)
+        self.assertIn("retroworld.qweekle.com", answer)
 
     def test_chat_brand_alias_routes(self):
         self.assertEqual(self.client.options("/chat/retroworld").status_code, 204)
@@ -349,11 +364,30 @@ class SmokeTests(unittest.TestCase):
         )
         self.assertEqual(result, answer)
 
-    def test_opening_hours_request_does_not_get_booking_noise(self):
+    def test_opening_hours_request_requires_advance_booking(self):
         answer = "Retroworld est ouvert le dimanche de 11h à 22h."
         question = "Quels sont vos horaires le dimanche ?"
         self.assertEqual(add_disclaimer_if_needed(answer, "retroworld", question), answer)
-        self.assertEqual(append_retroworld_links_if_missing(question, answer), answer)
+        guarded = enforce_retroworld_mandatory_reservation(answer, question)
+        self.assertIn("réservation préalable est obligatoire", guarded)
+        self.assertIn("ne garantissent pas qu'un créneau est disponible", guarded)
+        linked = append_retroworld_links_if_missing(question, guarded)
+        self.assertIn("retroworld.qweekle.com", linked)
+
+        already_guarded = "Ouvert de 11h à 22h, uniquement sur réservation."
+        self.assertEqual(
+            enforce_retroworld_mandatory_reservation(already_guarded, question),
+            already_guarded,
+        )
+
+    def test_retroworld_sources_state_mandatory_reservation_for_hours(self):
+        with open(os.path.join(ROOT_DIR, "static", "faq_retroworld.json"), "r", encoding="utf-8") as handle:
+            faq_text = json.dumps(json.load(handle), ensure_ascii=False).lower()
+        with open(os.path.join(ROOT_DIR, "src", "data", "knowledge_base.json"), "r", encoding="utf-8") as handle:
+            knowledge_text = json.dumps(json.load(handle), ensure_ascii=False).lower()
+        self.assertIn("réservation préalable est obligatoire", faq_text)
+        self.assertIn("reservation prealable est obligatoire", knowledge_text)
+        self.assertIn("ne garantissent jamais la disponibilite", knowledge_text)
 
     def test_lead_scoring_uses_client_messages_not_assistant_boilerplate(self):
         conversation = {

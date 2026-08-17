@@ -1,10 +1,10 @@
 {
   "brand": "retroworld",
-  "updated": "2026-04-11 00:00:00",
+  "updated": "2026-08-17 00:00:00",
   "items": [
     {
       "question": "Quels sont vos horaires ?",
-      "answer": "Retroworld est ouvert du mardi au dimanche, de 11h à 22h.",
+      "answer": "Retroworld est ouvert du mardi au dimanche, de 11h à 22h. La réservation préalable est obligatoire avant de venir jouer ; les horaires d'ouverture ne garantissent pas qu'un créneau est disponible.",
       "tags": ["horaires"]
     },
     {

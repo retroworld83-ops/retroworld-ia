@@ -58,6 +58,10 @@
       ],
       "knowledge_cards": [
         {
+          "title": "Horaires et reservation obligatoire",
+          "summary": "Retroworld est ouvert du mardi au dimanche de 11h a 22h, mais la reservation prealable est obligatoire avant de venir jouer. Les horaires d'ouverture ne garantissent jamais la disponibilite d'un creneau."
+        },
+        {
           "title": "Jeux VR arcade",
           "summary": "Formats courts, accessibles et adaptes aux groupes, familles et joueurs reguliers."
         },

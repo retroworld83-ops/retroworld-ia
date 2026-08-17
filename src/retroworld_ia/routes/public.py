@@ -4,6 +4,7 @@ from src.retroworld_ia import config
 from src.retroworld_ia.services.ai import (
     add_disclaimer_if_needed,
     append_retroworld_links_if_missing,
+    enforce_retroworld_mandatory_reservation,
     build_openai_messages,
     enforce_grounded_price_claims,
     enforce_no_live_availability_claims,
@@ -203,6 +204,7 @@ def chat():
     safe_answer, price_guarded = enforce_grounded_price_claims(safe_answer, system_prompt, msg)
     safe_answer = add_disclaimer_if_needed(safe_answer, brand_id, msg)
     if brand_id == "retroworld":
+        safe_answer = enforce_retroworld_mandatory_reservation(safe_answer, msg)
         safe_answer = append_retroworld_links_if_missing(msg, safe_answer)
     flags = []
     if promised:
