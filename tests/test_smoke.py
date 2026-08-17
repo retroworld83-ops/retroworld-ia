@@ -389,11 +389,12 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(extract_response_actions(untrusted), (untrusted, []))
 
         runningman = (
-            "Utilisez le lien suivant : https://runningmangames.fr/reserver/\n"
+            "Utilisez ce lien de réservation direct : https://runningmangames.fr/reserver/\n"
             "Contact: telephone: 04 98 09 30 59 | site: https://runningmangames.fr/"
         )
         display, actions = extract_response_actions(runningman)
         self.assertNotIn("site:", display.lower())
+        self.assertNotIn("lien", display.lower())
         self.assertIn("bouton ci-dessous", display.lower())
         self.assertEqual(
             [action["label"] for action in actions],
