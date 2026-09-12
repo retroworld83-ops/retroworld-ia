@@ -5,6 +5,7 @@ from src.retroworld_ia.services.ai import (
     add_disclaimer_if_needed,
     append_retroworld_links_if_missing,
     enforce_retroworld_mandatory_reservation,
+    enforce_retired_activity,
     build_openai_messages,
     enforce_grounded_price_claims,
     enforce_no_live_availability_claims,
@@ -208,6 +209,7 @@ def chat():
     if brand_id == "retroworld":
         safe_answer = enforce_retroworld_mandatory_reservation(safe_answer, msg)
         safe_answer = append_retroworld_links_if_missing(msg, safe_answer)
+    safe_answer = enforce_retired_activity(safe_answer, brand_id)
     flags = []
     if promised:
         flags.append("promesse_resa")

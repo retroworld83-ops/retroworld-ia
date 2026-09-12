@@ -107,9 +107,26 @@ class SmokeTests(unittest.TestCase):
         prompt = build_system_prompt("runningman", "Quel est le tarif de la Game Zone pour un enfant de 10 ans ?")
         self.assertIn("15 EUR enfant de moins de 12 ans", prompt)
         self.assertIn("20 EUR adulte", prompt)
-        self.assertIn("A partir de 8 EUR / joueur / 30 min", prompt)
+        self.assertNotIn("A partir de 8 EUR / joueur / 30 min", prompt)
         self.assertIn("30 EUR / joueur", prompt)
         self.assertIn("contact@runningmangames.fr", prompt)
+
+    def test_retired_quiz_cannot_be_offered(self):
+        from src.retroworld_ia.services.knowledge import without_retired_offers, public_brand_payload
+        for brand in ("retroworld", "runningman"):
+            payload = json.dumps(public_brand_payload(brand), ensure_ascii=False).lower()
+            self.assertNotIn("quiz", payload)
+            self.assertNotIn("blind test", payload)
+            prompt = build_system_prompt(brand, "Je veux réserver un quiz")
+            self.assertIn("ne proposent plus le quiz", prompt)
+            guarded = ai_service.enforce_retired_activity("Réservez VR + Quiz pour 20 €", brand)
+            self.assertIn("ne sont plus proposés", guarded)
+            self.assertNotIn("20 €", guarded)
+        self.assertEqual(ai_service.retroworld_booking_links_for("réserver quiz"), [])
+        old = {"offers": [{"name": "VR + Quiz"}, {"name": "Jeux VR"}]}
+        self.assertEqual(without_retired_offers(old)["offers"], [{"name": "Jeux VR"}])
+        _, actions = extract_response_actions("https://retroworld.qweekle.com/shop/retroworld/?tag=quizz")
+        self.assertEqual(actions, [])
 
     def test_runningman_vr_stays_on_runningman(self):
         with open(FAQ_RUNNINGMAN_PATH, "r", encoding="utf-8") as handle:

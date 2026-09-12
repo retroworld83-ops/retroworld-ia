@@ -5,47 +5,72 @@
     {
       "question": "Quels sont vos horaires ?",
       "answer": "Retroworld est ouvert du mardi au dimanche, de 11h à 22h. La réservation préalable est obligatoire avant de venir jouer ; les horaires d'ouverture ne garantissent pas qu'un créneau est disponible.",
-      "tags": ["horaires"]
+      "tags": [
+        "horaires"
+      ]
     },
     {
       "question": "Où se situe Retroworld ?",
       "answer": "Retroworld France se situe au 815 avenue Pierre Brossolette, 83300 Draguignan.",
-      "tags": ["adresse", "contact"]
+      "tags": [
+        "adresse",
+        "contact"
+      ]
     },
     {
       "question": "Quels sont vos tarifs VR ?",
       "answer": "Jeux VR : 15 € par joueur pour 30 minutes. Escape Game VR : 30 € par joueur pour 1 heure.",
-      "tags": ["tarifs", "vr"]
+      "tags": [
+        "tarifs",
+        "vr"
+      ]
     },
     {
       "question": "À partir de quel âge peut-on jouer ?",
       "answer": "Retroworld propose des activités dès 7 ans, avec accompagnement sur place pour guider les plus jeunes.",
-      "tags": ["enfants", "famille"]
+      "tags": [
+        "enfants",
+        "famille"
+      ]
     },
     {
       "question": "Faites-vous des anniversaires ?",
       "answer": "Oui. Retroworld propose des formules anniversaire. L’assistant peut vous orienter, mais l’équipe confirme toujours les disponibilités et la réservation.",
-      "tags": ["anniversaire", "reservation"]
+      "tags": [
+        "anniversaire",
+        "reservation"
+      ]
     },
     {
       "question": "Comment fonctionne la fidélité ?",
       "answer": "1 partie VR = 1 point. 1 escape game VR = 2 points. 10 points = 1 partie VR offerte. 20 points = 1 escape game VR offert. Pensez à présenter votre QR code avant de jouer.",
-      "tags": ["fidelite"]
+      "tags": [
+        "fidelite"
+      ]
     },
     {
       "question": "Comment est gérée l’hygiène du matériel VR ?",
       "answer": "Le matériel VR est soigneusement nettoyé et désinfecté entre chaque session pour garantir une expérience confortable et sereine.",
-      "tags": ["hygiene", "vr"]
+      "tags": [
+        "hygiene",
+        "vr"
+      ]
     },
     {
       "question": "Quel matériel utilisez-vous ?",
       "answer": "Retroworld utilise notamment des casques Vive Pro 2, Meta Quest 3 et Pimax Crystal, avec un parc régulièrement renouvelé.",
-      "tags": ["materiel", "vr"]
+      "tags": [
+        "materiel",
+        "vr"
+      ]
     },
     {
       "question": "Avez-vous un espace d’attente ?",
       "answer": "Oui. Vous trouverez un espace d’attente confortable avec boissons, snacks et jeux pour patienter dans de bonnes conditions.",
-      "tags": ["accueil", "confort"]
+      "tags": [
+        "accueil",
+        "confort"
+      ]
     }
   ]
 }

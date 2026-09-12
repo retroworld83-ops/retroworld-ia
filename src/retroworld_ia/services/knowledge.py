@@ -14,10 +14,26 @@ def normalize_brand(value: str) -> str:
 
 def load_knowledge_base() -> Dict[str, Any]:
     try:
-        return json.loads(config.KNOWLEDGE_PATH.read_text("utf-8"))
+        data = json.loads(config.KNOWLEDGE_PATH.read_text("utf-8"))
+        for bid in ("retroworld", "runningman"):
+            if bid in data.get("brands", {}):
+                data["brands"][bid] = without_retired_offers(data["brands"][bid])
+        return data
     except Exception as err:
         log_error("knowledge_base load failed", err)
         return {"global": {}, "brands": {}}
+
+
+RETIRED_ACTIVITY = re.compile(r"quiz|blind[\s-]?test", re.I)
+
+
+def without_retired_offers(brand: Dict[str, Any]) -> Dict[str, Any]:
+    """Also handles persistent knowledge edited before the activity was retired."""
+    result = dict(brand)
+    for key in ("highlights", "offers", "knowledge_cards", "booking_links", "quick_actions"):
+        result[key] = [item for item in result.get(key, []) if not RETIRED_ACTIVITY.search(json.dumps(item, ensure_ascii=False))]
+    result["summary"] = re.sub(r", quiz et", " et", result.get("summary", ""), flags=re.I)
+    return result
 
 
 KNOWLEDGE_BASE = load_knowledge_base()
@@ -39,7 +55,10 @@ PUBLIC_BRANDS = config.PUBLIC_BRANDS_ENV or FAQ_ENABLED_BRANDS
 def load_public_faq(brand_id: str) -> Dict[str, Any]:
     path = config.STATIC_DIR / f"faq_{brand_id}.json"
     try:
-        return json.loads(path.read_text("utf-8"))
+        data = json.loads(path.read_text("utf-8"))
+        if brand_id in ("retroworld", "runningman"):
+            data["items"] = [item for item in data.get("items", []) if not RETIRED_ACTIVITY.search(json.dumps(item, ensure_ascii=False))]
+        return data
     except Exception:
         return {"brand": brand_id, "updated": now_str(), "items": []}
 
@@ -134,6 +153,10 @@ def build_system_prompt(brand_id: str, user_text: str, corrections: Optional[Lis
         lines.append("")
         lines.append("La question mentionne possiblement une autre marque. Repondre en separant bien les etablissements.")
 
+    if brand_id in ("retroworld", "runningman"):
+        # Old corrections, conversations and mounted FAQ files must not revive withdrawn offers.
+        lines = [line for line in lines if not RETIRED_ACTIVITY.search(line or "")]
+        lines.append("Depuis le 12 septembre 2026, Retroworld et Running Man ne proposent plus le quiz, le blind test, ni aucune formule ou option les incluant (dont VR + Quiz). Ne jamais les proposer ni fournir de lien de reservation pour ces offres, meme si un ancien message les mentionne. Si la question porte dessus, expliquer simplement que cette activite n'est plus proposee et orienter vers les activites disponibles.")
     return "\n".join(line for line in lines if line is not None).strip()
 
 
@@ -163,6 +186,8 @@ def save_knowledge_brand(brand_id: str, payload: Dict[str, Any]) -> Dict[str, An
     full = load_knowledge_base()
     brands = full.setdefault("brands", {})
     incoming = dict(payload or {})
+    if brand_id in ("retroworld", "runningman"):
+        incoming = without_retired_offers(incoming)
     incoming["id"] = brand_id
     brands[brand_id] = incoming
     config.KNOWLEDGE_PATH.write_text(json.dumps(full, ensure_ascii=False, indent=2), "utf-8")

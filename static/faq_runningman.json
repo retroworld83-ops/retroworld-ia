@@ -4,188 +4,272 @@
   "items": [
     {
       "question": "Qu’est-ce que Running Man à Draguignan ?",
-      "answer": "Running Man est un complexe de loisirs immersif à Draguignan proposant des jeux d’action, escape games, quiz et activités de groupe dans une arène unique mêlant défis physiques et réflexion.",
-      "tags": ["concept", "loisir", "draguignan"]
+      "answer": "Running Man est un complexe de loisirs immersif à Draguignan proposant des jeux d’action, escape games et activités de groupe dans une arène unique mêlant défis physiques et réflexion.",
+      "tags": [
+        "concept",
+        "loisir",
+        "draguignan"
+      ]
     },
     {
       "question": "Quelles activités sont proposées chez Running Man ?",
-      "answer": "Running Man Games propose six activités : Game Zone, Escape Game Enigmaniac, Escape Game VR, Jeux VR, Quiz et Escape Game extérieur, ainsi que des événements de groupe.",
-      "tags": ["activités", "game zone", "escape game", "vr", "quiz"]
+      "answer": "Running Man Games propose cinq activités : Game Zone, Escape Game Enigmaniac, Escape Game VR, Jeux VR et Escape Game extérieur, ainsi que des événements de groupe.",
+      "tags": [
+        "activités",
+        "game zone",
+        "escape game",
+        "vr"
+      ]
     },
     {
       "question": "Qu’est-ce que la Game Zone ?",
       "answer": "La Game Zone est un parcours collectif de 10 salles de défis physiques et mentaux. La partie dure environ une heure et les joueurs coopèrent pour réussir les épreuves.",
-      "tags": ["game zone", "jeu", "défis"]
+      "tags": [
+        "game zone",
+        "jeu",
+        "défis"
+      ]
     },
     {
       "question": "Le jeu est-il physique ?",
       "answer": "Oui, certaines épreuves demandent de bouger, courir ou être agile, mais il reste accessible à la majorité des joueurs et adaptable selon le niveau.",
-      "tags": ["physique", "sport", "niveau"]
+      "tags": [
+        "physique",
+        "sport",
+        "niveau"
+      ]
     },
     {
       "question": "À partir de quel âge peut-on jouer ?",
       "answer": "Les activités sont accessibles dès 7 ans. Certaines épreuves peuvent être adaptées selon l’âge des participants.",
-      "tags": ["âge", "enfants"]
+      "tags": [
+        "âge",
+        "enfants"
+      ]
     },
     {
       "question": "Faut-il être sportif pour participer ?",
       "answer": "Non, les activités sont conçues pour être accessibles à tous, même sans condition physique particulière.",
-      "tags": ["accessibilité", "sport"]
+      "tags": [
+        "accessibilité",
+        "sport"
+      ]
     },
     {
       "question": "Peut-on venir en famille ?",
       "answer": "Oui, Running Man est adapté aux familles avec enfants, adolescents et adultes.",
-      "tags": ["famille"]
+      "tags": [
+        "famille"
+      ]
     },
     {
       "question": "Peut-on venir entre amis ?",
       "answer": "Oui, c’est une activité idéale entre amis avec des défis en équipe et une ambiance compétitive.",
-      "tags": ["amis", "groupe"]
+      "tags": [
+        "amis",
+        "groupe"
+      ]
     },
     {
       "question": "Combien de personnes peuvent jouer ?",
       "answer": "Les activités sont conçues pour les groupes, avec plusieurs joueurs en simultané selon le type de jeu.",
-      "tags": ["joueurs", "groupe"]
+      "tags": [
+        "joueurs",
+        "groupe"
+      ]
     },
     {
       "question": "Est-ce adapté aux groupes ?",
       "answer": "Oui, Running Man est spécialement conçu pour les groupes : anniversaires, EVG, EVJF, team building.",
-      "tags": ["groupes", "team building"]
+      "tags": [
+        "groupes",
+        "team building"
+      ]
     },
     {
       "question": "Faut-il réserver à l’avance ?",
       "answer": "Oui, il est fortement conseillé de réserver, surtout les week-ends et vacances.",
-      "tags": ["réservation"]
+      "tags": [
+        "réservation"
+      ]
     },
     {
       "question": "Quel est le tarif de la Game Zone ?",
       "answer": "La Game Zone coûte 15 € pour un enfant de moins de 12 ans et 20 € pour un adulte. La partie dure environ 1 heure.",
-      "tags": ["tarifs", "game zone", "enfant"]
+      "tags": [
+        "tarifs",
+        "game zone",
+        "enfant"
+      ]
     },
     {
       "question": "Quel est le tarif de l’Escape Game ?",
       "answer": "L’Escape Game Enigmaniac coûte 25 € par joueur pour un groupe de 3 à 4, 20 € par joueur pour un groupe de 5 à 6 et 15 € pour un enfant de moins de 12 ans.",
-      "tags": ["tarifs", "escape game"]
-    },
-    {
-      "question": "Quel est le tarif du Quiz ?",
-      "answer": "Le Quiz coûte à partir de 8 € par joueur pour 30 minutes. Il se joue en tour par tour et permet de choisir 6 thèmes parmi plus de 60.",
-      "tags": ["quiz", "tarifs"]
+      "tags": [
+        "tarifs",
+        "escape game"
+      ]
     },
     {
       "question": "Combien de temps dure une activité ?",
       "answer": "Les activités durent généralement entre 30 minutes et 1 heure selon le type de jeu.",
-      "tags": ["durée"]
-    },
-    {
-      "question": "Qu’est-ce que le Quiz Game ?",
-      "answer": "Le quiz est un jeu interactif avec buzzers et questions sur différents thèmes, à jouer en équipe.",
-      "tags": ["quiz"]
+      "tags": [
+        "durée"
+      ]
     },
     {
       "question": "Y a-t-il des activités en extérieur ?",
       "answer": "Oui. La Forteresse du Dragon est un escape game extérieur médiéval proposé à partir de 10 personnes.",
-      "tags": ["extérieur"]
+      "tags": [
+        "extérieur"
+      ]
     },
     {
       "question": "Combien de temps dure l’escape game extérieur ?",
       "answer": "Entre 1h30 et 2h environ selon la progression du groupe.",
-      "tags": ["extérieur", "durée"]
+      "tags": [
+        "extérieur",
+        "durée"
+      ]
     },
     {
       "question": "Peut-on organiser un anniversaire ?",
       "answer": "Oui, Running Man propose des formules anniversaire avec activités et salle dédiée.",
-      "tags": ["anniversaire"]
+      "tags": [
+        "anniversaire"
+      ]
     },
     {
       "question": "Proposez-vous des EVG / EVJF ?",
       "answer": "Oui. Les formules EVG et EVJF sont préparées sur mesure avec l’équipe selon la date, l’effectif et les activités choisies. Aucune formule fixe ne doit être promise avant validation.",
-      "tags": ["evg", "evjf"]
+      "tags": [
+        "evg",
+        "evjf"
+      ]
     },
     {
       "question": "Le team building est-il possible ?",
       "answer": "Oui, des formules sont disponibles pour les entreprises avec défis en équipe et activités sur mesure.",
-      "tags": ["team building"]
+      "tags": [
+        "team building"
+      ]
     },
     {
       "question": "Y a-t-il des options supplémentaires ?",
       "answer": "Des boissons et snacks sont disponibles sur place. Un prestataire extérieur peut être envisagé pour certains groupes après accord préalable de l’équipe.",
-      "tags": ["options"]
+      "tags": [
+        "options"
+      ]
     },
     {
       "question": "Peut-on manger sur place ?",
       "answer": "Oui, des options gourmandes peuvent être proposées selon les formules.",
-      "tags": ["snack"]
+      "tags": [
+        "snack"
+      ]
     },
     {
       "question": "Où se situe Running Man ?",
       "answer": "Running Man Games se situe au 815 avenue Pierre Brossolette, 83300 Draguignan.",
-      "tags": ["adresse"]
+      "tags": [
+        "adresse"
+      ]
     },
     {
       "question": "Comment contacter Running Man ?",
       "answer": "Par téléphone au 04 98 09 30 59 ou via leur site runningmangames.fr.",
-      "tags": ["contact"]
+      "tags": [
+        "contact"
+      ]
     },
     {
       "question": "Proposez-vous de la VR ?",
       "answer": "Oui. Running Man Games propose des Jeux VR à 15 € par joueur pour 30 minutes et des Escape Games VR à 30 € par joueur pour une mission de 40 à 60 minutes.",
-      "tags": ["vr", "jeux vr", "escape game vr"]
+      "tags": [
+        "vr",
+        "jeux vr",
+        "escape game vr"
+      ]
     },
     {
       "question": "Quelle différence entre Jeux VR et Escape Game VR ?",
       "answer": "Les Jeux VR sont des expériences courtes d’action, d’aventure ou de découverte. Les Escape Games VR sont des missions coopératives de 40 à 60 minutes centrées sur les énigmes et l’exploration.",
-      "tags": ["vr", "jeux vr", "escape game vr"]
+      "tags": [
+        "vr",
+        "jeux vr",
+        "escape game vr"
+      ]
     },
     {
       "question": "Combien coûte la VR ?",
       "answer": "Les Jeux VR coûtent 15 € par joueur pour 30 minutes. Les Escape Games VR coûtent 30 € par joueur pour une mission de 40 à 60 minutes.",
-      "tags": ["vr", "tarifs"]
+      "tags": [
+        "vr",
+        "tarifs"
+      ]
     },
     {
       "question": "Peut-on enchaîner Running Man + VR ?",
       "answer": "Oui, c’est une combinaison idéale pour une sortie complète.",
-      "tags": ["combo"]
+      "tags": [
+        "combo"
+      ]
     },
     {
       "question": "Quel est l’objectif des jeux ?",
       "answer": "S’amuser, coopérer et relever des défis en équipe dans une ambiance immersive.",
-      "tags": ["objectif"]
+      "tags": [
+        "objectif"
+      ]
     },
     {
       "question": "Les jeux sont-ils compétitifs ?",
       "answer": "Oui, certains défis peuvent être réalisés en compétition entre équipes.",
-      "tags": ["compétition"]
+      "tags": [
+        "compétition"
+      ]
     },
     {
       "question": "Est-ce encadré ?",
       "answer": "Oui, les activités sont encadrées par une équipe professionnelle.",
-      "tags": ["encadrement"]
+      "tags": [
+        "encadrement"
+      ]
     },
     {
       "question": "Faut-il une tenue spécifique ?",
       "answer": "Une tenue confortable ou de sport est recommandée.",
-      "tags": ["tenue"]
+      "tags": [
+        "tenue"
+      ]
     },
     {
       "question": "Les activités sont-elles sécurisées ?",
       "answer": "Oui, elles sont encadrées et conçues pour être accessibles en toute sécurité.",
-      "tags": ["sécurité"]
+      "tags": [
+        "sécurité"
+      ]
     },
     {
       "question": "Est-ce adapté aux entreprises ?",
       "answer": "Oui, les activités sont parfaites pour renforcer la cohésion d’équipe.",
-      "tags": ["entreprise"]
+      "tags": [
+        "entreprise"
+      ]
     },
     {
       "question": "Combien de temps prévoir sur place ?",
       "answer": "Comptez entre 1h et 2h selon l’activité choisie.",
-      "tags": ["durée"]
+      "tags": [
+        "durée"
+      ]
     },
     {
       "question": "Pourquoi choisir Running Man ?",
       "answer": "Pour une expérience immersive, fun et originale mêlant action, réflexion et esprit d’équipe.",
-      "tags": ["avantages"]
+      "tags": [
+        "avantages"
+      ]
     }
   ]
 }

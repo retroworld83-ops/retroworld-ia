@@ -297,6 +297,14 @@ def add_disclaimer_if_needed(answer: str, brand_id: str, user_msg: str) -> str:
     return (answer or "").rstrip() + "\n\n" + disclaimer
 
 
+def enforce_retired_activity(answer: str, brand_id: str) -> str:
+    if brand_id not in ("retroworld", "runningman") or not re.search(r"quiz|blind[\s-]?test", answer or "", re.I):
+        return answer
+    activities = "les jeux VR ou les escape games VR" if brand_id == "retroworld" else "la Game Zone, les escape games, les jeux VR ou l'escape game extérieur"
+    return ("Le quiz, le blind test et les formules qui les incluaient ne sont plus proposés. "
+            f"Vous pouvez choisir {activities}. Pour composer votre sortie, contactez notre équipe : {format_contact(brand_id)}")
+
+
 def retroworld_booking_links_for(user_text: str) -> List[str]:
     lowered = (user_text or "").lower()
     links = []
@@ -304,8 +312,8 @@ def retroworld_booking_links_for(user_text: str) -> List[str]:
         return links
     if re.search(r"\b(escape|escape\s*vr|escape\s*game)\b", lowered, flags=re.I):
         links.append("https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=escape%20game&lang=fr")
-    if re.search(r"\b(quiz|quizz)\b", lowered, flags=re.I):
-        links.append("https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=quizz&lang=fr")
+    if re.search(r"quiz|blind[\s-]?test", lowered, flags=re.I):
+        return []
     if not links:
         links.append("https://retroworld.qweekle.com/shop/retroworld/multi/jeux-a-la-partie?tag=Jeu%20%C3%A0%20la%20partie&lang=fr")
     return links
@@ -358,7 +366,7 @@ def extract_response_actions(answer: str) -> Tuple[str, List[Dict[str, str]]]:
             host = (parsed.hostname or "").lower()
         except ValueError:
             continue
-        if host not in TRUSTED_ACTION_HOSTS or url in seen:
+        if host not in TRUSTED_ACTION_HOSTS or url in seen or re.search(r"quiz|blind[\s-]?test", url, re.I):
             continue
         seen.add(url)
         if host == "retroworld.qweekle.com":
