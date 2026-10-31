@@ -10,7 +10,9 @@ APP_LOGS = deque(maxlen=config.LOG_BUFFER_MAX)
 
 
 def now_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # Keep the configured server timezone, but record its offset explicitly.
+    # Historical Render records are local Europe/Paris times and stay untouched.
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def record_log(level: str, message: str, context: Optional[Dict[str, Any]] = None) -> None:

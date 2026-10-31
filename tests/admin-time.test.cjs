@@ -1,0 +1,11 @@
+const assert = require('node:assert/strict');
+const { format } = require('../static/admin-time.js');
+assert.equal(format('2026-10-31 17:48:09'), '31/10/2026 à 17:48 (Paris)');
+assert.match(format('2026-07-01T12:00:00+00:00'), /01\/07\/2026.*14:00.*Paris/);
+assert.match(format('2026-10-31T12:00:00+00:00'), /31\/10\/2026.*13:00.*Paris/);
+assert.match(format('2026-10-25T00:30:00Z'), /02:30/);
+assert.match(format('2026-10-25T01:30:00Z'), /02:30/);
+assert.equal(format('2026-02-30 12:00:00'), 'Date à vérifier');
+assert.equal(format('not a date'), 'Date à vérifier');
+assert.equal(format(null), 'Date non renseignée');
+console.log('8 date/time assertions passed');
